@@ -10,19 +10,15 @@
   Eskimo Studio — single-file build
 
   Stack: React 18 + Babel Standalone, loaded from CDN, no build step.
-  Data lives in this browser's localStorage (see the Store object in the
-  first <script> below) — that's the seam where Supabase (data) and
-  Cloudflare (file storage) plug in later. Nothing here is demo/seed data;
-  the app starts completely empty and everything comes from what you add.
+  Data lives in this browser's localStorage first (see the Store object in the
+  first <script> below) and, once you've filled in APP_CONFIG below, syncs in
+  the background to Supabase so your graph follows you across devices. Nothing
+  here is demo/seed data; the app starts completely empty and everything comes
+  from what you add.
 
-  See TODO.md (shipped alongside this file) for the planned feature work,
-  the business model, and the design-system reasoning — read that before
+  See TODO.md for exactly what to do to turn on cloud sync + audio storage,
+  the feature backlog, and the design-system reasoning — read that before
   making changes.
-
-  Font note: the mono stack is set to 'Drafting Mono' (Indestructible
-  Type, OFL-licensed) first, falling back to IBM Plex Mono, which is what
-  actually renders right now — Drafting Mono isn't on a public CDN, so it
-  needs to be self-hosted. See TODO.md for the exact next step.
 
   Files:
     - core.js    (inlined below, plain JS)   data model, persistence, pure logic
@@ -33,9 +29,23 @@
   <script>/<style> blocks below are exactly core.js / app.jsx / styles.css.
 -->
 
+<script>
+  // Fill these in once you've done the "Your tasks" steps in TODO.md. Leave
+  // them blank and the app works exactly as before — local-storage only, no
+  // network calls, nothing to configure. Only the anon key belongs here (never
+  // a service_role key) — it's safe to ship in a static site because Supabase
+  // Row Level Security, not secrecy of this key, is what protects your data.
+  window.APP_CONFIG = {
+    SUPABASE_URL: '',        // e.g. https://xxxxxxxxxxxx.supabase.co
+    SUPABASE_ANON_KEY: '',   // Project Settings -> API -> anon public key
+    UPLOAD_WORKER_URL: '',   // your deployed worker/upload-worker.js endpoint
+  };
+</script>
+
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
 <style>
 /* ===================================================================
@@ -46,14 +56,24 @@
    pills: the content says what it is, color doesn't need to.
    =================================================================== */
 
+/* Gnomon* Foreground — indestructible type*, OFL-1.1. Self-hosted (it isn't on
+   a public CDN): compiled from github.com/indestructible-type/Gnomon's UFO
+   source with fontmake straight to woff2. Wordmark use only — never body text,
+   it's an 88-glyph WWII-poster display face, not built for reading paragraphs. */
+@font-face {
+  font-family: 'Gnomon';
+  src: url(data:font/woff2;base64,d09GMgABAAAAAA78AAsAAAAAHiQAAA6qAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGhYGYACBWAquEKIlATYCJAOCYAuBMgAEIAWDIgeBUhvAFqOinLFGk/1FAm+idZURqa0Vq7Cz6s4LRBii2jN7pvgnxAJYAdMRksz+QNvq3wgWRjGYQ846yAyRKuhJlYIJwroYudu6le4KF2ylXkS7/74bVXrV/r9RXso/L/fs3Pe/xmHfJJDmgbW1wNLImkcaUVv4fb9pJs2k6q8BT4FUI3mtvOfkSqtjusZXAUo6utYBuT5szsVwCeklaI7iaWZyARaA/zdX2pkrAChcctcTqsJWODIm9LLzM9kNHGaOKNnS7haQhKkk0HQMqgSsyLUShZJkFl7nCjv3qVLwocM6K7HOqmDESQ96nQ8gAJIx+MZAIHx10zvXJrEg5jV+AC60f+RKEQXJmKsBQvxnQv2gx92wmP/vcQS0B8RtHflN8wBw+fDANGB6iqA+dEesdLT+XOiU0wuYar6lWy4Xm5wEuMpVMJiqxYKFmAJj8ndYByaP+NLHvqG+IQDBBGDnga1S8lJXKmJUbIpyBax0ymAqCEg9wc2nlJcHheTiRNDgczBgy8fBgyskIiYhI6egpKJWQkvPxq4KAIAfAMAHAFaAuDdIPEESSNYaxwDi14akbWOWfkkuMSLnQdrpkpE8lB/DiH+4pAekfK0gyywrPYGWlpjIrmdJZvCT6RlJcXSO0tNTEjPTUxOLEjLjU5MTE9gpU5Iyy1Iyk+gFdDo9M0mSHZ+fnBzFoediSTROCpPfyBIw2cmbRnqyNVNTdyS5ScqmJ3oWIUnaatH0ZBJjxqckJySkJ9fTpYtrPcQnA+iBqZhoKDxjhFB9/FUCFTA6IYwcMrB1yGZEhWej4meybAPGDF1Dhvn64bmKdBcxZv2BZ4WnCK/ryDDWJZkJDQkhX6STKBwSi2Bh0EcqQwiMZAgpPQXYXAUPZT3hO45RuKtTOXQqNlFQGtPYnZPbLnU4c04NkoJAIgvq4zrddB0Z0nNr+QYTClWRt6qLsbt1Rez/HMxbi6xJV5R36tS5Q4rQ4ySLBudQ4CBzR+I7w8msqBA3JEly1K+MypCMVK/xzSy3W+kwjfvONF0abky5PCGh4haHnibhrsiemxMNTU6f5kG8llML7YPAAGv6ds2h/QBe5hb1T8lVvbekkcruK5MEkhfYx+JWVvx6l/LHckZQ3W0LUo8cGxxtwnuDetHU24q4mtPrOuS37G3bY+hyVlPE2I1OiuRxruzJmIGeUGFCEt0hmdJsZjkQj4XtfPOgP25xWhHxwX/gU86EFsflFBwg0E3Rp+5kzhhqkjR62UWtSHQtaF5aCACgx3X1h8/kLaM9vHuVtTMO0raGFbidT69alfUSiZZ+n6foE4dyo/yybyHaxj25oAcEO7z6PikxnP5f/D71VSY60mZ0ndlgOK7YLoZNhKJDq7Lqkp0KIR1jb5Hu7iiNzgFJRKOyQtiIz9xVEEeFJD7uGCPETiOBhMRZT2uKNmqSIkfr7yD/lPzUZFkyKMa0sg0cOAKECBBm55A8c/TmZSMjoYBip5n/EcUVIBcgJbjwHcyl+6OjKWkcMDJt3v56a555KMOR6Fs57IW3DVUgOmk7IIdBhBRkuKALtAtJZ3Fwv5QIDiYgeYvYl32uB+11V7fZkUQYmf7bTKwWX8HIDPd/3cG88gOkilF1pz2NE1sEjpRgOERIUvj8nAz+NLII71UopJLCXM2A0OTCF03zinuFeAFg6P0kbEMjgzbbhXVeX56JxpkkGcWkzHkzGKBkn1EyKrQ8IKIw5+TJkRiV3u5QQ6mAF7AFY7IrYDEVIoVP19uLxFiWWHdHkwC45qDN1qWIpW3faZzoXR474Y1nLaxBQax6lcCvg0RnnB+TCzsYaMIgePlx0d3RZw/OSML7u1SE4c2Ql8/evRXTthKXOWLaB5TwLobcjG75ATYkuFHQxP2LIJoRqhpYKPkfv2z6pUlOraMgcaK6/0I9cAe77tjdsqa79IX5QE08GPN3uQ3CtNFVb4gcXRZ/1tPegBfdjqK724fbA9gIin6BwXv3JEL9wQKJni0kVi5yYuW+VXbLUqfLsoR0XzknixaIcDlXUnBwIzV77eqn5s6F99rFUpPOamVSL/1SKcv77rgu9V1y3Vl8MOPiO4FLKy69SviLy9udYJsdunOjs1dTXrncbp/r0X0ljZbiQasfwEDMb9FMmcLkFhAKM6dG3j36eQo6dKXU88+fe+vj0ZHsT57/fXyvLmecEn0+pSLRm0JHomAT3hopK4+WRQJ2z6VfstTu8y+x00CXU790oN+31D7rJoekUP8hh/OhZBLpnCWdo2u4LiBWVmu0+FQBkc4bsay2RqxYCMenUfkG+RqerC7YveXEvAELo9WlnLvJQOrl4yqdep1eH9hy4IXtI/uMq019JmwAx9cBa0May/KmmTlFrjD6BOoOVwMxa8wixVEkNfOUMd8w5QRZUWwPsjWOLsklolfRvDUH80LW/MXDi3csjy6H4WvKeJJ6rGRFWbPnLVm4cN7qLlYUSseDQl/THdqgPvS/EWabDtkOvUBN2LFsZsPNsi0vzAkuCIJv4q1Fu6tYb52Js8ffaltF3pJFQe07n0Q/Gal4oe24/EO8AJ4lfb8Ry2Dxv+RqiNmXShnwlDtAbjndRWkNbo/jXkSIv0MUrDPLtFUaLVea6eqYwUIdqSmTaOb5PXC8CfXgJ0Iq0xPSUC1bTPr5OodWdHIlZiySY1VskjLmXX6WaBxrQVFz4ys8/DKWLcrNqMuG/eq8Df35G+Y06ec8LRO6fk5G8kej5v0h4fUrBl63q1wvOPZi1i/5GqOGXUtS/NpHZEGckhd5iIaSUn3JRqGB8JlU9dkSkY/r0IubDW6ytbKknVVqmPuy2b9+lk25KNi4RGZp3ezxhrH3Z5z9IxndjeO70OQ/MWIiMzIMZo1bJQzotMKgW6nhf9ElGrgqxQdIagCX/AQHJ/rV9/uBP6wvaWyWabE7PKLzaVkGOYzjn5MZ8qdYkbw7mLZZWRKETX90l7hHHUC/EVCr6f1RODUREXV9wVdXKoVBrU4YqFSpzTAcCbN+kuADFDmAS68GyHvWuZyD49FxS8bsaeWqQpNRsGMyOlnsLlq2vDrEsF7ZGJRpdfUSSbXmrn8fL5v7wYRu6gu1HKW2WVoSQJ98T55XZM8AeTtRZKgWanVeIVVJ2K2cZxOkaqUpwNZpgwIqSSYVvSNrWMNEv0Uz/H141ldoKY6XZkTrZ9dCXd7s8OyBj00YTLuCZb+gE+WPlfzfHJuIYFQ7RZPLjE5BIf+3pyNE29hrqRnztHXtDaD/GaNTib2f12hbC8s8FbLQUUs6T9tKjmYtH3WQJL6xEBt+JQf+9f2UZeFVtVPWHmsoyji+bt5aKFV07OWr7QqBT60RNNiVasvfgsibMo2pRkBpu3inibagN7sAHyeTv97Iwr/H8e9w1savfRp9c8BE8g1G8JZ0hdqMsqJX7kBdnOQp4Y+mlSg040s5ayJrIHpQ287ItzKZySEgeH8+Eyba3o0oSabUnHD41eeff/ObVzftP3AEmZ67Vrax9QZX3PDxSxaCYyjhMdNdlCn86FEt3rM2uxA3gu/0dgX9Om+R3ILWU7L8ZnWNR67UtkouCXtGX8eVUpci+FMez8VWmeJV6Pc4/j1aFg1ZM0LLUjy+UDezt6em3uFaph/rJ6cZ4tVJwAeGHpBRzfoKZSAg1WmDSmVwTSmuwEdYWQpQE4ee8WQCsQSkHTVuKRaSVZrh4DBJrQtff2FV8U6PB42sCtjwwdoafMgGsS9zz5TlEwzV1AoGfbCdCgx7cEh9v79OoOX302HTWD1X3WezVyyOLl5RpsL5JXHYUV0pvSBJSvVw8DqKDJ/ya0ewNivuQTPMKG6RjhGzXA0dmga2WF5i1Cz6VvkzTduZh13sr2n7cnbIyULp/VHPImPBv79IWttiSh4+GQu0zrYfpmOpX5+9E1nTl+CsHSzArM/B1e60LGY+hss/tjALC2x5RqJxbEdqASuNyczL4ciSHfmEoiqvhmgcfZyC7nnxzVe/pfc9/GhcJLCo7KomQX9TGKnJn0/VKQzT7i+Gz/Z4vePYa7EkLuOMa3l852jGeHV84oQNv0rIQtuthrBuhbfdi0UwGDoZUtijzCIjtmGvSLbxR3M69qlyG0e9JI73c7C1OLzmwd2fmKSPDi0Oi+U1DqdDj6Lp4zhulY4RvZeaJA7MkP5qCD5csiZiX2eigNuV3FLl8xPbV2/25jvyNz+zGsITiwZFqfIit74LSGy+iSa5zplH+JlvahjctHfPscHKVnfrIHF90wfh4+PO1qDjlLeNjmb0k+bf3/3Rv3v6l+fCR+4s6yVt9sqqVjsNdDmlSwdWVbbZwzc5rEInQSBgHa4OSRfEZXyYeOsTSit7mECj/QIArp7bugsA4KdDZcLJoT0uT116AcSJweC4WMJ9A98Qx4smTfH3gGLMGD0iHhqwhySj4wUc4phEsk5+ciomz8WkEIwswUfAVRNbsfsZGUNbjn1QWt9gjkigZyxze5gJqwAYvCezj/ijkYJOS5v/ytnvE3YGo21TXwEIjYGYCmjA1WV6gbdSPzSqPDryQbn9JrZf0S1xiNNsdHKoH6Xh+hQ+5fRWHhKMHxMJsgt8sv0CbFgQ8+QBAS69z8OSFJ6q7+VdjQ1qISFl8mbH5dIRZXUoAOS8BBeQegqbV+RFjPlcGlmAfLfhTcC/GiHTgZ8DzRtLSaxEvRu+yJoIAHqpcyFweleMVO0uGpVeF53Ia65Y6S644gh940qXWsKNz5AXC0zmmGuJXj26dJuPS6hNES4FGbliFC6PRTrMxmXRotdMVAq2qTPHLHMIRBtgzXx7dejSCwska1dzyPd0JlaqTs+Fnh10i2KCOIP5fmnYS+SwrA9BA5/Qq0/PdiNwqS/rLD5GMt7JIQod/WrHTVGIIFREhET93bm6dD63RrESpbR/oR5rObNEKQQsKlhh0tjEs8vHRXf3b45sTi7p3CpV8fCqViBODaZaSZIlyJCqDl+sT3zqcwz1GrDlyZWJxocF5dcoIGiqJlkAAAA=) format('woff2');
+  font-display: swap;
+}
+
 :root {
   --ink: #131313;
   --paper: #fcfcfc;
   --panel: #efefef;
-  --line: #cfcfcf;
-  --line-soft: #e1e1e1;
-  --muted: #5c5c5c;
-  --faint: #8a8a8a;
+  --line: #c2c2c2;
+  --line-soft: #dadada;
+  --muted: #454545;
+  --faint: #6c6c6c;
 
   --accent: #8b7bb8;          /* dusty pastel purple — the one accent color */
   --accent-bg: #eeeaf7;
@@ -67,6 +87,7 @@
 
   --radius: 2px;
   --font: 'Jost', 'Avenir Next', 'Segoe UI', Arial, sans-serif;
+  --font-display: 'Gnomon', var(--font);
   --font-mono: 'Drafting Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace;
 }
 
@@ -77,6 +98,7 @@ body {
   color: var(--ink);
   font-family: var(--font);
   font-size: 14.5px;
+  font-weight: 500;
   -webkit-font-smoothing: antialiased;
 }
 button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
@@ -99,20 +121,22 @@ table { font-family: inherit; }
 .app-shell { height: 100vh; display: flex; }
 
 .sidebar {
-  width: 184px; flex: none; background: var(--panel);
-  display: flex; flex-direction: column; padding: 16px 8px;
+  width: 188px; flex: none; background: var(--panel);
+  display: flex; flex-direction: column; padding: 18px 8px 16px;
   border-right: 1px solid var(--line-soft);
 }
-.sidebar-brand { font-weight: 500; font-size: 15px; letter-spacing: .01em; padding: 0 8px 16px; }
+.sidebar-brand { padding: 0 8px 18px; line-height: 1; }
+.sidebar-brand-word { font-family: var(--font-display); font-size: 27px; color: var(--ink); }
+.sidebar-brand-sub { font-size: 10px; font-weight: 600; letter-spacing: .18em; color: var(--muted); margin-top: 4px; }
 .nav-btn {
   display: flex; align-items: center; gap: 8px;
-  font-size: 13px; font-weight: 500; padding: 7px 9px; border-radius: var(--radius);
+  font-size: 13px; font-weight: 600; padding: 8px 9px; border-radius: var(--radius);
   text-align: left; width: 100%; color: var(--muted); margin-bottom: 1px;
 }
-.nav-btn:hover { background: rgba(19, 19, 19, .04); }
+.nav-btn:hover { background: rgba(19, 19, 19, .05); }
 .nav-btn.active { color: var(--paper); background: var(--ink); }
 .nav-btn.active:hover { background: var(--ink); }
-.sidebar-footer { margin-top: auto; padding: 8px 9px 2px; font-size: 11px; color: var(--faint); line-height: 1.55; }
+.sidebar-footer { margin-top: auto; padding: 8px 9px 2px; font-size: 11px; color: var(--faint); line-height: 1.6; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; position: relative; }
 
@@ -120,24 +144,24 @@ table { font-family: inherit; }
    Generic page scaffolding
    --------------------------------------------------------------- */
 .page { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.page-scroll { padding: 22px 24px; overflow-y: auto; }
-.page-narrow { max-width: 540px; margin: 0 auto; width: 100%; }
-.page-narrow-wide { max-width: 620px; margin: 0 auto; width: 100%; }
+.page-scroll { padding: 22px 26px; overflow-y: auto; }
+.page-narrow { max-width: 560px; margin: 0 auto; width: 100%; }
+.page-narrow-wide { max-width: 640px; margin: 0 auto; width: 100%; }
 .page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
-.page-title { font-weight: 500; font-size: 19px; }
-.page-sub { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+.page-title { font-weight: 600; font-size: 21px; }
+.page-sub { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
 
 .section-label {
-  font-size: 11px; letter-spacing: .02em;
-  color: var(--muted); font-weight: 500; margin-bottom: 6px;
+  font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600; margin-bottom: 7px;
 }
-.section-label-dark { color: rgba(252, 252, 252, .55); margin-top: 10px; }
+.section-label-dark { color: rgba(252, 252, 252, .6); margin-top: 12px; }
 
 .empty-state {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; text-align: center; padding: 36px; color: var(--muted);
 }
-.empty-state-title { font-size: 17px; font-weight: 500; color: var(--ink); }
+.empty-state-title { font-size: 17px; font-weight: 600; color: var(--ink); }
 .empty-state-sub { font-size: 13px; color: var(--muted); max-width: 320px; }
 .empty-note { font-size: 13px; color: var(--faint); font-style: italic; padding: 16px 4px; }
 .empty-note-sm { font-size: 11px; color: var(--muted); font-style: italic; }
@@ -152,7 +176,7 @@ table { font-family: inherit; }
 /* ---------------------------------------------------------------
    Buttons / inputs / tags
    --------------------------------------------------------------- */
-.btn { font-size: 13px; font-weight: 500; padding: 7px 14px; border-radius: var(--radius); }
+.btn { font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: var(--radius); }
 .btn-primary { background: var(--ink); color: var(--paper); }
 .btn-accent { background: var(--accent); color: var(--accent-ink); }
 .btn-ghost { background: var(--panel); color: var(--ink); }
@@ -162,7 +186,7 @@ table { font-family: inherit; }
 .btn-self-start { align-self: flex-start; }
 
 .input {
-  width: 100%; min-height: 32px; padding: 5px 9px; font-size: 13px;
+  width: 100%; min-height: 32px; padding: 5px 9px; font-size: 13px; font-weight: 500;
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink);
 }
 .input:focus { outline: 2px solid var(--accent-light); outline-offset: -1px; }
@@ -182,30 +206,30 @@ table { font-family: inherit; }
 .tag-row { display: flex; gap: 5px; margin-bottom: 14px; }
 
 .pill-group { display: flex; gap: 4px; }
-.pill { font-size: 11px; font-weight: 500; padding: 4px 9px; border-radius: var(--radius); background: var(--panel); color: var(--muted); }
+.pill { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: var(--radius); background: var(--panel); color: var(--muted); }
 .pill.active { background: var(--accent); color: var(--accent-ink); }
 
 .field { margin-bottom: 12px; }
-.field-label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--muted); }
+.field-label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--muted); font-weight: 500; }
 
 .form-card { border-radius: var(--radius); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 2px; }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
-.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; }
-.settings-row-title { font-size: 13px; font-weight: 500; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.settings-row-title { font-size: 13px; font-weight: 600; }
 .settings-row-sub { font-size: 11.5px; color: var(--muted); max-width: 420px; }
 
 /* dropzone */
 .dropzone {
   min-height: 50px; padding: 9px; font-size: 12px; background: var(--paper);
-  border: 1px dashed #b0b0b0; border-radius: var(--radius);
+  border: 1px dashed #a2a2a2; border-radius: var(--radius);
   display: flex; align-items: center; gap: 8px; color: var(--muted); cursor: pointer;
 }
 .dropzone-active { border-color: var(--accent); background: var(--accent-bg); }
 .dropzone-hint { color: var(--muted); }
 .dropzone-file { display: flex; flex-direction: column; gap: 1px; }
-.dropzone-file-name { font-weight: 500; color: var(--ink); font-size: 12.5px; }
+.dropzone-file-name { font-weight: 600; color: var(--ink); font-size: 12.5px; }
 .dropzone-file-size { color: var(--muted); font-size: 11px; font-family: var(--font-mono); }
 .analyzing-hint { margin: 4px 0 8px; }
 
@@ -217,21 +241,79 @@ table { font-family: inherit; }
 .picker-chip-free { background: var(--panel); border-style: dashed; }
 .picker-chip-art { width: 26px; height: 26px; flex: none; border-radius: var(--radius); background: repeating-linear-gradient(45deg, rgba(19, 19, 19, .12) 0 3px, transparent 3px 6px); }
 .picker-chip-text { flex: 1; min-width: 0; }
-.picker-chip-title { font-weight: 500; font-size: 12.5px; }
+.picker-chip-title { font-weight: 600; font-size: 12.5px; }
 .picker-chip-artist { font-size: 11px; color: var(--muted); }
 .picker-open { display: flex; flex-direction: column; gap: 5px; }
 .picker-results { max-height: 170px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius); padding: 3px; background: var(--paper); }
 .picker-result { display: flex; justify-content: space-between; gap: 8px; padding: 5px 7px; border-radius: var(--radius); font-size: 12.5px; text-align: left; }
 .picker-result:hover { background: var(--panel); }
 .picker-result-free { color: var(--muted); font-style: italic; }
-.picker-result-title { font-weight: 500; }
+.picker-result-title { font-weight: 600; }
 .picker-result-artist { color: var(--muted); font-size: 11px; }
 .picker-result-empty { font-size: 12px; color: var(--faint); padding: 7px; font-style: italic; }
 
 /* ---------------------------------------------------------------
+   Perform: two-pane layout — graph (plan visually) + sequence (act on it)
+   --------------------------------------------------------------- */
+.perform-layout { flex: 1; min-height: 0; display: flex; }
+.graph-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; position: relative; }
+.sequence-pane {
+  width: 320px; flex: none; border-left: 1px solid var(--line-soft); background: var(--paper);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.seq-scroll { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
+.seq-head { padding: 14px 14px 0; }
+.seq-head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.seq-venue { font-size: 12px; font-weight: 600; color: var(--muted); }
+
+.seq-now-card { border-radius: var(--radius); background: var(--ink); color: var(--paper); padding: 12px; }
+.seq-now-row { display: flex; align-items: center; gap: 10px; }
+.seq-play-btn { width: 34px; height: 34px; flex: none; border-radius: var(--radius); background: rgba(252, 252, 252, .16); color: var(--paper); display: flex; align-items: center; justify-content: center; }
+.seq-now-text { flex: 1; min-width: 0; }
+.seq-now-title { font-weight: 600; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seq-now-artist { font-size: 11.5px; color: rgba(252, 252, 252, .65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seq-now-tags { display: flex; gap: 5px; margin-top: 9px; }
+.seq-now .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper); }
+.seq-countdown-track { height: 3px; border-radius: 2px; background: rgba(252, 252, 252, .18); overflow: hidden; margin-top: 10px; }
+.seq-countdown-fill { height: 100%; background: var(--accent); float: right; }
+.seq-countdown-label { font-size: 10px; color: rgba(252, 252, 252, .55); margin-top: 4px; text-align: right; }
+.seq-endset-btn { width: 100%; margin-top: 10px; background: rgba(252, 252, 252, .1); color: var(--paper); border: 1px solid rgba(252, 252, 252, .3); }
+.seq-endset-btn:hover { background: rgba(252, 252, 252, .18); }
+
+.seq-start-card { border-radius: var(--radius); background: var(--panel); padding: 12px; }
+
+.seq-list-title { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 7px; }
+.seq-list { display: flex; flex-direction: column; gap: 6px; }
+.seq-row {
+  border-radius: var(--radius); background: var(--panel); padding: 8px 9px; cursor: pointer;
+  border: 1px solid transparent; position: relative; overflow: hidden;
+}
+.seq-row:hover { border-color: var(--line); }
+.seq-row-armed { background: var(--accent); color: var(--accent-ink); }
+.seq-row-staged { border-color: var(--ink); background: var(--paper); }
+.seq-row-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.seq-row-text { min-width: 0; }
+.seq-row-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seq-row-artist { font-size: 10.5px; color: var(--muted); }
+.seq-row-armed .seq-row-artist { color: var(--accent-ink); opacity: .75; }
+.seq-row-countdown { font-family: var(--font-mono); font-size: 10.5px; flex: none; }
+.seq-row-drain { position: absolute; left: 0; bottom: 0; top: 0; background: rgba(19, 19, 19, .06); }
+.seq-row-toggles { display: flex; gap: 4px; margin-top: 7px; }
+.seq-toggle { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 10.5px; font-weight: 600; padding: 4px 5px; border-radius: var(--radius); background: rgba(19, 19, 19, .06); color: var(--muted); }
+.seq-toggle.active { background: var(--ink); color: var(--paper); }
+.seq-row-armed .seq-toggle { background: rgba(42, 35, 56, .12); color: var(--accent-ink); }
+.seq-row-armed .seq-toggle.active { background: var(--accent-ink); color: var(--paper); }
+.seq-toggle:disabled { opacity: .35; cursor: not-allowed; }
+.seq-empty { font-size: 11.5px; color: var(--faint); font-style: italic; padding: 4px 2px; }
+
+.seq-path { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.seq-path-chip { display: flex; align-items: center; gap: 6px; padding: 3px 7px; border-radius: var(--radius); background: var(--panel); font-size: 11px; font-weight: 600; }
+.seq-path-remove { opacity: .5; font-size: 11px; }
+.seq-path-arrow { font-size: 11px; color: var(--faint); }
+
+/* ---------------------------------------------------------------
    Perform: toolbar / legend / zoom
    --------------------------------------------------------------- */
-.page-perform { position: relative; }
 .toolbar {
   display: flex; align-items: center; gap: 12px; padding: 8px 18px;
   border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; flex: none;
@@ -239,13 +321,14 @@ table { font-family: inherit; }
 .toolbar-search { width: 210px; }
 .legend { display: flex; align-items: center; gap: 9px; font-size: 10.5px; color: var(--faint); }
 .legend span { display: inline-flex; align-items: center; }
-.swatch { display: inline-block; width: 8px; height: 8px; margin-right: 4px; }
-.swatch-dot { border-radius: 50%; background: var(--ink); }
-.swatch-ring { border-radius: 0; border: 2px solid var(--accent); width: 6px; height: 6px; }
-.swatch-dash { border-top: 2px dashed var(--accent-light); width: 11px; height: 0; }
-.swatch-line { border-top: 3px solid var(--ink); width: 11px; height: 0; }
+.swatch { display: inline-block; width: 10px; height: 3px; margin-right: 4px; border-radius: 1px; }
+.swatch-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
+.swatch-base { background: #c7c7c7; }
+.swatch-next { background: var(--accent); }
+.swatch-later { background: var(--accent-light); }
+.swatch-line { background: var(--ink); height: 3px; }
 .zoom-controls { margin-left: auto; display: flex; gap: 2px; align-items: center; }
-.zoom-btn { width: 22px; height: 22px; border-radius: var(--radius); background: var(--panel); font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; }
+.zoom-btn { width: 22px; height: 22px; border-radius: var(--radius); background: var(--panel); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 .zoom-label { font-size: 11px; color: var(--muted); width: 36px; text-align: center; font-family: var(--font-mono); }
 
 /* ---------------------------------------------------------------
@@ -257,166 +340,87 @@ table { font-family: inherit; }
 .canvas-scale { width: 1400px; height: 820px; position: relative; transform-origin: top left; }
 .edge-svg { position: absolute; left: 0; top: 0; }
 .edge-hit { cursor: pointer; }
-.edge-tooltip { position: absolute; pointer-events: none; z-index: 2; white-space: nowrap; display: flex; gap: 3px; }
 
 .node-card {
   position: absolute; width: 178px; border-radius: var(--radius); padding: 9px;
   cursor: pointer; background: var(--paper); color: var(--ink); border: 1px solid var(--line);
-  user-select: none;
+  user-select: none; transition: box-shadow .12s ease;
 }
 .node-dark { background: var(--ink); color: var(--paper); border-color: var(--accent); }
 .node-now { border-color: var(--ink) !important; animation: pulseRing 2.2s ease-in-out infinite; }
 .node-tier1 { border: 2px solid var(--accent); }
-.node-tier2 { border: 1px dashed var(--accent-light); }
+.node-tier2 { border: 1px solid var(--accent-light); }
+.node-hovered { box-shadow: 0 4px 18px rgba(0, 0, 0, .18); z-index: 9 !important; }
 .node-badge {
   position: absolute; left: -7px; top: -7px; width: 18px; height: 18px; border-radius: 50%;
-  background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 500; font-family: var(--font-mono);
+  background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 600; font-family: var(--font-mono);
   display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
 }
-.node-inspect-btn {
-  position: absolute; top: 5px; right: 5px; width: 17px; height: 17px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 500;
-  background: rgba(19, 19, 19, .08); color: var(--muted);
-}
-.node-dark .node-inspect-btn { background: rgba(252, 252, 252, .18); color: var(--paper); }
-.node-title { font-weight: 500; font-size: 13px; line-height: 1.2; padding-right: 12px; }
+.node-title { font-weight: 600; font-size: 13px; line-height: 1.2; }
 .node-artist { font-size: 11px; margin-bottom: 4px; color: var(--muted); }
 .node-dark .node-artist { color: rgba(252, 252, 252, .7); }
 .node-tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .node-dark .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper); }
-.node-versions { display: flex; gap: 3px; margin-top: 5px; flex-wrap: wrap; }
-.version-chip { font-size: 9px; padding: 2px 5px; border-radius: 0; background: #d7d7d7; color: #363636; font-family: var(--font-mono); }
-.version-chip.active { background: var(--ink); color: var(--paper); }
-.node-dark .version-chip:not(.active) { background: rgba(252, 252, 252, .25); color: rgba(252, 252, 252, .85); }
-.node-inout { font-size: 10px; margin-top: 5px; color: #8a8a8a; font-family: var(--font-mono); }
-.node-dark .node-inout { color: rgba(252, 252, 252, .55); }
+.node-io { position: absolute; right: 8px; bottom: 7px; font-family: var(--font-mono); font-size: 9.5px; color: #8a8a8a; letter-spacing: .01em; }
+.node-dark .node-io { color: rgba(252, 252, 252, .55); }
 
 .end-node {
   position: absolute; width: 128px; border-radius: var(--radius); padding: 8px;
   cursor: pointer; background: var(--paper); color: var(--ink); border: 1px solid var(--line);
 }
-.end-node-title { display: flex; align-items: center; gap: 5px; font-weight: 500; font-size: 12px; }
+.end-node-title { display: flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; }
 .end-node-hint { font-size: 10px; margin-top: 2px; color: #8a8a8a; }
 .end-node.node-dark .end-node-hint { color: rgba(252, 252, 252, .7); }
 
-/* ---------------------------------------------------------------
-   Perform: floating transport / queue strip / pending panel
-   --------------------------------------------------------------- */
-.transport-card {
-  position: absolute; left: 14px; bottom: 14px; width: 260px; background: var(--paper);
-  border: 1px solid var(--line); border-radius: var(--radius); padding: 12px;
-  box-shadow: 0 3px 14px rgba(0, 0, 0, .12); z-index: 5;
+/* node hover card — the graph's quick-action popover; mirrors the sequence
+   panel's own commit functions so clicking through the graph or the list
+   does the same thing */
+.hover-card {
+  position: absolute; width: 210px; background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 11px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); z-index: 20;
 }
-.transport-row { display: flex; align-items: center; gap: 9px; }
-.play-btn { width: 36px; height: 36px; flex: none; border-radius: var(--radius); background: var(--ink); color: var(--paper); display: flex; align-items: center; justify-content: center; }
-.transport-text { flex: 1; min-width: 0; }
-.now-title { font-weight: 500; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.now-artist { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.progress-block { margin-top: 10px; }
-.progress-track { height: 4px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
-.progress-fill { height: 100%; background: var(--accent); }
-.progress-label { font-size: 10px; color: var(--muted); margin-top: 3px; }
-.ended-banner {
-  margin-top: 10px; padding: 7px 9px; border-radius: var(--radius); background: var(--panel);
-  display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 500;
-}
-
-.queue-strip {
-  position: absolute; left: 288px; right: 14px; bottom: 14px; background: var(--paper);
-  border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 11px;
-  box-shadow: 0 3px 14px rgba(0, 0, 0, .12); display: flex; align-items: center; gap: 7px;
-  overflow-x: auto; z-index: 5;
-}
-.queue-strip-label { font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); flex: none; }
-.queue-arrow { font-size: 13px; color: #b0b0b0; flex: none; }
-.queue-chip { display: flex; align-items: center; gap: 7px; padding: 4px 9px; border-radius: var(--radius); background: var(--panel); flex: none; min-width: 92px; }
-.queue-chip-now { background: var(--panel); flex-direction: column; align-items: flex-start; min-width: 76px; }
-.queue-chip-head { background: var(--ink); color: var(--paper); }
-.queue-chip-title { font-size: 12px; font-weight: 500; }
-.queue-chip-sub { font-size: 10px; color: var(--muted); }
-.queue-chip-head .queue-chip-sub { color: rgba(252, 252, 252, .65); }
-.queue-remove { flex: none; font-size: 12px; opacity: .6; }
-.queue-empty-hint { white-space: nowrap; }
-
-.pending-panel {
-  position: absolute; right: 14px; top: 14px; width: 300px; background: var(--ink); color: var(--paper);
-  border-radius: var(--radius); padding: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, .3); z-index: 6;
-  max-height: calc(100% - 28px); overflow-y: auto;
-}
-.pending-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.pending-title { font-weight: 500; font-size: 15px; }
-.pending-subtitle { font-size: 11px; color: rgba(252, 252, 252, .6); margin-bottom: 10px; }
-.pending-actions { display: flex; gap: 6px; margin-top: 10px; }
-
-.opt-row { border-radius: var(--radius); padding: 8px 9px; cursor: pointer; background: rgba(252, 252, 252, .08); color: var(--paper); border: 1px solid rgba(252, 252, 252, .25); margin-bottom: 5px; }
-.opt-row-disabled { color: rgba(252, 252, 252, .35); cursor: not-allowed; }
-.opt-row-selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.opt-row-main { display: flex; align-items: center; gap: 7px; }
-.opt-row-label { font-weight: 500; font-size: 13px; }
-.opt-row-note { font-size: 11px; color: rgba(252, 252, 252, .4); margin-top: 3px; }
-.opt-pair { display: flex; gap: 5px; margin-bottom: 5px; }
-.opt-pair .opt-row { flex: 1; text-align: center; margin-bottom: 0; }
-.or-divider { display: flex; align-items: center; gap: 8px; margin: 10px 0 5px; font-size: 10px; color: rgba(252, 252, 252, .4); letter-spacing: .06em; text-transform: uppercase; }
-.or-divider::before, .or-divider::after { content: ''; flex: 1; height: 1px; background: rgba(252, 252, 252, .15); }
+.hover-card-title { font-weight: 600; font-size: 14px; line-height: 1.2; }
+.hover-card-artist { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.hover-card-row { display: flex; gap: 5px; margin-top: 8px; }
+.hover-toggle { flex: 1; font-size: 10.5px; font-weight: 600; padding: 5px 4px; border-radius: var(--radius); background: var(--panel); color: var(--muted); text-align: center; }
+.hover-toggle.active { background: var(--ink); color: var(--paper); }
+.hover-toggle:disabled { opacity: .35; cursor: not-allowed; }
 
 /* ---------------------------------------------------------------
-   Library table
+   Library — flat accordion list
    --------------------------------------------------------------- */
-.table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.table thead tr { border-bottom: 1px solid var(--line); text-align: left; }
-.table th { padding: 7px 9px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
-.th-sortable { cursor: pointer; }
-.th-sortable:hover { color: var(--ink); }
-.table-row { border-bottom: 1px solid #e6e6e6; cursor: pointer; }
-.table-row:hover { background: rgba(19, 19, 19, .03); }
-.table-row-selected { background: var(--accent-bg) !important; }
-.table td { padding: 8px 9px; }
-.td-strong { font-weight: 500; }
-.td-muted { color: var(--muted); }
+.lib-row { border-bottom: 1px solid var(--line-soft); }
+.lib-row-head { display: flex; align-items: center; gap: 12px; padding: 10px 6px; cursor: pointer; }
+.lib-row-head:hover { background: rgba(19, 19, 19, .025); }
+.lib-chevron { flex: none; color: var(--faint); transition: transform .1s ease; }
+.lib-row-open .lib-chevron { transform: rotate(90deg); }
+.lib-title-wrap { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.lib-title { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-artist { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-tags { display: flex; gap: 5px; flex: none; }
+.lib-io { font-family: var(--font-mono); font-size: 11px; color: var(--faint); flex: none; width: 54px; text-align: right; }
+.lib-body { padding: 4px 6px 16px 34px; display: flex; flex-direction: column; gap: 14px; }
+.lib-edit-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.lib-edit-row .field { margin-bottom: 0; width: 140px; }
+.lib-pieces { display: flex; flex-direction: column; gap: 5px; }
+.drawer-actions-row { display: flex; gap: 7px; margin-bottom: 2px; }
+.drawer-frag { border-radius: var(--radius); background: var(--panel); padding: 7px 9px; }
+.drawer-frag-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.drawer-frag-label { font-size: 12px; font-weight: 600; }
+.drawer-frag-actions { display: flex; gap: 4px; flex: none; }
+.drawer-frag-dest { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.dot-verified { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); flex: none; }
 
 /* ---------------------------------------------------------------
    Add Audio: detected summary / cue preview
    --------------------------------------------------------------- */
-.detected-label { font-size: 11px; letter-spacing: .02em; color: var(--muted); font-weight: 500; margin: 8px 0 8px; }
+.detected-label { font-size: 11px; letter-spacing: .02em; color: var(--muted); font-weight: 600; margin: 8px 0 8px; }
 .pair-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
 .detected-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .cue-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
 .waveform-bar { position: relative; height: 40px; background: repeating-linear-gradient(90deg, rgba(19, 19, 19, .14) 0 2px, transparent 2px 6px), var(--line-soft); border-radius: var(--radius); overflow: hidden; }
 .waveform-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
 .waveform-marker-label { position: absolute; top: 0; transform: translateX(-50%); font-size: 9px; font-family: var(--font-mono); background: var(--ink); color: var(--paper); padding: 2px 4px; border-radius: 0; white-space: nowrap; }
-
-/* ---------------------------------------------------------------
-   Inspect drawer
-   --------------------------------------------------------------- */
-.drawer {
-  position: absolute; right: 14px; top: 14px; width: 310px; max-height: calc(100% - 28px);
-  overflow-y: auto; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 16px; box-shadow: 0 6px 20px rgba(0, 0, 0, .15); z-index: 8;
-}
-.drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; gap: 8px; }
-.drawer-title { font-weight: 500; font-size: 17px; }
-.drawer-title-input { font-weight: 500; font-size: 15px; flex: 1; margin-right: 8px; }
-.drawer-artist { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-.drawer-actions-row { display: flex; gap: 7px; margin-bottom: 16px; align-items: center; }
-.drawer-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 18px; }
-.drawer-frag { border-radius: var(--radius); background: var(--panel); padding: 7px 9px; }
-.drawer-frag-inheritable { background: transparent; border: 1px dashed #b0b0b0; }
-.drawer-frag-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.drawer-frag-label { font-size: 12px; font-weight: 500; }
-.drawer-frag-label-muted { color: var(--muted); }
-.drawer-frag-actions { display: flex; gap: 4px; flex: none; }
-.drawer-frag-dest { font-size: 11px; color: var(--muted); margin-top: 2px; }
-.dot-verified { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); flex: none; }
-
-.version-row { display: flex; gap: 5px; margin-bottom: 10px; }
-.seg-btn { font-size: 12px; padding: 5px 10px; border-radius: var(--radius); flex: 1; background: var(--panel); color: #363636; }
-.seg-btn.active { background: var(--ink); color: var(--paper); }
-
-.linking-panel { margin-top: 14px; border-radius: var(--radius); background: var(--panel); padding: 11px; }
-.linking-title { font-size: 12px; font-weight: 500; margin-bottom: 7px; }
-.linking-waveform { height: 40px; background: repeating-linear-gradient(90deg, rgba(19, 19, 19, .15) 0 2px, transparent 2px 6px), var(--line-soft); border-radius: var(--radius); margin-bottom: 7px; }
-.linking-nudge { display: flex; align-items: center; gap: 8px; }
-.linking-nudge-label { font-size: 11px; color: var(--muted); flex: 1; text-align: center; }
 </style>
 </head>
 <body>
@@ -424,51 +428,52 @@ table { font-family: inherit; }
 
 <script>
 // =====================================================================================
-// DJ Flow — core data model & pure logic (no React/JSX here — plain JS, easy to unit test)
+// Eskimo Studio — core data model & pure logic (no React/JSX here — plain JS, easy to
+// unit test). A song is flat (no version sub-objects) — a remix is just another song.
 // =====================================================================================
 
 const END = '__end__';
-const STORAGE_KEY = 'djflow:v1';
+const STORAGE_KEY = 'djflow:v2';
 
 // ---------------------------------------------------------------------------
 // Real app state starts empty — no demo/sample data is ever loaded into the app.
-// The functions below (sample*ForTests) exist purely so the pure-logic unit
-// tests have some realistic data shaped like real library data to exercise;
-// nothing in the app itself calls them.
+// These sample* functions exist purely so the pure-logic unit tests have some
+// realistic data to exercise; nothing in the app itself calls them.
 // ---------------------------------------------------------------------------
 function sampleSongsForTests() {
   return {
-    hd: { id: 'hd', title: 'Horizon Drift', artist: 'Nomi Sato', x: 40, y: 360, versions: [{ id: 'v1', label: 'Original', bpm: 124, key: 'A min' }] },
-    cb: { id: 'cb', title: 'Concrete Bloom', artist: 'Ledger', x: 320, y: 300, versions: [{ id: 'v1', label: 'Original', bpm: 128, key: 'F# min' }, { id: 'v2', label: 'VIP Remix', bpm: 132, key: 'F# min' }] },
-    gs: { id: 'gs', title: 'Glass Static', artist: 'Rook & Vale', x: 620, y: 440, versions: [{ id: 'v1', label: 'Original', bpm: 126, key: 'G min' }, { id: 'v2', label: 'Radio Edit', bpm: 126, key: 'G min' }] },
-    lr: { id: 'lr', title: 'Late Return', artist: 'Nomi Sato', x: 900, y: 480, versions: [{ id: 'v1', label: 'Original', bpm: 120, key: 'D min' }] },
-    wr: { id: 'wr', title: 'Wire & Rust', artist: 'Rook & Vale', x: 900, y: 600, versions: [{ id: 'v1', label: 'Original', bpm: 129, key: 'D min' }] },
+    hd: { id: 'hd', title: 'Horizon Drift', artist: 'Nomi Sato', x: 40, y: 360, bpm: 124, key: 'A min', durationSec: 214 },
+    cb: { id: 'cb', title: 'Concrete Bloom', artist: 'Ledger', x: 320, y: 300, bpm: 128, key: 'F# min', durationSec: 198 },
+    gs: { id: 'gs', title: 'Glass Static', artist: 'Rook & Vale', x: 620, y: 440, bpm: 126, key: 'G min', durationSec: 231 },
+    lr: { id: 'lr', title: 'Late Return', artist: 'Nomi Sato', x: 900, y: 480, bpm: 120, key: 'D min', durationSec: 205 },
+    wr: { id: 'wr', title: 'Wire & Rust', artist: 'Rook & Vale', x: 900, y: 600, bpm: 129, key: 'D min', durationSec: 187 },
   };
 }
 function sampleEdgesForTests() {
   return [
-    { id: 'e1', type: 'intro', r: 'hd', rv: 'v1', verified: true },
-    { id: 'e2', type: 'transition', l: 'hd', lv: 'v1', r: 'cb', rv: 'v1', verified: true, bpmDelta: 4, keyChange: true, remix: false },
-    { id: 'e4', type: 'transition', l: 'cb', lv: 'v1', r: 'gs', rv: 'v1', verified: true, bpmDelta: -2, keyChange: false, remix: true },
-    { id: 'e5', type: 'outro', l: 'cb', lv: 'v1', verified: true },
-    { id: 'e6', type: 'transition', l: 'gs', lv: 'v1', r: 'lr', rv: 'v1', verified: false, bpmDelta: -6, keyChange: true, remix: false },
-    { id: 'e13', type: 'transition', l: 'gs', lv: 'v1', r: 'wr', rv: 'v1', verified: true, bpmDelta: 3, keyChange: true, remix: false },
-    { id: 'e14', type: 'outro', l: 'gs', lv: 'v1', verified: true },
+    { id: 'e1', type: 'intro', r: 'hd', verified: true },
+    { id: 'e2', type: 'transition', l: 'hd', r: 'cb', verified: true },
+    { id: 'e4', type: 'transition', l: 'cb', r: 'gs', verified: true },
+    { id: 'e5', type: 'outro', l: 'cb', verified: true },
+    { id: 'e6', type: 'transition', l: 'gs', r: 'lr', verified: false },
+    { id: 'e13', type: 'transition', l: 'gs', r: 'wr', verified: true },
+    { id: 'e14', type: 'outro', l: 'gs', verified: true },
   ];
 }
 
 function emptySession() {
   return {
-    nowPlayingId: null, nowPlayingVersion: null, startMethod: null,
-    versionOf: {}, queue: [], nextCountdown: 34, isPlaying: false, setEnded: false,
+    nowPlayingId: null, startMethod: null,
+    queue: [], timeLeft: 0, isPlaying: false, setEnded: false,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Persistence (localStorage stand-in for the eventual Supabase-backed store).
-// Everything reads/writes through these three functions — when it's time to
-// swap in real Supabase + Cloudflare storage, this is the only file that
-// should need to change. Keep the shape of `load()`'s return value stable.
+// Persistence. localStorage is always the source of truth for the current
+// tab (instant, works offline). When APP_CONFIG has Supabase credentials,
+// pushRemote/pullRemote best-effort sync a single JSON blob per (anonymous)
+// user in the background — see TODO.md for how to turn this on. Nothing
+// about the local-only path below changes when sync is off.
 // ---------------------------------------------------------------------------
 const Store = {
   load() {
@@ -479,7 +484,7 @@ const Store = {
       if (!parsed || typeof parsed !== 'object') return null;
       return parsed;
     } catch (e) {
-      console.warn('DJ Flow: could not read saved data, starting fresh.', e);
+      console.warn('Eskimo Studio: could not read saved data, starting fresh.', e);
       return null;
     }
   },
@@ -488,7 +493,7 @@ const Store = {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       return true;
     } catch (e) {
-      console.warn('DJ Flow: could not save — storage may be full or disabled.', e);
+      console.warn('Eskimo Studio: could not save — storage may be full or disabled.', e);
       return false;
     }
   },
@@ -497,11 +502,77 @@ const Store = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Optional Supabase sync. Entirely inert until APP_CONFIG.SUPABASE_URL and
+// SUPABASE_ANON_KEY are filled in (see TODO.md -> "Your tasks"). Uses
+// anonymous auth so cross-device sync works without building a login screen
+// yet — one row per anonymous user in a `library` table, RLS-scoped to
+// auth.uid() (see supabase/schema.sql).
+// ---------------------------------------------------------------------------
+const supaConfigured = !!(window.APP_CONFIG && window.APP_CONFIG.SUPABASE_URL && window.APP_CONFIG.SUPABASE_ANON_KEY);
+const supa = (supaConfigured && window.supabase && window.supabase.createClient)
+  ? window.supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_ANON_KEY)
+  : null;
+
+async function ensureSupaUser() {
+  if (!supa) return null;
+  try {
+    const { data: { session } } = await supa.auth.getSession();
+    if (session && session.user) return session.user;
+    const { data, error } = await supa.auth.signInAnonymously();
+    if (error) { console.warn('Eskimo Studio: Supabase anonymous sign-in failed', error); return null; }
+    return data.user;
+  } catch (e) {
+    console.warn('Eskimo Studio: Supabase auth unreachable', e);
+    return null;
+  }
+}
+
+Store.pullRemote = async function pullRemote() {
+  if (!supa) return null;
+  const user = await ensureSupaUser();
+  if (!user) return null;
+  const { data, error } = await supa.from('library').select('data').eq('user_id', user.id).maybeSingle();
+  if (error) { console.warn('Eskimo Studio: Supabase load failed', error); return null; }
+  return data ? data.data : null;
+};
+Store.pushRemote = async function pushRemote(data) {
+  if (!supa) return;
+  const user = await ensureSupaUser();
+  if (!user) return;
+  const { error } = await supa.from('library').upsert({ user_id: user.id, data, updated_at: new Date().toISOString() });
+  if (error) console.warn('Eskimo Studio: Supabase save failed', error);
+};
+
+// ---------------------------------------------------------------------------
+// Optional audio upload. Inert until APP_CONFIG.UPLOAD_WORKER_URL is filled
+// in (see worker/upload-worker.js + TODO.md). The file is POSTed straight to
+// your deployed Cloudflare Worker, which writes it into R2 via its bucket
+// binding and hands back a public URL — no R2 credentials, presigning, or
+// AWS SDK ever touch the client. Without a worker configured this just
+// returns the file's name/size, exactly like before.
+// ---------------------------------------------------------------------------
+async function uploadAudioIfConfigured(file) {
+  const workerUrl = window.APP_CONFIG && window.APP_CONFIG.UPLOAD_WORKER_URL;
+  if (!workerUrl || !file || !file.name) return { name: file && file.name, size: file && file.size, audioUrl: null };
+  try {
+    const res = await fetch(workerUrl + '/upload?filename=' + encodeURIComponent(file.name), {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    if (!res.ok) throw new Error('upload failed: ' + res.status);
+    const { url } = await res.json();
+    return { name: file.name, size: file.size, audioUrl: url };
+  } catch (e) {
+    console.warn('Eskimo Studio: audio upload failed, keeping metadata only', e);
+    return { name: file.name, size: file.size, audioUrl: null };
+  }
+}
+
 // The one and only "no saved state yet" starting point — a genuinely empty
 // library. Nothing is seeded; the person adds their own songs and audio.
-function freshState() {
-  return { songs: {}, edges: [], session: emptySession(), venueName: '' };
-}
+function freshState() { return { songs: {}, edges: [], session: emptySession(), venueName: '' }; }
 
 // ---------------------------------------------------------------------------
 // Small generic helpers
@@ -521,6 +592,10 @@ function hashString(s) {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return h;
 }
+
+// Deterministic mock track length until real audio analysis (see TODO.md)
+// can read the actual duration off the file. 150s-260s.
+function mockDuration(seed) { return 150 + (hashString(seed || 'x') % 110); }
 
 // A short, deterministic pseudo-cue-point pair derived from two song ids, so the
 // "detected" cue markers in Add Audio vary per pair instead of always looking identical.
@@ -543,7 +618,6 @@ function pickDetectedSongs(songIds, seedText, count) {
     const id = songIds[Math.abs(idx) % songIds.length];
     if (!picks.includes(id)) picks.push(id);
   }
-  // pad out with the next distinct ids if a collision shrank the list
   let j = 0;
   while (picks.length < count && j < songIds.length) {
     if (!picks.includes(songIds[j])) picks.push(songIds[j]);
@@ -555,27 +629,23 @@ function pickDetectedSongs(songIds, seedText, count) {
 // ---------------------------------------------------------------------------
 // Song / edge helpers shared by multiple pages
 // ---------------------------------------------------------------------------
-function activeVersionId(song, versionOf) {
-  if (!song) return null;
-  return versionOf[song.id] || song.versions[0].id;
-}
-function activeVersion(song, versionOf) {
-  if (!song) return null;
-  const vid = activeVersionId(song, versionOf);
-  return song.versions.find(v => v.id === vid) || song.versions[0];
-}
-function edgeVersionMatches(songs, versionOf, e) {
-  const lOk = !e.l || activeVersionId(songs[e.l], versionOf) === e.lv;
-  const rOk = !e.r || activeVersionId(songs[e.r], versionOf) === e.rv;
-  return lOk && rOk;
-}
-function getVisibleEdges(songs, edges, versionOf) {
-  return edges.filter(e => e.verified && edgeVersionMatches(songs, versionOf, e));
-}
-function inOutCounts(edges, songId, versionId) {
-  const inCount = edges.filter(e => e.verified && e.type !== 'outro' && e.r === songId && e.rv === versionId).length;
-  const outCount = edges.filter(e => e.verified && e.type !== 'intro' && e.l === songId && e.lv === versionId).length;
+function inOutCounts(edges, songId) {
+  const inCount = edges.filter(e => e.verified && e.type !== 'outro' && e.r === songId).length;
+  const outCount = edges.filter(e => e.verified && e.type !== 'intro' && e.l === songId).length;
   return { inCount, outCount };
+}
+function getVisibleEdges(edges) { return edges.filter(e => e.verified); }
+
+// One hop of *built* transitions out of a specific song, excluding ids already
+// used elsewhere in the current plan. This is the one primitive both the
+// "Next" list (from Now Playing) and the "Later" list (from whatever's
+// staged in Next) are built from.
+function oneHopReachable(visibleEdges, fromId, excludeIds) {
+  const out = new Set();
+  visibleEdges.filter(e => e.type === 'transition' && e.l === fromId).forEach(e => {
+    if (!excludeIds.has(e.r)) out.add(e.r);
+  });
+  return out;
 }
 
 // Removing a song must not leave dangling edges pointing at it.
@@ -595,8 +665,7 @@ const END_NODE = { x: 1250, y: 20, w: 130 };
 function centerOf(songs, id) {
   if (id === END) return { x: END_NODE.x + END_NODE.w / 2, y: END_NODE.y + 24 };
   const s = songs[id];
-  const extra = s.versions.length > 1 ? 12 : 0;
-  return { x: s.x + CARD_W / 2, y: s.y + 38 + extra };
+  return { x: s.x + CARD_W / 2, y: s.y + 38 };
 }
 function shorten(x1, y1, x2, y2, pad1, pad2) {
   const dx = x2 - x1, dy = y2 - y1;
@@ -607,63 +676,52 @@ function shorten(x1, y1, x2, y2, pad1, pad2) {
 
 // ---------------------------------------------------------------------------
 // Reachability from the tail of the current queue (or Now Playing if the queue
-// is empty). Returns which songs have a *built* path to them right now.
+// is empty). "tier1" is the Next list; the Later list is computed separately,
+// live, from whichever song is staged (see oneHopReachable above).
 // ---------------------------------------------------------------------------
-function computeReachability(songs, visibleEdges, nowPlayingId, nowPlayingVersion, versionOf, queue) {
+function computeReachability(songs, visibleEdges, nowPlayingId, queue) {
   const queueHasId = (id) => queue.some(q => q.id === id);
   const tail = queue.length ? queue[queue.length - 1] : null;
   const fromId = tail ? (tail.id === END ? null : tail.id) : nowPlayingId;
-  const fromVer = tail ? (tail.id === END ? null : tail.version) : nowPlayingVersion;
 
   const tier1 = new Set();
-  const tier2 = new Set();
   if (fromId) {
-    visibleEdges.filter(e => e.type === 'transition' && e.l === fromId && e.lv === fromVer).forEach(e => {
+    visibleEdges.filter(e => e.type === 'transition' && e.l === fromId).forEach(e => {
       if (e.r !== nowPlayingId && !queueHasId(e.r)) tier1.add(e.r);
     });
     visibleEdges.filter(e => e.type === 'intro').forEach(e => {
       if (e.r !== nowPlayingId && !queueHasId(e.r)) tier1.add(e.r);
     });
     if (!queueHasId(END)) tier1.add(END);
-    tier1.forEach(id => {
-      if (id === END) return;
-      visibleEdges.filter(e => e.type === 'transition' && e.l === id).forEach(e => {
-        if (e.r !== nowPlayingId && !queueHasId(e.r) && !tier1.has(e.r)) tier2.add(e.r);
-      });
-    });
   }
-  return { fromId, fromVer, tier1, tier2 };
+  return { fromId, tier1 };
 }
 
-// quality: 3 = produced transition (solid, thick); 2 = both halves built (solid, medium);
-// 1 = one half built (dashed, medium); 0 = raw cut (dashed, fine)
-function hopQuality(hop, isEndHop) {
-  if (isEndHop) return hop.ending === 'outro' ? 2 : 0;
-  if (hop.mode === 'transition') return 3;
-  const eOk = hop.ending === 'outro', sOk = hop.starting === 'intro';
-  return (eOk && sOk) ? 2 : (eOk || sOk) ? 1 : 0;
-}
-function dashForQuality(quality) {
-  return { 3: { dash: '0', width: 4 }, 2: { dash: '0', width: 3 }, 1: { dash: '7,4', width: 2.5 }, 0: { dash: '2,5', width: 2.5 } }[quality];
-}
-function hopEndingLabel(e) { return e === 'outro' ? 'outro' : 'natural end'; }
-function hopStartingLabel(s) { return s === 'intro' ? 'intro' : 'cold cut'; }
+function hopEndingLabel(e) { return e === 'outro' ? 'outro' : 'cut'; }
+function hopStartingLabel(s) { return s === 'intro' ? 'intro' : 'cut'; }
 function hopSummary(hop) {
   if (hop.id === END) return hopEndingLabel(hop.ending);
   if (hop.mode === 'transition') return 'transition';
-  return hopEndingLabel(hop.ending) + ' \u2192 ' + hopStartingLabel(hop.starting);
+  return hopEndingLabel(hop.ending) + ' → ' + hopStartingLabel(hop.starting);
+}
+// width-only weighting now that every edge/segment renders solid (no dashing):
+// built transitions and fully-fragmented hops draw thicker than a raw cut.
+function hopWidth(hop, isEndHop) {
+  if (isEndHop) return hop.ending === 'outro' ? 3.5 : 2;
+  if (hop.mode === 'transition') return 4;
+  const eOk = hop.ending === 'outro', sOk = hop.starting === 'intro';
+  return (eOk && sOk) ? 3.5 : (eOk || sOk) ? 3 : 2;
 }
 
 // ---------------------------------------------------------------------------
-// Library table sort/filter
+// Library list sort/filter
 // ---------------------------------------------------------------------------
-function libraryRows(songs, edges, versionOf, search, sortKey, sortDir) {
+function libraryRows(songs, edges, search, sortKey, sortDir) {
   const q = search.trim().toLowerCase();
   let rows = Object.keys(songs).map(id => {
     const s = songs[id];
-    const v = activeVersion(s, versionOf);
-    const { inCount, outCount } = inOutCounts(edges, id, v.id);
-    return { id, title: s.title, artist: s.artist, bpmNum: v.bpm, bpm: v.bpm + ' BPM', key: v.key, versions: s.versions.length, inCount, outCount, isDeadEnd: outCount === 0 };
+    const { inCount, outCount } = inOutCounts(edges, id);
+    return { id, title: s.title, artist: s.artist, bpmNum: s.bpm, bpm: s.bpm + ' BPM', key: s.key, inCount, outCount, isDeadEnd: outCount === 0 };
   });
   if (q) rows = rows.filter(r => r.title.toLowerCase().includes(q) || r.artist.toLowerCase().includes(q));
   const val = (r) => sortKey === 'bpm' ? r.bpmNum : sortKey === 'artist' ? r.artist.toLowerCase() : sortKey === 'key' ? r.key : r.title.toLowerCase();
@@ -675,10 +733,11 @@ function libraryRows(songs, edges, versionOf, search, sortKey, sortDir) {
 window.Core = {
   END, STORAGE_KEY,
   sampleSongsForTests, sampleEdgesForTests, emptySession, freshState, Store,
-  uid, clamp, fmtTime, fmtSignedBpm, fmtBytes, hashString, pseudoCuePoints, pickDetectedSongs,
-  activeVersionId, activeVersion, edgeVersionMatches, getVisibleEdges, inOutCounts, removeSongCascade,
+  uid, clamp, fmtTime, fmtSignedBpm, fmtBytes, hashString, mockDuration, pseudoCuePoints, pickDetectedSongs,
+  uploadAudioIfConfigured,
+  getVisibleEdges, inOutCounts, oneHopReachable, removeSongCascade,
   CARD_W, END_NODE, centerOf, shorten,
-  computeReachability, hopQuality, dashForQuality, hopEndingLabel, hopStartingLabel, hopSummary,
+  computeReachability, hopEndingLabel, hopStartingLabel, hopSummary, hopWidth,
   libraryRows,
 };
 </script>
@@ -686,19 +745,26 @@ window.Core = {
 <script type="text/babel" data-presets="react">
 // Wrapped in an IIFE: classic (non-module) <script> tags share one global lexical
 // scope, so top-level const/let here would collide with the plain <script> above
-// (both declare END / END_NODE) and throw a SyntaxError before anything can render.
+// (both would declare END / END_NODE) and throw a SyntaxError before anything
+// can render.
 (function () {
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 const {
   END, Store, freshState,
-  uid, clamp, fmtTime, fmtSignedBpm, fmtBytes, pseudoCuePoints, pickDetectedSongs,
-  activeVersionId, activeVersion, getVisibleEdges, inOutCounts, removeSongCascade,
+  uid, clamp, fmtTime, fmtBytes, mockDuration, pseudoCuePoints, pickDetectedSongs, uploadAudioIfConfigured,
+  getVisibleEdges, inOutCounts, oneHopReachable, removeSongCascade,
   CARD_W, END_NODE, centerOf, shorten,
-  computeReachability, hopQuality, dashForQuality, hopEndingLabel, hopStartingLabel, hopSummary,
+  computeReachability, hopEndingLabel, hopStartingLabel, hopSummary, hopWidth,
   libraryRows,
 } = window.Core;
 
 const INITIAL = Store.load() || freshState();
+
+// =====================================================================================
+// Terminology, kept small and stuck to on purpose (see TODO.md for the full glossary):
+// standard DJ words are kept as-is (Transition, Intro, Outro, BPM, Key, Cue) — only the
+// app's own invented states are simplified, to exactly three: Playing, Next, Later.
+// =====================================================================================
 
 // =====================================================================================
 // Small shared bits
@@ -721,9 +787,10 @@ const ICONS = {
   close: <><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></>,
   play: <polygon points="6,4 20,12 6,20" fill="currentColor" />,
   pause: <><rect x="5" y="4" width="5" height="16" fill="currentColor"></rect><rect x="14" y="4" width="5" height="16" fill="currentColor"></rect></>,
-  download: <><path d="M12 3v12"></path><path d="M7 10l5 5 5-5"></path><path d="M5 21h14"></path></>,
+  chevron: <polyline points="9,6 15,12 9,18"></polyline>,
   swap: <><path d="M9 17H7A5 5 0 0 1 7 7h2"></path><path d="M15 7h2a5 5 0 1 1 0 10h-2"></path><line x1="8" y1="12" x2="16" y2="12"></line></>,
   cold: <><path d="M3 12h13"></path><path d="M11 6l6 6-6 6"></path></>,
+  introIcon: <><path d="M5 4l14 8-14 8V4z"></path></>,
 };
 
 // A small searchable song picker: shows a chip once a value is chosen, or a
@@ -800,7 +867,7 @@ function Dropzone({ file, onFile, hint }) {
   const [dragging, setDragging] = useState(false);
 
   function handleFiles(fileList) {
-    if (fileList && fileList[0]) onFile({ name: fileList[0].name, size: fileList[0].size });
+    if (fileList && fileList[0]) onFile(fileList[0]);
   }
   return (
     <div
@@ -838,7 +905,10 @@ function Sidebar({ tab, setTab, songCount, edgeCount, venueName }) {
   ];
   return (
     <div className="sidebar">
-      <div className="sidebar-brand">Eskimo Studio</div>
+      <div className="sidebar-brand">
+        <div className="sidebar-brand-word">eskimo</div>
+        <div className="sidebar-brand-sub">STUDIO</div>
+      </div>
       {items.map(it => (
         <button key={it.id} className={'nav-btn' + (tab === it.id ? ' active' : '')} onClick={() => setTab(it.id)}>
           <Icon path={it.icon} size={15} />
@@ -854,8 +924,7 @@ function Sidebar({ tab, setTab, songCount, edgeCount, venueName }) {
 
 // =====================================================================================
 // App shell — owns the durable data (songs / edges / session / venueName) and the
-// small bits of UI state that are shared across more than one page (the tab itself,
-// and which song's inspect drawer is open).
+// small bits of UI state that are shared across more than one page (just the tab).
 // =====================================================================================
 
 function App() {
@@ -865,52 +934,61 @@ function App() {
   const [venueName, setVenueName] = useState(INITIAL.venueName);
 
   const [tab, setTab] = useState('perform');
-  const [selectedSongId, setSelectedSongId] = useState(null);
-  const [linkingId, setLinkingId] = useState(null);
 
-  // ---- debounced persistence ----
+  // ---- pull anything saved on another device once, on boot (no-op until Supabase is configured) ----
+  useEffect(() => {
+    Store.pullRemote().then(remote => {
+      if (remote && typeof remote === 'object') {
+        if (remote.songs) setSongs(remote.songs);
+        if (remote.edges) setEdges(remote.edges);
+        if (remote.session) setSession(remote.session);
+        if (typeof remote.venueName === 'string') setVenueName(remote.venueName);
+      }
+    });
+  }, []);
+
+  // ---- debounced persistence: local write is instant, remote push is best-effort ----
   const saveTimer = useRef(null);
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      Store.save({ songs, edges, session, venueName });
+      const data = { songs, edges, session, venueName };
+      Store.save(data);
+      Store.pushRemote(data);
     }, 400);
     return () => clearTimeout(saveTimer.current);
   }, [songs, edges, session, venueName]);
 
-  // ---- the set clock: advances nowPlaying when the queue's head countdown elapses ----
+  // ---- the set clock: ticks Now Playing's countdown, promotes Next when it hits 0 ----
   useEffect(() => {
     const t = setInterval(() => {
       setSession(prev => {
-        if (!prev.isPlaying || prev.queue.length === 0) return prev;
-        if (prev.nextCountdown <= 1) {
+        if (!prev.isPlaying || !prev.nowPlayingId) return prev;
+        if (prev.timeLeft <= 1) {
           const head = prev.queue[0];
-          if (head.id === END) {
-            return { ...prev, isPlaying: false, setEnded: true, queue: [], nextCountdown: 34 };
+          if (head) {
+            if (head.id === END) {
+              return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0 };
+            }
+            const nextSong = songs[head.id];
+            return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210 };
           }
-          return {
-            ...prev,
-            nowPlayingId: head.id, nowPlayingVersion: head.version,
-            versionOf: { ...prev.versionOf, [head.id]: head.version },
-            queue: prev.queue.slice(1), nextCountdown: 34,
-          };
+          // nothing armed yet — the window resets rather than the set stalling outright
+          const cur = songs[prev.nowPlayingId];
+          return { ...prev, timeLeft: cur ? cur.durationSec : 210 };
         }
-        return { ...prev, nextCountdown: prev.nextCountdown - 1 };
+        return { ...prev, timeLeft: prev.timeLeft - 1 };
       });
     }, 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [songs]);
 
-  // ---- cascade-safe song deletion (also closes the drawer / clears anything referencing it) ----
   const deleteSong = useCallback((songId) => {
     const result = removeSongCascade(songs, edges, songId);
     setSongs(result.songs);
     setEdges(result.edges);
-    setSelectedSongId(sel => (sel === songId ? null : sel));
     setSession(prev => {
       if (prev.nowPlayingId !== songId && !prev.queue.some(q => q.id === songId)) return prev;
-      // if the deleted song was involved in the live set, just stop cleanly rather than
-      // leave the app pointing at a song that no longer exists
       return { ...prev, queue: prev.queue.filter(q => q.id !== songId), isPlaying: prev.nowPlayingId === songId ? false : prev.isPlaying, setEnded: prev.nowPlayingId === songId ? true : prev.setEnded };
     });
   }, [edges, songs]);
@@ -919,27 +997,15 @@ function App() {
     setSongs(prev => (prev[songId] ? { ...prev, [songId]: { ...prev[songId], ...patch } } : prev));
   }, []);
 
-  const addVersion = useCallback((songId, versionData) => {
-    setSongs(prev => {
-      const s = prev[songId]; if (!s) return prev;
-      return { ...prev, [songId]: { ...s, versions: [...s.versions, versionData] } };
-    });
-  }, []);
-
   const deleteEdge = useCallback((edgeId) => {
     setEdges(prev => prev.filter(e => e.id !== edgeId));
-    setLinkingId(id => (id === edgeId ? null : id));
-  }, []);
-
-  const setVersionOf = useCallback((songId, versionId) => {
-    setSession(prev => ({ ...prev, versionOf: { ...prev.versionOf, [songId]: versionId } }));
   }, []);
 
   const clearAllData = useCallback(() => {
     Store.clear();
     const fresh = freshState();
     setSongs(fresh.songs); setEdges(fresh.edges); setSession(fresh.session); setVenueName(fresh.venueName);
-    setSelectedSongId(null); setLinkingId(null); setTab('perform');
+    setTab('perform');
   }, []);
 
   const songCount = Object.keys(songs).length;
@@ -952,25 +1018,27 @@ function App() {
         {tab === 'perform' && (
           <PerformPage
             songs={songs} setSongs={setSongs} edges={edges} session={session} setSession={setSession}
-            onInspect={setSelectedSongId} goAddAudio={() => setTab('addAudio')} goUpload={() => setTab('upload')}
+            venueName={venueName} goAddAudio={() => setTab('addAudio')} goUpload={() => setTab('upload')}
           />
         )}
         {tab === 'library' && (
-          <LibraryPage songs={songs} edges={edges} session={session} onInspect={setSelectedSongId} selectedSongId={selectedSongId} goUpload={() => setTab('upload')} />
+          <LibraryPage songs={songs} edges={edges} goUpload={() => setTab('upload')}
+            onUpdateSong={updateSong} onDeleteSong={deleteSong} onDeleteEdge={deleteEdge}
+            onVerifyEdge={(edgeId) => setEdges(prev => prev.map(e => e.id === edgeId ? { ...e, verified: true } : e))}
+          />
         )}
         {tab === 'upload' && (
           <UploadSongPage
             onAddSong={(song) => setSongs(prev => ({ ...prev, [song.id]: song }))}
-            onViewSong={(id) => { setTab('library'); setSelectedSongId(id); }}
+            onViewSong={() => setTab('library')}
             existingCount={songCount}
           />
         )}
         {tab === 'addAudio' && (
           <AddAudioPage
-            songs={songs} session={session}
+            songs={songs}
             onAddEdge={(edge) => setEdges(prev => [...prev, edge])}
-            onAddVersion={addVersion}
-            onViewSong={(id) => { setTab('library'); setSelectedSongId(id); }}
+            onViewSong={() => setTab('library')}
           />
         )}
         {tab === 'settings' && (
@@ -981,95 +1049,120 @@ function App() {
             onRestore={(data) => { setSongs(data.songs); setEdges(data.edges); setSession(data.session); setVenueName(data.venueName); }}
           />
         )}
-
-        {selectedSongId && songs[selectedSongId] && (
-          <InspectDrawer
-            song={songs[selectedSongId]}
-            songs={songs} edges={edges} versionOf={session.versionOf}
-            linkingId={linkingId} setLinkingId={setLinkingId}
-            onClose={() => { setSelectedSongId(null); setLinkingId(null); }}
-            onSetVersion={setVersionOf}
-            onVerifyEdge={(edgeId) => setEdges(prev => prev.map(e => e.id === edgeId ? { ...e, verified: true } : e))}
-            onDeleteEdge={deleteEdge}
-            onUpdateSong={updateSong}
-            onDeleteSong={deleteSong}
-          />
-        )}
       </div>
     </div>
   );
 }
 // =====================================================================================
-// Perform — the master graph doubles as the live routing/queue-building surface.
+// Perform — Graph pane (plan visually) + Sequence pane (act on it). One state
+// machine, two entry points: hovering a node and picking from the Next/Later
+// lists both call the exact same stage/commit functions below.
 // =====================================================================================
 
-function PerformPage({ songs, setSongs, edges, session, setSession, onInspect, goAddAudio, goUpload }) {
+function PerformPage({ songs, setSongs, edges, session, setSession, venueName, goAddAudio, goUpload }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [focusMode, setFocusMode] = useState('all'); // 'all' | 'reachable'
   const [zoom, setZoom] = useState(1);
-  const [hoveredEdge, setHoveredEdge] = useState(null);
-  const [pendingId, setPendingId] = useState(null);
-  const [pendingKind, setPendingKind] = useState('song'); // 'start' | 'song' | 'end'
-  const [pendingMode, setPendingMode] = useState('custom'); // 'transition' | 'custom' (song hops only)
-  const [pendingEnding, setPendingEnding] = useState('natural');
-  const [pendingStarting, setPendingStarting] = useState('cold');
+  const [hoveredId, setHoveredId] = useState(null);
+  const hoverTimer = useRef(null);
+
+  // "staged" = selected in the Next list (or via a node's hover card) but not
+  // yet committed to the queue. This is what the Later list is computed from.
+  const [stagedId, setStagedId] = useState(null);
+  const [stagedMode, setStagedMode] = useState('cut'); // 'transition' | 'cut'
+  const [stagedEnding, setStagedEnding] = useState('cut'); // how Now Playing ends: 'cut' | 'outro'
+  const [stagedStarting, setStagedStarting] = useState('cut'); // how staged song starts: 'cut' | 'intro'
+  const [startingSet, setStartingSet] = useState(false); // hard-start picker open
 
   const zoomRef = useRef(zoom);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
 
-  // the reachable set (and therefore what a click even means) depends on nowPlaying —
-  // once the set clock advances, any half-open pick no longer applies to the new context.
-  useEffect(() => { setPendingId(null); }, [session.nowPlayingId]);
+  useEffect(() => { setStagedId(null); }, [session.nowPlayingId]);
 
   const hasStarted = session.nowPlayingId !== null;
-  const versionOf = session.versionOf;
-  const verOf = (id) => (id === END ? null : (versionOf[id] || songs[id].versions[0].id));
-
-  const visibleEdges = useMemo(() => getVisibleEdges(songs, edges, versionOf), [songs, edges, versionOf]);
+  const visibleEdges = useMemo(() => getVisibleEdges(edges), [edges]);
   const reach = useMemo(
     () => hasStarted
-      ? computeReachability(songs, visibleEdges, session.nowPlayingId, session.nowPlayingVersion, versionOf, session.queue)
-      : { fromId: null, fromVer: null, tier1: new Set(Object.keys(songs)), tier2: new Set() },
-    [songs, visibleEdges, hasStarted, session.nowPlayingId, session.nowPlayingVersion, versionOf, session.queue]
+      ? computeReachability(songs, visibleEdges, session.nowPlayingId, session.queue)
+      : { fromId: null, tier1: new Set(Object.keys(songs)) },
+    [songs, visibleEdges, hasStarted, session.nowPlayingId, session.queue]
   );
-  const { fromId, fromVer, tier1, tier2 } = reach;
+  const { fromId, tier1 } = reach;
+
+  const usedIds = useMemo(() => {
+    const s = new Set([session.nowPlayingId, ...session.queue.map(q => q.id)]);
+    return s;
+  }, [session.nowPlayingId, session.queue]);
+  const laterIds = useMemo(
+    () => stagedId ? oneHopReachable(visibleEdges, stagedId, new Set([...usedIds, ...tier1])) : new Set(),
+    [stagedId, visibleEdges, usedIds, tier1]
+  );
+
   const findEdge = (pred) => visibleEdges.find(pred);
 
-  // ---------------- node click (open the pending panel / toggle queue membership) ----------------
-  function handleNodeClick(id) {
-    if (!hasStarted) {
-      if (id === END) return; // can't end a set that hasn't started
-      const nextVer = verOf(id);
-      const introEdge = findEdge(e => e.type === 'intro' && e.r === id && e.rv === nextVer);
-      setPendingId(id); setPendingKind('start'); setPendingStarting(introEdge ? 'intro' : 'cold');
-      onInspect(null);
-      return;
-    }
+  function stage(id) {
     if (id === session.nowPlayingId) return;
     const qIdx = session.queue.findIndex(q => q.id === id);
-    if (qIdx >= 0) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, qIdx) })); setPendingId(null); return; }
-    if (!fromId) return; // the plan already ends in "End Set" — nothing more to add
+    if (qIdx >= 0) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, qIdx) })); setStagedId(null); return; }
+    if (!fromId) return;
     if (id === END) {
-      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId && e.lv === fromVer);
-      setPendingId(END); setPendingKind('end'); setPendingEnding(outroEdge ? 'outro' : 'natural'); onInspect(null); return;
+      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId);
+      setStagedId(END); setStagedEnding(outroEdge ? 'outro' : 'cut');
+      return;
     }
-    const nextVer = verOf(id);
-    const transitionEdge = findEdge(e => e.type === 'transition' && e.l === fromId && e.lv === fromVer && e.r === id && e.rv === nextVer);
-    const introEdge = findEdge(e => e.type === 'intro' && e.r === id && e.rv === nextVer);
-    const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId && e.lv === fromVer);
-    setPendingId(id);
-    setPendingKind('song');
-    setPendingMode(transitionEdge ? 'transition' : 'custom');
-    setPendingEnding(outroEdge ? 'outro' : 'natural');
-    setPendingStarting(introEdge ? 'intro' : 'cold');
-    onInspect(null);
+    const transitionEdge = findEdge(e => e.type === 'transition' && e.l === fromId && e.r === id);
+    const introEdge = findEdge(e => e.type === 'intro' && e.r === id);
+    const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId);
+    setStagedId(id);
+    setStagedMode(transitionEdge ? 'transition' : 'cut');
+    setStagedEnding(outroEdge ? 'outro' : 'cut');
+    setStagedStarting(introEdge ? 'intro' : 'cut');
   }
-  // kept in a ref so the (stable-identity) window drag handlers always call the latest version
-  const handleNodeClickRef = useRef(handleNodeClick);
-  handleNodeClickRef.current = handleNodeClick;
+
+  function commitStaged() {
+    if (!stagedId) return;
+    if (stagedId === END) {
+      setSession(prev => ({ ...prev, queue: [...prev.queue, { id: END, ending: stagedEnding }] }));
+      setStagedId(null);
+      return;
+    }
+    const item = stagedMode === 'transition'
+      ? { id: stagedId, mode: 'transition' }
+      : { id: stagedId, mode: 'cut', ending: stagedEnding, starting: stagedStarting };
+    const wasEmpty = session.queue.length === 0;
+    const song = songs[stagedId];
+    setSession(prev => ({
+      ...prev,
+      queue: [...prev.queue, item],
+      timeLeft: wasEmpty ? prev.timeLeft : prev.timeLeft,
+    }));
+    setStagedId(null);
+  }
+
+  function startSet(songId, starting) {
+    const song = songs[songId];
+    setSession(prev => ({
+      ...prev, nowPlayingId: songId, startMethod: starting,
+      queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false,
+    }));
+    setStartingSet(false);
+  }
+  function togglePlaying() { setSession(prev => ({ ...prev, isPlaying: !prev.isPlaying })); }
+  function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0 })); }
+
+  // node hover (canvas quick-actions) — small delay so moving toward the card doesn't dismiss it
+  function onNodeEnter(id) {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    setHoveredId(id);
+  }
+  function onNodeLeave() {
+    hoverTimer.current = setTimeout(() => setHoveredId(null), 150);
+  }
 
   // ---------------- drag-to-reposition a node (vs. a plain click) ----------------
   const dragInfo = useRef(null);
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
   const onDragMove = useCallback((e) => {
     const d = dragInfo.current; if (!d) return;
     const dx = (e.clientX - d.startX) / zoomRef.current;
@@ -1086,8 +1179,8 @@ function PerformPage({ songs, setSongs, edges, session, setSession, onInspect, g
     window.removeEventListener('mousemove', onDragMove);
     window.removeEventListener('mouseup', onDragUp);
     dragInfo.current = null;
-    if (d && !d.moved) handleNodeClickRef.current(d.id);
-  }, [onDragMove]);
+    if (d && !d.moved && hasStarted) stageRef.current(d.id);
+  }, [onDragMove, hasStarted]);
   function onNodeMouseDown(e, song) {
     e.stopPropagation();
     dragInfo.current = { id: song.id, startX: e.clientX, startY: e.clientY, origX: song.x, origY: song.y, moved: false };
@@ -1103,33 +1196,30 @@ function PerformPage({ songs, setSongs, edges, session, setSession, onInspect, g
   function opacityFor(id, exempt) {
     if (exempt) return 1;
     if (searchActive) return matches(id) ? 1 : 0.2;
-    if (focusMode === 'reachable' && !tier1.has(id) && !tier2.has(id)) return 0.3;
+    if (focusMode === 'reachable' && !tier1.has(id) && !laterIds.has(id)) return 0.3;
     return 1;
   }
 
-  // ---------------- edge classification + drawing ----------------
+  // ---------------- edge classification + drawing (all solid, no per-edge labels) ----------------
   function classify(e) {
-    if (e.l === fromId && e.lv === fromVer && tier1.has(e.r)) return 'tier1';
-    if (tier1.has(e.l) && tier2.has(e.r)) return 'tier2';
+    if (e.l === fromId && tier1.has(e.r)) return 'next';
+    if (e.l === stagedId && laterIds.has(e.r)) return 'later';
     return 'base';
   }
-  const EDGE_STYLE = { base: { stroke: '#c7c7c7', width: 1.5 }, tier2: { stroke: '#9cc3e8', width: 2 }, tier1: { stroke: '#2a5da3', width: 3 } };
+  const EDGE_STYLE = { base: { stroke: '#c7c7c7', width: 1.5 }, later: { stroke: '#c9bfe0', width: 2.5 }, next: { stroke: '#8b7bb8', width: 3.5 } };
   function mkEdge(e, tier) {
     const c1 = centerOf(songs, e.l), c2 = centerOf(songs, e.r);
-    const yOff = e.id === 'e8' ? 14 : 0; // small nudge so a parallel v2 transition doesn't overlap its v1 sibling
-    const sh = shorten(c1.x, c1.y + yOff, c2.x, c2.y + yOff, 62, 62);
-    const hovered = hoveredEdge === e.id;
+    const sh = shorten(c1.x, c1.y, c2.x, c2.y, 62, 62);
     const st = EDGE_STYLE[tier];
-    return { ...sh, id: e.id, stroke: st.stroke, strokeWidth: hovered ? st.width + 1.5 : st.width, marker: 'url(#arrow-' + tier + ')', e };
+    return { ...sh, id: e.id, stroke: st.stroke, strokeWidth: st.width, marker: 'url(#arrow-' + tier + ')' };
   }
   const transitionEdges = visibleEdges.filter(e => e.type === 'transition');
   const baseEdges = transitionEdges.filter(e => classify(e) === 'base').map(e => mkEdge(e, 'base'));
-  const tier2Edges = transitionEdges.filter(e => classify(e) === 'tier2').map(e => mkEdge(e, 'tier2'));
-  const tier1Edges = transitionEdges.filter(e => classify(e) === 'tier1').map(e => mkEdge(e, 'tier1'));
-  const tooltipEdges = [...baseEdges, ...tier1Edges];
+  const laterEdges = transitionEdges.filter(e => classify(e) === 'later').map(e => mkEdge(e, 'later'));
+  const nextEdges = transitionEdges.filter(e => classify(e) === 'next').map(e => mkEdge(e, 'next'));
 
   // ---------------- the committed plan-path, regardless of whether it follows built content ----------------
-  const chain = hasStarted ? [{ id: session.nowPlayingId, ver: session.nowPlayingVersion }, ...session.queue.map(q2 => ({ id: q2.id, ver: q2.version }))] : [];
+  const chain = hasStarted ? [{ id: session.nowPlayingId }, ...session.queue.map(q2 => ({ id: q2.id }))] : [];
   const planSegments = [];
   for (let i = 0; i < chain.length - 1; i++) {
     const a = chain[i], b = chain[i + 1];
@@ -1137,68 +1227,23 @@ function PerformPage({ songs, setSongs, edges, session, setSession, onInspect, g
     const c1 = centerOf(songs, a.id), c2 = centerOf(songs, b.id);
     const pad1 = a.id === END ? 40 : 62, pad2 = b.id === END ? 40 : 62;
     const sh = shorten(c1.x, c1.y, c2.x, c2.y, pad1, pad2);
-    const { dash, width } = dashForQuality(hopQuality(hop, b.id === END));
-    planSegments.push({ id: 'plan' + i, ...sh, dash, width });
+    planSegments.push({ id: 'plan' + i, ...sh, width: hopWidth(hop, b.id === END) });
   }
 
-  const cueBarPct = Math.round((1 - session.nextCountdown / 34) * 100);
-  const hasQueueHead = session.queue.length > 0;
-  const nowSongData = hasStarted ? songs[session.nowPlayingId] : null;
-  const nowVer = nowSongData ? activeVersion(nowSongData, versionOf) : null;
-  const nowSongLabel = nowSongData ? nowSongData.title : null;
+  const nowSong = hasStarted ? songs[session.nowPlayingId] : null;
+  const cueBarPct = nowSong && nowSong.durationSec ? Math.round((1 - session.timeLeft / nowSong.durationSec) * 100) : 0;
 
-  function togglePlaying() { setSession(prev => ({ ...prev, isPlaying: !prev.isPlaying })); }
-  function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, nowPlayingVersion: null, startMethod: null, queue: [], nextCountdown: 34 })); }
-
-  function confirmPending() {
-    if (pendingKind === 'start') {
-      const pver = verOf(pendingId);
-      setSession(prev => ({
-        ...prev, nowPlayingId: pendingId, nowPlayingVersion: pver, startMethod: pendingStarting,
-        versionOf: { ...prev.versionOf, [pendingId]: pver }, queue: [], isPlaying: true, nextCountdown: 34, setEnded: false,
-      }));
-      setPendingId(null);
-      return;
+  function optionsFor(id) {
+    if (id === END) {
+      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId);
+      return { title: 'End Set', outroEdge };
     }
-    if (pendingKind === 'end') {
-      setSession(prev => ({ ...prev, queue: [...prev.queue, { id: END, ending: pendingEnding }] }));
-      setPendingId(null);
-      return;
-    }
-    const pver = verOf(pendingId);
-    const wasEmpty = session.queue.length === 0;
-    const item = pendingMode === 'transition'
-      ? { id: pendingId, version: pver, mode: 'transition' }
-      : { id: pendingId, version: pver, mode: 'custom', ending: pendingEnding, starting: pendingStarting };
-    setSession(prev => ({ ...prev, queue: [...prev.queue, item], nextCountdown: wasEmpty ? 34 : prev.nextCountdown }));
-    setPendingId(null);
+    const s = songs[id];
+    const transitionEdge = findEdge(e => e.type === 'transition' && e.l === fromId && e.r === id);
+    const introEdge = findEdge(e => e.type === 'intro' && e.r === id);
+    const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId);
+    return { title: s.title, artist: s.artist, transitionEdge, introEdge, outroEdge };
   }
-
-  function optRowClass(available, selected) {
-    return 'opt-row' + (!available ? ' opt-row-disabled' : selected ? ' opt-row-selected' : '');
-  }
-  function chooseEnding(ending) { setPendingMode('custom'); setPendingEnding(ending); }
-  function chooseStarting(starting) { setPendingMode('custom'); setPendingStarting(starting); }
-
-  // pending-panel derived bits
-  let pendingView = null;
-  if (pendingId) {
-    if (pendingKind === 'end') {
-      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId && e.lv === fromVer);
-      pendingView = { kind: 'end', title: 'End Set', subtitle: 'stop the set here — no next song needed', outroEdge };
-    } else if (pendingKind === 'start') {
-      const s = songs[pendingId]; const pver = verOf(pendingId);
-      const introEdge = findEdge(e => e.type === 'intro' && e.r === pendingId && e.rv === pver);
-      pendingView = { kind: 'start', title: s.title, subtitle: s.artist, introEdge };
-    } else {
-      const s = songs[pendingId]; const pver = verOf(pendingId);
-      const transitionEdge = findEdge(e => e.type === 'transition' && e.l === fromId && e.lv === fromVer && e.r === pendingId && e.rv === pver);
-      const introEdge = findEdge(e => e.type === 'intro' && e.r === pendingId && e.rv === pver);
-      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId && e.lv === fromVer);
-      pendingView = { kind: 'song', title: s.title, subtitle: s.artist, transitionEdge, introEdge, outroEdge };
-    }
-  }
-  const confirmLabel = pendingView && ({ start: 'Start Set', song: 'Add to Queue', end: 'Queue Ending' })[pendingView.kind];
 
   if (Object.keys(songs).length === 0) {
     return (
@@ -1212,6 +1257,8 @@ function PerformPage({ songs, setSongs, edges, session, setSession, onInspect, g
     );
   }
 
+  const hoveredSong = hoveredId && hoveredId !== END ? songs[hoveredId] : null;
+
   return (
     <div className="page page-perform">
       <div className="toolbar">
@@ -1221,10 +1268,10 @@ function PerformPage({ songs, setSongs, edges, session, setSession, onInspect, g
           <button className={'pill' + (focusMode === 'reachable' ? ' active' : '')} onClick={() => setFocusMode('reachable')}>Reachable now</button>
         </div>
         <div className="legend">
-          <span><i className="swatch swatch-dot" />now / queued</span>
-          <span><i className="swatch swatch-ring" />built path available</span>
-          <span><i className="swatch swatch-dash" />two hops out</span>
-          <span><i className="swatch swatch-line" />your planned route</span>
+          <span><i className="swatch swatch-dot" />playing</span>
+          <span><i className="swatch swatch-next" />next</span>
+          <span><i className="swatch swatch-later" />later</span>
+          <span><i className="swatch swatch-line" />planned</span>
         </div>
         <div className="zoom-controls">
           <button className="zoom-btn" onClick={() => setZoom(z => clamp(Math.round((z - 0.1) * 10) / 10, 0.6, 1.4))}>−</button>
@@ -1233,264 +1280,363 @@ function PerformPage({ songs, setSongs, edges, session, setSession, onInspect, g
         </div>
       </div>
 
-      <div className="canvas-wrap">
-        <div className="canvas-scroll">
-          <div className="canvas-sizer" style={{ width: Math.round(1400 * zoom), height: Math.round(820 * zoom) }}>
-            <div className="canvas-scale" style={{ transform: 'scale(' + zoom + ')' }}>
-              <svg width="1400" height="820" className="edge-svg">
-                <defs>
-                  <marker id="arrow-base" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c7c7c7" /></marker>
-                  <marker id="arrow-tier2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9cc3e8" /></marker>
-                  <marker id="arrow-tier1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2a5da3" /></marker>
-                  <marker id="arrow-plan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#131313" /></marker>
-                </defs>
-                {[...baseEdges, ...tier2Edges, ...tier1Edges].map(be => (
-                  <g key={be.id}>
-                    <line x1={be.x1} y1={be.y1} x2={be.x2} y2={be.y2} stroke={be.stroke} strokeWidth={be.strokeWidth} markerEnd={be.marker} />
-                    <line x1={be.x1} y1={be.y1} x2={be.x2} y2={be.y2} stroke="transparent" strokeWidth={16} className="edge-hit" onMouseEnter={() => setHoveredEdge(be.id)} onMouseLeave={() => setHoveredEdge(null)} />
-                  </g>
-                ))}
-                {planSegments.map(ps => (
-                  <line key={ps.id} x1={ps.x1} y1={ps.y1} x2={ps.x2} y2={ps.y2} stroke="#131313" strokeWidth={ps.width} strokeDasharray={ps.dash} markerEnd="url(#arrow-plan)" />
-                ))}
-              </svg>
+      <div className="perform-layout">
+        <div className="graph-pane">
+          <div className="canvas-wrap">
+            <div className="canvas-scroll">
+              <div className="canvas-sizer" style={{ width: Math.round(1400 * zoom), height: Math.round(820 * zoom) }}>
+                <div className="canvas-scale" style={{ transform: 'scale(' + zoom + ')' }}>
+                  <svg width="1400" height="820" className="edge-svg">
+                    <defs>
+                      <marker id="arrow-base" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c7c7c7" /></marker>
+                      <marker id="arrow-later" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c9bfe0" /></marker>
+                      <marker id="arrow-next" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8b7bb8" /></marker>
+                      <marker id="arrow-plan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#131313" /></marker>
+                    </defs>
+                    {[...baseEdges, ...laterEdges, ...nextEdges].map(be => (
+                      <line key={be.id} x1={be.x1} y1={be.y1} x2={be.x2} y2={be.y2} stroke={be.stroke} strokeWidth={be.strokeWidth} markerEnd={be.marker} />
+                    ))}
+                    {planSegments.map(ps => (
+                      <line key={ps.id} x1={ps.x1} y1={ps.y1} x2={ps.x2} y2={ps.y2} stroke="#131313" strokeWidth={ps.width} markerEnd="url(#arrow-plan)" />
+                    ))}
+                  </svg>
 
-              {tooltipEdges.map(be => (be.e.bpmDelta || be.e.keyChange || be.e.remix) && (
-                <div key={'tt-' + be.id} className="edge-tooltip" style={{ left: (be.x1 + be.x2) / 2 - 50, top: (be.y1 + be.y2) / 2 - 10 }}>
-                  {!!be.e.bpmDelta && <span className="tag tag-accent">{fmtSignedBpm(be.e.bpmDelta)}</span>}
-                  {be.e.keyChange && <span className="tag tag-good">key</span>}
-                  {be.e.remix && <span className="tag tag-purple">remix</span>}
-                </div>
-              ))}
-
-              {Object.values(songs).map(s => {
-                const isNow = s.id === session.nowPlayingId;
-                const qIdx = session.queue.findIndex(q2 => q2.id === s.id);
-                const isQueued = qIdx >= 0;
-                const isTier1 = !isNow && !isQueued && tier1.has(s.id);
-                const isTier2 = !isNow && !isQueued && !isTier1 && tier2.has(s.id);
-                const dark = isNow || isQueued;
-                const av = activeVersion(s, versionOf);
-                const { inCount, outCount } = inOutCounts(edges, s.id, av.id);
-                const cls = ['node-card', dark && 'node-dark', isNow && 'node-now', isTier1 && 'node-tier1', isTier2 && 'node-tier2'].filter(Boolean).join(' ');
-                return (
-                  <div
-                    key={s.id}
-                    className={cls}
-                    style={{ left: s.x, top: s.y, width: CARD_W, opacity: opacityFor(s.id, dark), zIndex: isNow ? 4 : isQueued ? 3 : isTier1 ? 2 : 1 }}
-                    onMouseDown={(e) => onNodeMouseDown(e, s)}
-                  >
-                    {(isNow || isQueued) && <div className="node-badge">{isNow ? 'NOW' : qIdx + 1}</div>}
-                    <button className="node-inspect-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => onInspect(s.id)}>i</button>
-                    <div className="node-title">{s.title}</div>
-                    <div className="node-artist">{s.artist}</div>
-                    <div className="node-tags">
-                      <span className="tag tag-accent">{av.bpm} BPM</span>
-                      <span className="tag tag-good">{av.key}</span>
-                    </div>
-                    {s.versions.length > 1 && (
-                      <div className="node-versions">
-                        {s.versions.map(v => (
-                          <button
-                            key={v.id}
-                            className={'version-chip' + (v.id === av.id ? ' active' : '')}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={() => setSession(prev => ({ ...prev, versionOf: { ...prev.versionOf, [s.id]: v.id } }))}
-                          >{v.label}</button>
-                        ))}
+                  {Object.values(songs).map(s => {
+                    const isNow = s.id === session.nowPlayingId;
+                    const qIdx = session.queue.findIndex(q2 => q2.id === s.id);
+                    const isQueued = qIdx >= 0;
+                    const isNext = !isNow && !isQueued && tier1.has(s.id);
+                    const isLater = !isNow && !isQueued && !isNext && laterIds.has(s.id);
+                    const dark = isNow || isQueued;
+                    const { inCount, outCount } = inOutCounts(edges, s.id);
+                    const cls = ['node-card', dark && 'node-dark', isNow && 'node-now', isNext && 'node-tier1', isLater && 'node-tier2', hoveredId === s.id && 'node-hovered'].filter(Boolean).join(' ');
+                    return (
+                      <div
+                        key={s.id}
+                        className={cls}
+                        style={{ left: s.x, top: s.y, width: CARD_W, opacity: opacityFor(s.id, dark) }}
+                        onMouseDown={(e) => onNodeMouseDown(e, s)}
+                        onMouseEnter={() => onNodeEnter(s.id)}
+                        onMouseLeave={onNodeLeave}
+                      >
+                        {(isNow || isQueued) && <div className="node-badge">{isNow ? 'NOW' : qIdx + 1}</div>}
+                        <div className="node-title">{s.title}</div>
+                        <div className="node-artist">{s.artist}</div>
+                        <div className="node-tags">
+                          <span className="tag tag-accent">{s.bpm} BPM</span>
+                          <span className="tag tag-good">{s.key}</span>
+                        </div>
+                        <div className="node-io">↓{inCount} ↑{outCount}</div>
                       </div>
-                    )}
-                    <div className="node-inout">{inCount} in · {outCount} out</div>
-                  </div>
-                );
-              })}
+                    );
+                  })}
 
-              {hasStarted && (() => {
-                const endIdx = session.queue.findIndex(q2 => q2.id === END);
-                const endQueued = endIdx >= 0;
-                const endTier1 = !endQueued && tier1.has(END);
-                const cls = ['end-node', endQueued && 'node-dark', endTier1 && 'node-tier1'].filter(Boolean).join(' ');
-                const opacity = (focusMode === 'reachable' && !endTier1 && !endQueued) ? 0.3 : 1;
-                return (
-                  <div className={cls} style={{ left: END_NODE.x, top: END_NODE.y, width: END_NODE.w, opacity }} onClick={() => handleNodeClick(END)}>
-                    {endQueued && <div className="node-badge">{endIdx + 1}</div>}
-                    <div className="end-node-title"><Icon path={<rect x="5" y="5" width="14" height="14" />} filled size={11} /> End Set</div>
-                    <div className="end-node-hint">{endQueued ? 'queued to close the set' : 'end here — no transition needed'}</div>
-                  </div>
-                );
-              })()}
+                  {hasStarted && (() => {
+                    const endIdx = session.queue.findIndex(q2 => q2.id === END);
+                    const endQueued = endIdx >= 0;
+                    const endNext = !endQueued && tier1.has(END);
+                    const cls = ['end-node', endQueued && 'node-dark', endNext && 'node-tier1'].filter(Boolean).join(' ');
+                    const opacity = (focusMode === 'reachable' && !endNext && !endQueued) ? 0.3 : 1;
+                    return (
+                      <div className={cls} style={{ left: END_NODE.x, top: END_NODE.y, width: END_NODE.w, opacity }}
+                        onMouseEnter={() => onNodeEnter(END)} onMouseLeave={onNodeLeave}
+                        onClick={() => hasStarted && stage(END)}>
+                        {endQueued && <div className="node-badge">{endIdx + 1}</div>}
+                        <div className="end-node-title"><Icon path={<rect x="5" y="5" width="14" height="14" />} filled size={11} /> End Set</div>
+                        <div className="end-node-hint">{endQueued ? 'queued' : 'stop here'}</div>
+                      </div>
+                    );
+                  })()}
+
+                  {hoveredId && hoveredId !== END && hoveredSong && hasStarted && tier1.has(hoveredId) && (() => {
+                    const opts = optionsFor(hoveredId);
+                    const isStagedHere = stagedId === hoveredId;
+                    return (
+                      <div className="hover-card" style={{ left: clamp(hoveredSong.x + CARD_W + 10, 0, 1400 - 220), top: hoveredSong.y }}
+                        onMouseEnter={() => onNodeEnter(hoveredId)} onMouseLeave={onNodeLeave}>
+                        <div className="hover-card-title">{opts.title}</div>
+                        <div className="hover-card-artist">{opts.artist}</div>
+                        <div className="hover-card-row">
+                          <button className={'hover-toggle' + (isStagedHere ? ' active' : '')} onClick={() => stage(hoveredId)}>Next</button>
+                          <button className="hover-toggle" disabled={!isStagedHere} onClick={commitStaged}>Confirm</button>
+                        </div>
+                        {isStagedHere && (
+                          <div className="hover-card-row">
+                            <button className={'hover-toggle' + (stagedMode === 'transition' ? ' active' : '')} disabled={!opts.transitionEdge} onClick={() => setStagedMode('transition')}>Trans.</button>
+                            <button className={'hover-toggle' + (stagedMode === 'cut' ? ' active' : '')} onClick={() => setStagedMode('cut')}>Cut</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="transport-card">
-          <div className="section-label">Now Playing</div>
-          {!hasStarted ? (
-            <div className="hint-text">nothing playing — click any song on the graph to start the set</div>
-          ) : (
-            <>
-              <div className="transport-row">
-                <button className="play-btn" onClick={togglePlaying}>
-                  <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={14} />
-                </button>
-                <div className="transport-text">
-                  <div className="now-title">{nowSongLabel}</div>
-                  <div className="now-artist">{nowSongData.artist}</div>
-                </div>
-              </div>
-              {nowVer && (
-                <div className="tag-row">
-                  <span className="tag tag-accent">{nowVer.bpm} BPM</span>
-                  <span className="tag tag-good">{nowVer.key}</span>
-                </div>
-              )}
-              {hasQueueHead && (
-                <div className="progress-block">
-                  <div className="progress-track"><div className="progress-fill" style={{ width: cueBarPct + '%' }} /></div>
-                  <div className="progress-label">next move in <span className="mono-num">{fmtTime(session.nextCountdown)}</span></div>
-                </div>
-              )}
-              {!hasQueueHead && <div className="hint-text">nothing queued — click a highlighted node on the graph</div>}
-            </>
-          )}
-          {session.setEnded && (
-            <div className="ended-banner">
-              <span>— Set ended —</span>
-              <button className="btn btn-primary btn-sm" onClick={resumeSet}>Start a new set</button>
-            </div>
-          )}
-        </div>
+        <SequencePane
+          songs={songs} session={session} venueName={venueName}
+          hasStarted={hasStarted} nowSong={nowSong} cueBarPct={cueBarPct}
+          tier1={tier1} laterIds={laterIds} stagedId={stagedId} stagedMode={stagedMode} stagedEnding={stagedEnding} stagedStarting={stagedStarting}
+          startingSet={startingSet} setStartingSet={setStartingSet}
+          onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onStartSet={startSet}
+          onStage={stage} onCommitStaged={commitStaged}
+          onSetStagedMode={setStagedMode} onSetStagedEnding={setStagedEnding} onSetStagedStarting={setStagedStarting}
+          optionsFor={optionsFor} goAddAudio={goAddAudio}
+        />
+      </div>
+    </div>
+  );
+}
 
-        <div className="queue-strip">
-          <div className="queue-strip-label">Queue</div>
-          {!hasStarted ? (
-            <div className="hint-text queue-empty-hint">start the set to begin building a queue</div>
-          ) : (
-            <>
-              <div className="queue-chip queue-chip-now">
-                <div className="queue-chip-title">{nowSongLabel}</div>
-                <div className="queue-chip-sub">playing now</div>
-              </div>
-              {session.queue.map((qi, i) => {
-                const label = qi.id === END ? 'End Set' : songs[qi.id] ? songs[qi.id].title : '(deleted)';
-                const sub = qi.id === END ? hopSummary(qi) : (songs[qi.id] ? songs[qi.id].artist + ' · ' + hopSummary(qi) : '');
-                return (
-                  <React.Fragment key={qi.id + i}>
-                    <span className="queue-arrow">→</span>
-                    <div className={'queue-chip' + (i === 0 ? ' queue-chip-head' : '')}>
-                      <div>
-                        <div className="queue-chip-title">{label}</div>
-                        <div className="queue-chip-sub">{sub}</div>
-                      </div>
-                      <button className="queue-remove" onClick={() => setSession(prev => ({ ...prev, queue: prev.queue.slice(0, i) }))}>✕</button>
-                    </div>
-                  </React.Fragment>
-                );
-              })}
-              {session.queue.length === 0 && <div className="hint-text queue-empty-hint">nothing queued yet — click a highlighted node</div>}
-            </>
-          )}
-        </div>
+// =====================================================================================
+// Sequence pane — persistent, always-visible hard-start/hard-stop/transition controls.
+// Two lists: Next (one hop from Playing) and Later (one hop from whatever's staged in
+// Next) — pick in Next, preview Later, confirm, repeat.
+// =====================================================================================
 
-        {pendingView && (
-          <div className="pending-panel">
-            <div className="pending-head">
-              <div className="pending-title">{pendingView.title}</div>
-              <button className="icon-btn icon-btn-dark" onClick={() => setPendingId(null)}><Icon path={ICONS.close} size={12} /></button>
-            </div>
-            <div className="pending-subtitle">{pendingView.kind === 'start' ? 'start the set with this' : pendingView.subtitle}</div>
+function SequencePane({
+  songs, session, venueName, hasStarted, nowSong, cueBarPct,
+  tier1, laterIds, stagedId, stagedMode, stagedEnding, stagedStarting,
+  startingSet, setStartingSet, onTogglePlaying, onResumeSet, onStartSet,
+  onStage, onCommitStaged, onSetStagedMode, onSetStagedEnding, onSetStagedStarting,
+  optionsFor, goAddAudio,
+}) {
+  const [startPickId, setStartPickId] = useState(null);
+  const [startStarting, setStartStarting] = useState('cut');
 
-            {pendingView.kind === 'song' && (
-              <>
-                <div className={optRowClass(!!pendingView.transitionEdge, pendingMode === 'transition')} onClick={() => pendingView.transitionEdge && setPendingMode('transition')}>
-                  <div className="opt-row-main">
-                    <Icon path={ICONS.swap} size={15} />
-                    <span className="opt-row-label">Transition</span>
-                    {pendingView.transitionEdge && !!pendingView.transitionEdge.bpmDelta && <span className="tag tag-accent tag-on-dark">{fmtSignedBpm(pendingView.transitionEdge.bpmDelta)}</span>}
-                    {pendingView.transitionEdge && pendingView.transitionEdge.keyChange && <span className="tag tag-good tag-on-dark">key change</span>}
-                    {pendingView.transitionEdge && pendingView.transitionEdge.remix && <span className="tag tag-purple tag-on-dark">remix</span>}
-                  </div>
-                  {!pendingView.transitionEdge && <div className="opt-row-note">no transition built yet — <a href="#" onClick={(e) => { e.preventDefault(); goAddAudio(); }}>build one</a></div>}
-                </div>
+  const nextRows = Array.from(tier1).map(id => ({ id, ...optionsFor(id) }));
+  const laterRows = stagedId ? Array.from(laterIds).map(id => ({ id, ...optionsFor(id) })) : [];
 
-                <div className="or-divider"><span>or build it manually</span></div>
-
-                <div className="section-label section-label-dark">How {nowSongLabel} ends</div>
-                <div className="opt-pair">
-                  <div className={optRowClass(true, pendingMode === 'custom' && pendingEnding === 'natural')} onClick={() => chooseEnding('natural')}>Play out naturally</div>
-                  <div className={optRowClass(!!pendingView.outroEdge, pendingMode === 'custom' && pendingEnding === 'outro')} onClick={() => pendingView.outroEdge && chooseEnding('outro')}>Use outro fragment</div>
-                </div>
-
-                <div className="section-label section-label-dark">How {pendingView.title} starts</div>
-                <div className="opt-pair">
-                  <div className={optRowClass(true, pendingMode === 'custom' && pendingStarting === 'cold')} onClick={() => chooseStarting('cold')}>Cold cut</div>
-                  <div className={optRowClass(!!pendingView.introEdge, pendingMode === 'custom' && pendingStarting === 'intro')} onClick={() => pendingView.introEdge && chooseStarting('intro')}>Play its intro</div>
-                </div>
-              </>
-            )}
-
-            {pendingView.kind === 'start' && (
-              <>
-                <div className="section-label section-label-dark">How {pendingView.title} starts</div>
-                <div className={optRowClass(true, pendingStarting === 'cold')} onClick={() => setPendingStarting('cold')}><span className="opt-row-label">Cold cut</span></div>
-                <div className={optRowClass(!!pendingView.introEdge, pendingStarting === 'intro')} onClick={() => pendingView.introEdge && setPendingStarting('intro')}>
-                  <span className="opt-row-label">Play its intro</span>
-                  {!pendingView.introEdge && <div className="opt-row-note">no intro built yet — <a href="#" onClick={(e) => { e.preventDefault(); goAddAudio(); }}>build one</a></div>}
-                </div>
-              </>
-            )}
-
-            {pendingView.kind === 'end' && (
-              <>
-                <div className="section-label section-label-dark">How {nowSongLabel} ends</div>
-                <div className={optRowClass(true, pendingEnding === 'natural')} onClick={() => setPendingEnding('natural')}><span className="opt-row-label">Play out naturally</span></div>
-                <div className={optRowClass(!!pendingView.outroEdge, pendingEnding === 'outro')} onClick={() => pendingView.outroEdge && setPendingEnding('outro')}>
-                  <span className="opt-row-label">Use outro fragment</span>
-                  {!pendingView.outroEdge && <div className="opt-row-note">no outro built yet — <a href="#" onClick={(e) => { e.preventDefault(); goAddAudio(); }}>build one</a></div>}
-                </div>
-              </>
-            )}
-
-            <div className="pending-actions">
-              <button className="btn btn-accent" onClick={confirmPending}>{confirmLabel}</button>
-            </div>
+  function Row({ row, isEnd, isStaged, onClick, showToggles }) {
+    return (
+      <div className={'seq-row' + (isStaged ? ' seq-row-staged' : '')} onClick={onClick}>
+        <div className="seq-row-main">
+          <div className="seq-row-text">
+            <div className="seq-row-title">{row.title}</div>
+            {!isEnd && <div className="seq-row-artist">{row.artist}</div>}
           </div>
+          {!isEnd && <span className="seq-row-countdown mono-num">{fmtTime(session.timeLeft)}</span>}
+        </div>
+        {showToggles && (
+          <div className="seq-row-toggles">
+            {!isEnd ? (
+              <>
+                <button className={'seq-toggle' + (stagedMode === 'transition' ? ' active' : '')} disabled={!row.transitionEdge}
+                  onClick={(e) => { e.stopPropagation(); onSetStagedMode('transition'); }}>Transition</button>
+                <button className={'seq-toggle' + (stagedMode === 'cut' && stagedStarting === 'cut' ? ' active' : '')}
+                  onClick={(e) => { e.stopPropagation(); onSetStagedMode('cut'); onSetStagedStarting('cut'); }}>Cut</button>
+                <button className={'seq-toggle' + (stagedMode === 'cut' && stagedStarting === 'intro' ? ' active' : '')} disabled={!row.introEdge}
+                  onClick={(e) => { e.stopPropagation(); onSetStagedMode('cut'); onSetStagedStarting('intro'); }}>Intro</button>
+              </>
+            ) : (
+              <>
+                <button className={'seq-toggle' + (stagedEnding === 'cut' ? ' active' : '')}
+                  onClick={(e) => { e.stopPropagation(); onSetStagedEnding('cut'); }}>Cut</button>
+                <button className={'seq-toggle' + (stagedEnding === 'outro' ? ' active' : '')} disabled={!row.outroEdge}
+                  onClick={(e) => { e.stopPropagation(); onSetStagedEnding('outro'); }}>Outro</button>
+              </>
+            )}
+            <button className="btn btn-accent btn-xs" onClick={(e) => { e.stopPropagation(); onCommitStaged(); }}>Set</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="sequence-pane">
+      <div className="seq-scroll">
+        <div className="seq-venue">{venueName || 'Untitled session'}</div>
+
+        {!hasStarted ? (
+          <div className="seq-start-card">
+            <div className="section-label">Start the set</div>
+            <SongPicker songs={songs} value={startPickId} onChange={setStartPickId} placeholder="Search songs…" />
+            {startPickId && (
+              <>
+                <div className="seq-row-toggles" style={{ marginTop: 9 }}>
+                  <button className={'seq-toggle' + (startStarting === 'cut' ? ' active' : '')} onClick={() => setStartStarting('cut')}>Cut</button>
+                  <button className={'seq-toggle' + (startStarting === 'intro' ? ' active' : '')} onClick={() => setStartStarting('intro')}>Intro</button>
+                </div>
+                <button className="btn btn-primary" style={{ width: '100%', marginTop: 9 }} onClick={() => onStartSet(startPickId, startStarting)}>Start playing</button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="seq-now-card">
+            <div className="section-label section-label-dark">Playing</div>
+            <div className="seq-now-row">
+              <button className="seq-play-btn" onClick={onTogglePlaying}>
+                <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={14} />
+              </button>
+              <div className="seq-now-text">
+                <div className="seq-now-title">{nowSong.title}</div>
+                <div className="seq-now-artist">{nowSong.artist}</div>
+              </div>
+            </div>
+            <div className="seq-now-tags">
+              <span className="tag">{nowSong.bpm} BPM</span>
+              <span className="tag">{nowSong.key}</span>
+            </div>
+            <div className="seq-countdown-track"><div className="seq-countdown-fill" style={{ width: cueBarPct + '%' }} /></div>
+            <div className="seq-countdown-label mono-num">{fmtTime(session.timeLeft)} left to cue</div>
+            <button className="btn seq-endset-btn" onClick={() => onStage(END)}>End Set</button>
+          </div>
+        )}
+
+        {session.setEnded && (
+          <div className="success-note">
+            <span>Set ended.</span>
+            <button className="btn btn-primary btn-sm" onClick={onResumeSet}>Start a new set</button>
+          </div>
+        )}
+
+        {hasStarted && !session.setEnded && (
+          <>
+            <div>
+              <div className="seq-list-title">Next</div>
+              <div className="seq-list">
+                {nextRows.map(row => (
+                  <Row key={row.id} row={row} isEnd={row.id === END} isStaged={stagedId === row.id}
+                    showToggles={stagedId === row.id} onClick={() => onStage(row.id)} />
+                ))}
+                {nextRows.length === 0 && <div className="seq-empty">nothing built out of this song yet</div>}
+              </div>
+            </div>
+
+            <div>
+              <div className="seq-list-title">Later</div>
+              <div className="seq-list">
+                {laterRows.map(row => (
+                  <Row key={row.id} row={row} isEnd={false} isStaged={false} showToggles={false} onClick={() => {}} />
+                ))}
+                {!stagedId && <div className="seq-empty">pick something in Next to preview what follows it</div>}
+                {stagedId && laterRows.length === 0 && <div className="seq-empty">nothing built past that pick yet</div>}
+              </div>
+            </div>
+
+            {session.queue.length > 0 && (
+              <div>
+                <div className="seq-list-title">Path</div>
+                <div className="seq-path">
+                  {session.queue.map((q, i) => (
+                    <React.Fragment key={q.id + i}>
+                      <span className="seq-path-arrow">→</span>
+                      <span className="seq-path-chip">{q.id === END ? 'End' : (songs[q.id] ? songs[q.id].title : '(deleted)')}</span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 }
 // =====================================================================================
-// Library — a sortable, searchable table over every song in the crate.
+// Library — a flat, searchable accordion. Click a row to see its built pieces and edit
+// its details inline; no separate floating panel.
 // =====================================================================================
 
-function LibraryPage({ songs, edges, session, onInspect, selectedSongId, goUpload }) {
+function LibraryRow({ row, song, edges, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, onVerifyEdge }) {
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(song.title);
+  const [draftArtist, setDraftArtist] = useState(song.artist);
+  const [draftBpm, setDraftBpm] = useState(String(song.bpm));
+  const [draftKey, setDraftKey] = useState(song.key);
+
+  function saveEdits() {
+    const bpmNum = Number(draftBpm);
+    onUpdateSong(song.id, {
+      title: draftTitle.trim() || song.title, artist: draftArtist.trim() || song.artist,
+      bpm: Number.isFinite(bpmNum) && bpmNum > 0 ? bpmNum : song.bpm, key: draftKey.trim() || song.key,
+    });
+    setEditing(false);
+  }
+  function destText(e) {
+    if (e.type === 'outro') return 'ends set';
+    if (e.type === 'intro') return 'cold-open';
+    const other = e.l === song.id ? e.r : e.l;
+    return (e.l === song.id ? '→ ' : '← ') + (row.songs && row.songs[other] ? row.songs[other].title : '');
+  }
+  function labelOf(e) { return e.type === 'outro' ? 'Outro' : e.type === 'intro' ? 'Intro' : 'Transition'; }
+  const ownEdges = edges.filter(e => e.l === song.id || e.r === song.id);
+
+  function confirmDelete() {
+    if (window.confirm('Delete "' + song.title + '"? This also removes every transition/intro/outro that touches it.')) onDeleteSong(song.id);
+  }
+
+  return (
+    <div className={'lib-row' + (open ? ' lib-row-open' : '')}>
+      <div className="lib-row-head" onClick={onToggle}>
+        <span className="lib-chevron"><Icon path={ICONS.chevron} size={13} /></span>
+        <div className="lib-title-wrap">
+          <span className="lib-title">{row.title}</span>
+          <span className="lib-artist">{row.artist}</span>
+        </div>
+        <div className="lib-tags">
+          <span className="tag tag-accent">{row.bpm}</span>
+          <span className="tag tag-good">{row.key}</span>
+          {row.isDeadEnd && <span className="tag tag-warn">dead end</span>}
+        </div>
+        <div className="lib-io mono-num">↓{row.inCount} ↑{row.outCount}</div>
+      </div>
+      {open && (
+        <div className="lib-body">
+          {!editing ? (
+            <div className="drawer-actions-row" style={{ display: 'flex', gap: 7 }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>Edit details</button>
+              <button className="btn btn-danger btn-sm" onClick={confirmDelete}>Delete song</button>
+            </div>
+          ) : (
+            <div className="lib-edit-row">
+              <Field label="Title"><input className="input" value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} /></Field>
+              <Field label="Artist"><input className="input" value={draftArtist} onChange={(e) => setDraftArtist(e.target.value)} /></Field>
+              <Field label="BPM"><input className="input" value={draftBpm} onChange={(e) => setDraftBpm(e.target.value)} /></Field>
+              <Field label="Key"><input className="input" value={draftKey} onChange={(e) => setDraftKey(e.target.value)} /></Field>
+              <button className="btn btn-primary btn-sm" onClick={saveEdits}>Save</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>Cancel</button>
+            </div>
+          )}
+          <div>
+            <div className="section-label">Built audio</div>
+            <div className="lib-pieces">
+              {ownEdges.map(e => (
+                <div key={e.id} className="drawer-frag">
+                  <div className="drawer-frag-row">
+                    <span className="drawer-frag-label">{labelOf(e)}</span>
+                    {e.verified && <span className="dot-verified" />}
+                    <div className="drawer-frag-actions">
+                      {!e.verified && <button className="btn btn-ghost btn-xs" onClick={() => onVerifyEdge(e.id)}>Preview &amp; verify</button>}
+                      <button className="btn btn-ghost btn-xs" onClick={() => { if (window.confirm('Remove this ' + labelOf(e).toLowerCase() + '?')) onDeleteEdge(e.id); }}>Remove</button>
+                    </div>
+                  </div>
+                  <div className="drawer-frag-dest">{destText(e)}</div>
+                </div>
+              ))}
+              {ownEdges.length === 0 && <div className="empty-note-sm">nothing built for this song yet</div>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onVerifyEdge }) {
   const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState('title');
-  const [sortDir, setSortDir] = useState('asc');
+  const [openId, setOpenId] = useState(null);
 
   const totalSongs = Object.keys(songs).length;
-  const rows = useMemo(() => libraryRows(songs, edges, session.versionOf, search, sortKey, sortDir), [songs, edges, session.versionOf, search, sortKey, sortDir]);
-
-  function toggleSort(key) {
-    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
-    else { setSortKey(key); setSortDir('asc'); }
-  }
-  function sortHeader(key, label) {
-    const active = sortKey === key;
-    return (
-      <th className="th-sortable" onClick={() => toggleSort(key)}>
-        {label} {active ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-      </th>
-    );
-  }
+  const rows = useMemo(() => libraryRows(songs, edges, search, 'title', 'asc').map(r => ({ ...r, songs })), [songs, edges, search]);
 
   if (totalSongs === 0) {
     return (
       <div className="page page-scroll">
-        <div className="page-header">
-          <div className="page-title">Library</div>
-        </div>
+        <div className="page-header"><div className="page-title">Library</div></div>
         <div className="empty-state">
           <div className="empty-state-title">No songs yet</div>
           <div className="empty-state-sub">Upload your first track to start building your library.</div>
@@ -1506,42 +1652,24 @@ function LibraryPage({ songs, edges, session, onInspect, selectedSongId, goUploa
         <div className="page-title">Library</div>
         <button className="btn btn-primary" onClick={goUpload}>+ New song</button>
       </div>
-      <div className="page-sub">Every song in the crate. Search, sort, and click a row to inspect its built audio and versions.</div>
-
+      <div className="page-sub">Every song in the crate. Click a row for its built transitions and to edit it.</div>
       <input className="input" style={{ maxWidth: 320, marginBottom: 16 }} placeholder="Find a song or artist…" value={search} onChange={(e) => setSearch(e.target.value)} />
 
-      <table className="table">
-        <thead>
-          <tr>
-            {sortHeader('title', 'Title')}
-            {sortHeader('artist', 'Artist')}
-            {sortHeader('bpm', 'BPM')}
-            {sortHeader('key', 'Key')}
-            <th>Versions</th><th>In</th><th>Out</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(r => (
-            <tr key={r.id} className={'table-row' + (selectedSongId === r.id ? ' table-row-selected' : '')} onClick={() => onInspect(r.id)}>
-              <td className="td-strong">{r.title}</td>
-              <td className="td-muted">{r.artist}</td>
-              <td><span className="tag tag-accent">{r.bpm}</span></td>
-              <td><span className="tag tag-good">{r.key}</span></td>
-              <td className="td-muted">{r.versions}</td>
-              <td className="td-muted">{r.inCount}</td>
-              <td className="td-muted">{r.outCount}</td>
-              <td>{r.isDeadEnd && <span className="tag tag-warn">dead end</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div>
+        {rows.map(r => (
+          <LibraryRow key={r.id} row={r} song={songs[r.id]} edges={edges} open={openId === r.id}
+            onToggle={() => setOpenId(id => (id === r.id ? null : r.id))}
+            onUpdateSong={onUpdateSong} onDeleteSong={onDeleteSong} onDeleteEdge={onDeleteEdge} onVerifyEdge={onVerifyEdge} />
+        ))}
+      </div>
       {rows.length === 0 && <div className="empty-note">no songs match "{search}"</div>}
     </div>
   );
 }
 
 // =====================================================================================
-// Upload Song — add a brand-new master to the library.
+// Upload Song — add a brand-new master to the library. A remix is just another song
+// here (its own bpm/key/id) — there's no separate "version" concept anymore.
 // =====================================================================================
 
 function UploadSongPage({ onAddSong, onViewSong, existingCount }) {
@@ -1551,18 +1679,23 @@ function UploadSongPage({ onAddSong, onViewSong, existingCount }) {
   const [key, setKey] = useState('');
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState(null); // { id, title } | null
+  const [saved, setSaved] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
-  function save() {
+  async function save() {
     if (!title.trim()) { setError('Give the song a title.'); return; }
     const bpmNum = Number(bpm);
     if (bpm.trim() && (!Number.isFinite(bpmNum) || bpmNum <= 0)) { setError('BPM should be a positive number.'); return; }
     setError('');
+    setUploading(true);
+    const audio = await uploadAudioIfConfigured(file);
+    setUploading(false);
     const id = uid('s');
     const song = {
       id, title: title.trim(), artist: artist.trim() || 'Unknown',
       x: 60 + (existingCount * 47) % 1180, y: 60 + (existingCount * 83) % 700,
-      versions: [{ id: 'v1', label: 'Original', bpm: bpmNum || 120, key: key.trim() || '—' }],
+      bpm: bpmNum || 120, key: key.trim() || '—',
+      durationSec: mockDuration(title + artist), audioUrl: audio.audioUrl || null,
     };
     onAddSong(song);
     setSaved({ id, title: song.title });
@@ -1572,28 +1705,20 @@ function UploadSongPage({ onAddSong, onViewSong, existingCount }) {
   return (
     <div className="page page-scroll page-narrow">
       <div className="page-title">Upload Song</div>
-      <div className="page-sub">Add a new master to the library. Full-body differences (instrumental, acapella, remaster) are their own song — use Add Audio → Remix instead if this is just a new version.</div>
+      <div className="page-sub">Add a new master to the library. A remix is just its own song here — give it its own title/BPM/key and connect it with Add Audio like anything else.</div>
 
       <div className="form-card">
-        <Field label="Title">
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Faultline Blue" />
-        </Field>
-        <Field label="Artist">
-          <input className="input" value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="e.g. Nomi Sato" />
-        </Field>
+        <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Faultline Blue" /></Field>
+        <Field label="Artist"><input className="input" value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="e.g. Nomi Sato" /></Field>
         <div className="form-grid-2">
-          <Field label="BPM">
-            <input className="input" value={bpm} onChange={(e) => setBpm(e.target.value)} placeholder="126" inputMode="numeric" />
-          </Field>
-          <Field label="Key">
-            <input className="input" value={key} onChange={(e) => setKey(e.target.value)} placeholder="A min" />
-          </Field>
+          <Field label="BPM"><input className="input" value={bpm} onChange={(e) => setBpm(e.target.value)} placeholder="126" inputMode="numeric" /></Field>
+          <Field label="Key"><input className="input" value={key} onChange={(e) => setKey(e.target.value)} placeholder="A min" /></Field>
         </div>
         <Field label="Master audio">
           <Dropzone file={file} onFile={setFile} hint="drop lossless master (WAV/AIFF/FLAC preferred; MP3 accepted, flagged)" />
         </Field>
         {error && <div className="error-note">{error}</div>}
-        <button className="btn btn-primary btn-self-start" onClick={save}>Add to library</button>
+        <button className="btn btn-primary btn-self-start" onClick={save} disabled={uploading}>{uploading ? 'Uploading…' : 'Add to library'}</button>
         {saved && (
           <div className="success-note">
             <span>Added "{saved.title}" to the library.</span>
@@ -1606,51 +1731,32 @@ function UploadSongPage({ onAddSong, onViewSong, existingCount }) {
 }
 // =====================================================================================
 // Add Audio — drop a produced piece; we detect what it connects and let you confirm.
-// Replaces the old manual "pick a type, pick both sides, generate a sync code" flow —
-// detection now does the matching, so the only controls left are the ones a human
-// actually needs: confirming (or correcting) the match, and how each hop is built.
 // =====================================================================================
 
-function AddAudioPage({ songs, session, onAddEdge, onAddVersion, onViewSong }) {
-  const [mode, setMode] = useState('pair'); // 'pair' | 'remix'
+function AddAudioPage({ songs, onAddEdge, onViewSong }) {
   const [file, setFile] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [detected, setDetected] = useState(false);
-
   const [leftId, setLeftId] = useState(null);
   const [rightId, setRightId] = useState(null);
-  const [remixSongId, setRemixSongId] = useState(null);
-  const [versionLabel, setVersionLabel] = useState('');
-  const [remixBpm, setRemixBpm] = useState('');
-  const [remixKey, setRemixKey] = useState('');
   const [fragLabel, setFragLabel] = useState('');
-
   const [error, setError] = useState('');
-  const [saved, setSaved] = useState(null); // { kind, label, songId }
+  const [saved, setSaved] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   const songIds = Object.keys(songs);
 
   function reset() {
     setFile(null); setAnalyzing(false); setDetected(false);
-    setLeftId(null); setRightId(null); setRemixSongId(null);
-    setVersionLabel(''); setRemixBpm(''); setRemixKey(''); setFragLabel(''); setError('');
+    setLeftId(null); setRightId(null); setFragLabel(''); setError('');
   }
 
   function handleFile(f) {
     setFile(f); setAnalyzing(true); setDetected(false); setSaved(null);
     const seed = f.name + '|' + f.size;
     setTimeout(() => {
-      if (mode === 'pair') {
-        const [a, b] = pickDetectedSongs(songIds, seed, 2);
-        setLeftId(a || null); setRightId(b || null);
-      } else {
-        const [a] = pickDetectedSongs(songIds, seed, 1);
-        setRemixSongId(a || null);
-        if (a && songs[a]) {
-          const v = activeVersion(songs[a], session.versionOf);
-          setRemixBpm(String(v.bpm)); setRemixKey(v.key);
-        }
-      }
+      const [a, b] = pickDetectedSongs(songIds, seed, 2);
+      setLeftId(a || null); setRightId(b || null);
       setAnalyzing(false); setDetected(true);
     }, 700);
   }
@@ -1660,29 +1766,18 @@ function AddAudioPage({ songs, session, onAddEdge, onAddVersion, onViewSong }) {
   const derivedType = leftId && rightId ? 'transition' : rightId ? 'intro' : leftId ? 'outro' : null;
   const cue = detected ? pseudoCuePoints(leftId, rightId) : null;
 
-  function saveEdgeOrVersion() {
-    if (mode === 'remix') {
-      if (!remixSongId) { setError('Pick which song this is a remix of.'); return; }
-      const bpmNum = Number(remixBpm);
-      if (!Number.isFinite(bpmNum) || bpmNum <= 0) { setError('BPM should be a positive number.'); return; }
-      const versionData = { id: uid('v'), label: versionLabel.trim() || 'New Version', bpm: bpmNum, key: remixKey.trim() || '—' };
-      onAddVersion(remixSongId, versionData);
-      setSaved({ kind: 'version', label: versionData.label, songId: remixSongId });
-      reset();
-      return;
-    }
+  async function saveEdge() {
     if (!derivedType) { setError('This needs at least one song — pick a left and/or right side.'); return; }
-    const leftVer = leftId ? activeVersionId(songs[leftId], session.versionOf) : undefined;
-    const rightVer = rightId ? activeVersionId(songs[rightId], session.versionOf) : undefined;
-    const bpmDelta = leftSong && rightSong ? activeVersion(rightSong, session.versionOf).bpm - activeVersion(leftSong, session.versionOf).bpm : undefined;
-    const keyChange = leftSong && rightSong ? activeVersion(leftSong, session.versionOf).key !== activeVersion(rightSong, session.versionOf).key : false;
+    setUploading(true);
+    const audio = await uploadAudioIfConfigured(file);
+    setUploading(false);
     const edge = {
       id: uid('e'), type: derivedType,
-      l: leftId || undefined, lv: leftVer, r: rightId || undefined, rv: rightVer,
-      verified: false, bpmDelta, keyChange, remix: false, label: fragLabel.trim() || undefined,
+      l: leftId || undefined, r: rightId || undefined,
+      verified: false, label: fragLabel.trim() || undefined, audioUrl: audio.audioUrl || null,
     };
     onAddEdge(edge);
-    setSaved({ kind: 'edge', label: derivedType, songId: rightId || leftId });
+    setSaved({ label: derivedType, songId: rightId || leftId });
     reset();
   }
 
@@ -1703,21 +1798,16 @@ function AddAudioPage({ songs, session, onAddEdge, onAddVersion, onViewSong }) {
   return (
     <div className="page page-scroll page-narrow-wide">
       <div className="page-title">Add Audio</div>
-      <div className="page-sub">Drop a produced transition, intro, outro, or remix — we detect the song(s), type, and cue points automatically.</div>
-
-      <div className="pill-group" style={{ marginBottom: 18 }}>
-        <button className={'pill' + (mode === 'pair' ? ' active' : '')} onClick={() => { setMode('pair'); reset(); }}>Transition / Intro / Outro</button>
-        <button className={'pill' + (mode === 'remix' ? ' active' : '')} onClick={() => { setMode('remix'); reset(); }}>Remix (new version)</button>
-      </div>
+      <div className="page-sub">Drop a produced transition, intro, or outro — we detect the song(s), type, and cue points automatically. A remix is a new song (Upload Song), not audio to attach here.</div>
 
       <div className="form-card">
-        <Field label={mode === 'remix' ? 'Remix audio' : 'Produced audio'}>
-          <Dropzone file={file} onFile={handleFile} hint={mode === 'remix' ? 'drop the remixed/edited audio' : 'drop the finished transition, intro, or outro render'} />
+        <Field label="Produced audio">
+          <Dropzone file={file} onFile={handleFile} hint="drop the finished transition, intro, or outro render" />
         </Field>
 
         {analyzing && <div className="hint-text analyzing-hint">Analyzing audio…</div>}
 
-        {detected && mode === 'pair' && (
+        {detected && (
           <>
             <div className="detected-label">Detected</div>
             <div className="pair-grid">
@@ -1735,8 +1825,8 @@ function AddAudioPage({ songs, session, onAddEdge, onAddVersion, onViewSong }) {
               <span className="tag tag-neutral">Type: {typeLabel}</span>
               {leftSong && rightSong && (
                 <>
-                  <span className="tag tag-accent">{activeVersion(leftSong, session.versionOf).bpm} → {activeVersion(rightSong, session.versionOf).bpm} BPM</span>
-                  <span className="tag tag-good">{activeVersion(leftSong, session.versionOf).key} → {activeVersion(rightSong, session.versionOf).key}</span>
+                  <span className="tag tag-accent">{leftSong.bpm} → {rightSong.bpm} BPM</span>
+                  <span className="tag tag-good">{leftSong.key} → {rightSong.key}</span>
                 </>
               )}
             </div>
@@ -1770,34 +1860,12 @@ function AddAudioPage({ songs, session, onAddEdge, onAddVersion, onViewSong }) {
           </>
         )}
 
-        {detected && mode === 'remix' && (
-          <>
-            <div className="detected-label">Detected</div>
-            <Field label="Original song">
-              <SongPicker songs={songs} value={remixSongId} onChange={(id) => {
-                setRemixSongId(id);
-                if (id && songs[id]) { const v = activeVersion(songs[id], session.versionOf); setRemixBpm(String(v.bpm)); setRemixKey(v.key); }
-              }} placeholder="Search songs…" />
-            </Field>
-            <div className="form-grid-3">
-              <Field label="Version name"><input className="input" value={versionLabel} onChange={(e) => setVersionLabel(e.target.value)} placeholder="VIP Remix" /></Field>
-              <Field label="BPM"><input className="input" value={remixBpm} onChange={(e) => setRemixBpm(e.target.value)} /></Field>
-              <Field label="Key"><input className="input" value={remixKey} onChange={(e) => setRemixKey(e.target.value)} /></Field>
-            </div>
-          </>
-        )}
-
         {error && <div className="error-note">{error}</div>}
-
-        {detected && (
-          <button className="btn btn-primary btn-self-start" onClick={saveEdgeOrVersion}>
-            {mode === 'remix' ? 'Add version' : 'Save ' + typeLabel}
-          </button>
-        )}
+        {detected && <button className="btn btn-primary btn-self-start" onClick={saveEdge} disabled={uploading}>{uploading ? 'Uploading…' : 'Save ' + typeLabel}</button>}
 
         {saved && (
           <div className="success-note">
-            <span>{saved.kind === 'version' ? 'Added "' + saved.label + '" as a new version.' : 'Saved — unverified. Preview it from the song panel to verify it.'}</span>
+            <span>Saved — unverified. Preview it from Library to verify it.</span>
             {saved.songId && <button className="btn btn-primary btn-sm" onClick={() => onViewSong(saved.songId)}>View in Library</button>}
           </div>
         )}
@@ -1805,22 +1873,24 @@ function AddAudioPage({ songs, session, onAddEdge, onAddVersion, onViewSong }) {
     </div>
   );
 }
+
 // =====================================================================================
-// Settings — venue name, data reset, and a manual JSON export/import (a stand-in for
-// the eventual Supabase sync — swap these two buttons for real sync calls later).
+// Settings — venue name, data reset, manual JSON backup, and Supabase sync status.
 // =====================================================================================
 
 function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearAll, onRestore }) {
   const [confirmingReset, setConfirmingReset] = useState(false);
   const fileInputRef = useRef(null);
   const [importError, setImportError] = useState('');
+  const syncOn = !!(window.APP_CONFIG && window.APP_CONFIG.SUPABASE_URL && window.APP_CONFIG.SUPABASE_ANON_KEY);
+  const uploadOn = !!(window.APP_CONFIG && window.APP_CONFIG.UPLOAD_WORKER_URL);
 
   function downloadBackup() {
     const data = { songs, edges, session, venueName };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'djflow-backup.json';
+    a.href = url; a.download = 'eskimo-studio-backup.json';
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -1836,7 +1906,7 @@ function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearA
         onRestore(data);
         setImportError('');
       } catch (e) {
-        setImportError('That file doesn\u2019t look like a DJ Flow backup.');
+        setImportError('That file doesn’t look like an Eskimo Studio backup.');
       }
     };
     reader.readAsText(f);
@@ -1845,7 +1915,25 @@ function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearA
   return (
     <div className="page page-scroll page-narrow">
       <div className="page-title">Settings</div>
-      <div className="page-sub">Data lives in this browser for now (localStorage) — this is the seam where Supabase + Cloudflare storage will plug in later.</div>
+      <div className="page-sub">Data always lives in this browser first. See TODO.md to turn on cloud sync + audio storage.</div>
+
+      <div className="section-label">Cloud sync</div>
+      <div className="form-card" style={{ marginBottom: 20 }}>
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-title">Supabase sync</div>
+            <div className="settings-row-sub">{syncOn ? 'Configured — this browser syncs in the background.' : 'Not set up yet — add your project keys at the top of index.html.'}</div>
+          </div>
+          <span className={'tag ' + (syncOn ? 'tag-good' : 'tag-warn')}>{syncOn ? 'ON' : 'OFF'}</span>
+        </div>
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-title">Audio uploads</div>
+            <div className="settings-row-sub">{uploadOn ? 'Configured — dropped files upload to your R2 bucket.' : 'Not set up yet — deploy worker/upload-worker.js and add its URL.'}</div>
+          </div>
+          <span className={'tag ' + (uploadOn ? 'tag-good' : 'tag-warn')}>{uploadOn ? 'ON' : 'OFF'}</span>
+        </div>
+      </div>
 
       <div className="form-card">
         <Field label="Venue / session name">
@@ -1895,163 +1983,13 @@ function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearA
 }
 
 // =====================================================================================
-// Inspect drawer — song detail & curation. Shared by Perform's graph and Library's
-// table so there's exactly one place this logic lives.
-// =====================================================================================
-
-function InspectDrawer({ song, songs, edges, versionOf, linkingId, setLinkingId, onClose, onSetVersion, onVerifyEdge, onDeleteEdge, onUpdateSong, onDeleteSong }) {
-  const [editing, setEditing] = useState(false);
-  const [draftTitle, setDraftTitle] = useState(song.title);
-  const [draftArtist, setDraftArtist] = useState(song.artist);
-  const [draftBpm, setDraftBpm] = useState('');
-  const [draftKey, setDraftKey] = useState('');
-
-  const vid = activeVersionId(song, versionOf);
-  const av = activeVersion(song, versionOf);
-
-  useEffect(() => {
-    setDraftTitle(song.title); setDraftArtist(song.artist);
-    setDraftBpm(String(av.bpm)); setDraftKey(av.key);
-    setEditing(false);
-  }, [song.id, vid]);
-
-  function saveEdits() {
-    const bpmNum = Number(draftBpm);
-    const versions = song.versions.map(v => v.id === vid ? { ...v, bpm: Number.isFinite(bpmNum) && bpmNum > 0 ? bpmNum : v.bpm, key: draftKey.trim() || v.key } : v);
-    onUpdateSong(song.id, { title: draftTitle.trim() || song.title, artist: draftArtist.trim() || song.artist, versions });
-    setEditing(false);
-  }
-
-  function destText(e) {
-    if (e.type === 'outro') return 'ends set';
-    if (e.type === 'intro') return 'cold-open';
-    const other = e.l === song.id ? e.r : e.l;
-    const otherSong = songs[other];
-    return (e.l === song.id ? '\u2192 ' : '\u2190 ') + (otherSong ? otherSong.title : '(deleted song)');
-  }
-  function labelOf(e) { return e.type === 'outro' ? 'Outro' : e.type === 'intro' ? 'Intro' : 'Transition'; }
-
-  const ownTransitions = edges.filter(e => (e.l === song.id && e.lv === vid) || (e.r === song.id && e.rv === vid));
-  const inheritable = edges.filter(e => !e.verified && ((e.l === song.id && e.lv !== vid) || (e.r === song.id && e.rv !== vid)));
-  const linking = linkingId ? edges.find(e => e.id === linkingId) : null;
-
-  function confirmDelete() {
-    if (window.confirm('Delete "' + song.title + '"? This also removes every transition/intro/outro that touches it.')) {
-      onDeleteSong(song.id);
-    }
-  }
-
-  return (
-    <div className="drawer">
-      <div className="drawer-head">
-        {!editing ? (
-          <div className="drawer-title">{song.title}</div>
-        ) : (
-          <input className="input drawer-title-input" value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} />
-        )}
-        <button className="icon-btn" onClick={onClose}><Icon path={ICONS.close} size={13} /></button>
-      </div>
-
-      {!editing ? (
-        <div className="drawer-artist">{song.artist}</div>
-      ) : (
-        <input className="input" style={{ marginBottom: 10 }} value={draftArtist} onChange={(e) => setDraftArtist(e.target.value)} placeholder="Artist" />
-      )}
-
-      {song.versions.length > 1 && (
-        <div className="version-row">
-          {song.versions.map(v => (
-            <button key={v.id} className={'seg-btn' + (v.id === vid ? ' active' : '')} onClick={() => onSetVersion(song.id, v.id)}>{v.label}</button>
-          ))}
-        </div>
-      )}
-
-      {!editing ? (
-        <div className="tag-row" style={{ marginBottom: 16 }}>
-          <span className="tag tag-accent">{av.bpm} BPM</span>
-          <span className="tag tag-good">{av.key}</span>
-        </div>
-      ) : (
-        <div className="form-grid-2" style={{ marginBottom: 12 }}>
-          <Field label="BPM"><input className="input" value={draftBpm} onChange={(e) => setDraftBpm(e.target.value)} /></Field>
-          <Field label="Key"><input className="input" value={draftKey} onChange={(e) => setDraftKey(e.target.value)} /></Field>
-        </div>
-      )}
-
-      <div className="drawer-actions-row">
-        {!editing ? (
-          <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>Edit details</button>
-        ) : (
-          <>
-            <button className="btn btn-primary btn-sm" onClick={saveEdits}>Save</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>Cancel</button>
-          </>
-        )}
-        <button className="btn btn-danger btn-sm" onClick={confirmDelete}>Delete song</button>
-      </div>
-
-      <div className="section-label">Audio — this version</div>
-      <div className="drawer-list">
-        {ownTransitions.map(e => (
-          <div key={e.id} className="drawer-frag">
-            <div className="drawer-frag-row">
-              <span className="drawer-frag-label">{labelOf(e)}</span>
-              {e.verified && <span className="dot-verified" />}
-              <div className="drawer-frag-actions">
-                {!e.verified && <button className="btn btn-ghost btn-xs" onClick={() => onVerifyEdge(e.id)}>Preview &amp; verify</button>}
-                <button className="btn btn-ghost btn-xs" onClick={() => { if (window.confirm('Remove this ' + labelOf(e).toLowerCase() + '?')) onDeleteEdge(e.id); }}>Remove</button>
-              </div>
-            </div>
-            <div className="drawer-frag-dest">{destText(e)}</div>
-          </div>
-        ))}
-        {ownTransitions.length === 0 && <div className="empty-note-sm">no audio attached to this version yet</div>}
-      </div>
-
-      <div className="section-label">Inherit from other versions</div>
-      <div className="drawer-list">
-        {inheritable.map(e => {
-          const sibVersion = song.versions.find(v => v.id === (e.l === song.id ? e.lv : e.rv));
-          return (
-            <div key={e.id} className="drawer-frag drawer-frag-inheritable">
-              <div className="drawer-frag-row">
-                <span className="drawer-frag-label drawer-frag-label-muted">from {sibVersion ? sibVersion.label : '?'}</span>
-                <button className="btn btn-primary btn-xs" onClick={() => setLinkingId(e.id)}>Link</button>
-              </div>
-              <div className="drawer-frag-dest">{destText(e)}</div>
-            </div>
-          );
-        })}
-        {inheritable.length === 0 && <div className="empty-note-sm">nothing to inherit for this version</div>}
-      </div>
-
-      {linking && (
-        <div className="linking-panel">
-          <div className="linking-title">Sync {linking.type === 'outro' ? 'outro' : linking.type === 'intro' ? 'intro' : 'transition'}</div>
-          <div className="linking-waveform" />
-          <div className="linking-nudge">
-            <button className="btn btn-ghost btn-xs">−10ms</button>
-            <span className="linking-nudge-label">nudge to align</span>
-            <button className="btn btn-ghost btn-xs">+10ms</button>
-          </div>
-          <div className="drawer-actions-row">
-            <button className="btn btn-ghost btn-sm" onClick={() => setLinkingId(null)}>Cancel</button>
-            <button className="btn btn-primary btn-sm" onClick={() => setLinkingId(null)}>Confirm link</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// =====================================================================================
 // A minimal error boundary — surfaces a readable message instead of a blank page
 // while this is still being developed.
 // =====================================================================================
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
-  componentDidCatch(error, info) { console.error('DJ Flow crashed:', error, info); }
+  componentDidCatch(error, info) { console.error('Eskimo Studio crashed:', error, info); }
   render() {
     if (this.state.error) {
       return (

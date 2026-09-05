@@ -3,8 +3,10 @@
 This file is the backlog and the reasoning behind it, for whoever (human or
 agent) picks this up next in Claude Code. `index.html` is a complete,
 working single-file build (React 18 + Babel Standalone via CDN, no build
-step) — open it in a browser and it runs. Everything below is what's
-*not* built yet, roughly in the order it makes sense to tackle it.
+step) — open it in a browser and it runs. `supabase/schema.sql` and
+`worker/upload-worker.js` are real, deployable backend pieces that are
+already wired into the app — they just need your account-level setup and
+keys (see **Your tasks**, below) before they turn on.
 
 ## Positioning — read this first, it shapes every decision below
 
@@ -25,78 +27,193 @@ The interface should stay minimal because the job — controlling music —
 is simple; the depth lives in how much the person has built into their
 graph, not in how many controls are on screen.
 
+## Terminology glossary — stick to this everywhere (code, UI copy, docs)
+
+Kept small on purpose so a producer friend can figure the app out without
+a manual. Standard DJ words are kept as-is; only the app's own states got
+simplified, to exactly three:
+
+- **Playing** — the song live right now.
+- **Next** — the one song staged/armed to follow it (the first list in the
+  Sequence pane).
+- **Later** — what's reachable *after* whatever's staged in Next (the
+  second list) — a two-move lookahead, not an open chain.
+- **Cut** — a hard edge with no fragment (replaces the old "cold cut" /
+  "play out naturally" wording).
+- Kept as-is: Transition, Intro, Outro, BPM, Key, Cue.
+
 ## Graph model — decided, don't revisit
 
 Single node per song, directed edges between them (transitions / intros /
-outros), same as it is now. This was considered and rejected: a
-"one-way flow" graph where nodes repeat per path so nothing ever crosses
-itself. It doesn't work as the primary model because a loop unrolled that
-way is infinite — there's no node count to cap it at that isn't
-arbitrary — and any song with more than one incoming and outgoing edge
-would need a separate node per path through it, which blows up
-combinatorially in exactly the graphs this product wants to encourage
-(big, interconnected ones).
+outros). A remix is just another song with its own node — there is no
+"versions" sub-concept on a song anymore (see **Done this pass** below for
+why that changed). This was considered and rejected: a "one-way flow"
+graph where nodes repeat per path so nothing ever crosses itself. It
+doesn't work as the primary model because a loop unrolled that way is
+infinite — there's no node count to cap it at that isn't arbitrary — and
+any song with more than one incoming and outgoing edge would need a
+separate node per path through it, which blows up combinatorially in
+exactly the graphs this product wants to encourage (big, interconnected
+ones).
 
-What *should* change is the **layout**, not the data model:
+What *should* change is the **layout**, not the data model — still not
+built:
 - Forward-flowing transitions (the common case) render as short, straight
   arrows.
 - Any edge that loops back to something earlier in the current flow
   direction renders as a curved arc routed around the outside, visually
-  distinct (dashed, muted color) from a forward edge — instead of a
-  straight line crossing through other nodes. See the diagram shared in
-  chat during the design discussion for the exact convention (5 nodes in
-  a row, one dashed arc looping back under the row).
+  distinct from a forward edge — instead of a straight line crossing
+  through other nodes.
 - An optional "tidy layout" auto-arrange (left-to-right or top-to-bottom
   by rough energy / BFS distance from the person's most-used opener),
   toggle-able, that never overrides manual dragging unless the person
   asks for it.
 
-## Feature backlog
+## Done this pass
 
+- **Type + layout overhaul.** Wordmark is now the real Gnomon\* Foreground
+  face (indestructible type\*, OFL) — compiled straight from the
+  foundry's UFO source with `fontmake` since the repo only ships a
+  compiled build of the *variable shadow layer*, not the bold display
+  font; self-hosted as a base64 `@font-face` so the file stays single-file
+  and build-step-free. Body copy stays Jost (it already is indestructible
+  type's own font) but at a heavier default weight and darker secondary
+  grays — the old thin/washed-out look was a weight/contrast issue, not a
+  wrong-font one. The floating inspect drawer that used to overlap flat
+  form pages (Upload Song, Add Audio) is gone entirely — see below for
+  where its jobs moved.
+- **Versions dropped.** A remix is now a first-class song with its own
+  id/BPM/key, connected like anything else via Add Audio. Simpler data
+  model, one fewer concept to explain to a producer friend.
+- **Perform page split into two panes.** Graph pane (visual planning —
+  hover a reachable node for a quick-action card: stage it as Next,
+  confirm, pick Transition vs Cut) and a persistent Sequence pane (Playing
+  block with an always-visible **End Set**; Next list; Later list; a
+  compact committed-path breadcrumb). Hard-start, hard-stop, and
+  transition-type choices all live in one obvious, always-visible place
+  instead of behind a node click.
+- **Graph readability.** All edges solid (a single line can't honestly
+  label one specific transition when several can exist between the same
+  two songs, so per-edge stat tags are gone). In/out counts on every node
+  are bare numbers in a fixed spot (`↓2 ↑3`, no words) — one thing to
+  learn once instead of relearning per element.
+- **Library simplified** to a flat, searchable, accordion list — click a
+  row for its built pieces and inline editing, no separate panel.
+- **Countdown mechanic** (Next-list rows drain a shared timer while
+  Playing, tied to a mocked `durationSec` per song — see the code comment
+  by `mockDuration` in `index.html` for exactly what's simulated vs real
+  here; real duration should come from actual audio metadata once real
+  detection lands, below).
+- **Backend scaffolding is real, not just planned**: `supabase/schema.sql`
+  (one RLS-scoped table, anonymous-auth-keyed) and
+  `worker/upload-worker.js` (a Cloudflare Worker that writes straight to
+  an R2 bucket binding and hands back a public URL — no AWS-style signing,
+  no R2 credentials ever touch the browser) are both wired into
+  `index.html` already, gated behind the empty `APP_CONFIG` values at the
+  top of the file. Fill those in and both turn on with no further code
+  changes.
+
+## Your tasks (only you can do these — accounts, keys, hosting)
+
+1. **Enable GitHub Pages.** Repo Settings → Pages → Source: "GitHub
+   Actions". `.github/workflows/pages.yml` is already in the repo — the
+   next push to `main` gets you a live URL with no other setup. It works
+   with zero backend configured (local-storage only, exactly like now).
+2. **Supabase project** (for cross-device sync):
+   - Create a project at supabase.com.
+   - Project Settings → API → copy the **Project URL** and the **anon
+     public** key (never the `service_role` key — it must never leave
+     Supabase).
+   - Authentication → Providers → enable **Anonymous Sign-Ins** (there's
+     no login screen yet, so this is what gives each browser a stable
+     identity to sync under).
+   - SQL Editor → run `supabase/schema.sql`.
+   - Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` as **repository secrets**
+     (Settings → Secrets and variables → Actions) so the Pages workflow
+     bakes them into the deployed copy — or paste them directly into
+     `APP_CONFIG` in `index.html` for local testing.
+3. **Cloudflare R2 bucket** (for audio file storage):
+   - Create a bucket (dashboard, or `npx wrangler r2 bucket create
+     eskimo-studio-audio` — name matches `worker/wrangler.toml`).
+   - Turn on public access for it (bucket → Settings → Public access —
+     the free `r2.dev` subdomain is fine to start) and put that URL into
+     `worker/wrangler.toml`'s `PUBLIC_BUCKET_URL`.
+   - Deploy the worker: `cd worker && npx wrangler login && npx wrangler
+     deploy`. Copy the resulting `*.workers.dev` URL.
+   - Add `UPLOAD_WORKER_URL` as a repository secret (or paste into
+     `APP_CONFIG` locally), same as above.
+4. **Tell me when the above is done** (or hand me the values) — wiring
+   anything further (auth UI beyond anonymous sign-in, tightening the
+   worker's CORS from `*` to your real Pages origin, etc.) is on me once
+   real keys exist to test against.
+
+## My tasks (engineering backlog)
+
+- [ ] Once you've done the Supabase/R2 setup above: verify the sync and
+      upload paths end-to-end against your real project (they're wired
+      and code-complete but only testable against live credentials).
+- [ ] Tighten `worker/upload-worker.js`'s CORS (`ALLOWED_ORIGIN`) to your
+      actual Pages origin once you have one, instead of `*`.
 - [ ] **Real audio detection.** Replace `pickDetectedSongs` (the
       deterministic mock in `core.js`) with real analysis: **Essentia.js**
       (WebAssembly build of the Essentia C++ MIR library) runs entirely
-      client-side and can detect BPM, musical key, and Camelot code
-      directly from the dropped file — no server round-trip needed. This
-      is what should drive Add Audio's "detected" step for real, and
-      could also auto-fill BPM/key on Upload Song instead of asking for
-      them.
-- [ ] **Autoplay / infinite set mode.** The reachability set the graph
-      already computes (`computeReachability` in `core.js` — which songs
-      are validly next) is exactly the input an auto-picker needs.
-      Autoplay is "pick from that set on a timer instead of waiting for a
-      click." Add:
-      - A policy for picking (random among built/verified edges; weighted
-        to avoid repeating a song too soon).
-      - Closed-loop detection: whether the current position sits in a
-        strongly-connected component of verified edges, i.e. can wander
-        forever without dead-ending. Surface this visually on the graph
-        (e.g. a highlight over "finished circuits") so the person can see
-        which parts of their graph are autoplay-safe versus still-open
-        branches, and so autoplay itself only wanders inside one.
-- [ ] **"Flow" visual pass on the graph canvas.** Distinct from the
-      arc-for-loops layout fix above — a more organic/ambient rendering:
-      particles or light pulses traveling along built edges, like signal
-      flowing through a patch bay. Two uses: (1) an idle ambient view of
-      the graph while performing, (2) a shareable "signature" export of a
-      graph (a dense, well-built graph should look visually different
-      from a sparse one) — this doubles as a natural, low-effort marketing
-      hook (people showing off their graph).
+      client-side and can detect BPM, musical key, Camelot code, *and
+      actual track duration* directly from the dropped file — this
+      should also replace `mockDuration`, making the Sequence pane's
+      countdown mechanic real instead of simulated.
+- [ ] **Autoplay / infinite set mode.** The reachability the graph already
+      computes (`computeReachability` + `oneHopReachable` in `core.js`) is
+      exactly the input an auto-picker needs — Next is already "what's
+      valid to go to," Later is already a second hop ahead. Add: a policy
+      for picking (random among built/verified edges; weighted to avoid
+      repeating a song too soon), and closed-loop detection (whether the
+      current position sits in a strongly-connected component of verified
+      edges, i.e. can wander forever without dead-ending) surfaced on the
+      graph so the person can see which parts of their graph are
+      autoplay-safe.
+- [ ] **"Flow" visual pass on the graph canvas** — particles/light pulses
+      traveling along built edges, for an idle ambient view during a set
+      and as a shareable "signature" export of a graph.
+- [ ] **Loop-back arc layout** from the Graph model section above — still
+      not built; forward edges are straight, nothing routes loops as
+      arcs yet.
 - [ ] **Node CRUD polish**: bulk operations in Library (multi-select
       delete/tag), duplicate-song detection on Upload Song.
-
-## Backend — not wired up yet, currently pure localStorage
-
-- **Supabase**: Postgres + auth + RLS for the song/edge graph and sync
-  metadata across devices.
-- **Cloudflare R2** for the actual audio files. Don't put audio in
-  Supabase Storage — R2's zero egress fee matters a lot here since the
-  person will be repeatedly streaming/downloading their own multi-GB
-  library.
-- Keep a local SQLite cache (via Tauri) so the app works fully offline
-  and only syncs deltas when online. The `Store` object in `core.js` is
-  the one seam meant for this swap — every read/write already goes
-  through it, nothing else should need to change.
+- [ ] **UI/UX research pass**, since this is going out to producer
+      friends to test cold:
+      - Accessibility: contrast ratios on the new type scale, visible
+        focus states, keyboard navigation for the graph and Sequence
+        pane (currently mouse-only).
+      - Usability testing with the actual producer friends — watch where
+        someone unfamiliar with the app gets stuck, particularly around
+        the Next/Later staging flow and the hover-card vs. Sequence-pane
+        dual entry points.
+      - Icon audit: a couple of hover-card/sequence toggles are
+        text-label chips (Transition/Cut/Intro) rather than icons — see
+        if a producer group actually prefers icons here or if the words
+        are clearer; don't guess, ask them.
+- [ ] **Performance research + work**, biggest levers first:
+      1. **Stop shipping Babel Standalone.** Right now the JSX is
+         transpiled *in the browser, on every load* — this is the single
+         biggest cost in first paint. Moving to a prebuilt bundle
+         (esbuild or Vite) while keeping the existing
+         core.js/app.jsx/styles.css split (the file already documents
+         itself as splittable this way) would cut it dramatically. This
+         is the highest-value performance change available and should
+         happen before the app gets much bigger.
+      2. Isolate the 1-second countdown tick into its own leaf component
+         (it currently lives in `App`'s top-level state, so every tick
+         re-renders the whole tree including the graph canvas).
+      3. Memoize `computeReachability`/`oneHopReachable` harder if the
+         graph grows large — currently recomputed on most renders via
+         `useMemo` but the dependency array is coarse (whole `songs`
+         object).
+      4. Virtualize the Library list once someone's crate gets into the
+         hundreds of songs (it's a flat unvirtualized DOM list right
+         now).
+      5. Profile the SVG edge rendering at a large graph size (100+
+         songs, 300+ edges) — plain `<line>` elements should hold up
+         fine, but confirm before assuming it.
 
 ## Desktop packaging
 
@@ -174,38 +291,46 @@ Already implemented in `styles.css` — documented here so the reasoning
 isn't lost in a later pass:
 
 - Light, monochrome base (paper/ink/panel/line grays) — this is the
-  original "eski" look and it's staying; this pass was layout/spacing
-  tightening (denser paddings, consistent gap scale, tighter radius), not
-  a re-theme. If a future pass considers dark mode, that's a real second
-  token set, not a tweak of this one.
+  original "eski" look and it's staying. Contrast was raised this pass
+  (darker `--muted`/`--faint`, heavier default text weight) specifically
+  because the first version read as thin/weak — this wasn't a font
+  change, Jost was already correct.
 - **One accent color**: a dusty pastel purple (`--accent: #8b7bb8`),
   spent only on interactive/active state — active nav item, primary
-  "confirm" actions, the now-playing/reachable highlight on the graph,
-  focus rings, progress fill. Never on static data.
-- **Data tags (BPM, key, dead-end, remix) are brutalist, not SaaS pills**:
+  "confirm" actions, the Next/Later highlight on the graph, focus rings,
+  progress fill. Never on static data.
+- **Data tags (BPM, key, dead-end) are brutalist, not SaaS pills**:
   plain bordered boxes (`border-radius: 0`), monospace type, no fill, no
   per-category color — every tag is just ink-on-transparent with a
   hairline border. The label text carries the meaning ("128 BPM", "A
-  min", "dead end"); color doesn't need to repeat it. This was a direct
-  correction from an earlier pass that (wrongly) gave tags colored pastel
-  backgrounds like a typical SaaS dashboard.
-- **Two typefaces, both deliberate**: `Jost` for all UI text (unchanged —
-  keep this), and a monospace stack reserved for genuine numeric readouts
-  (BPM values via `.tag`, cue timecodes, the countdown timer, via the
-  `.mono-num` class) — real hardware displays these as monospace so
-  digits align, so this is functional, not decorative.
+  min", "dead end"); color doesn't need to repeat it. Edges on the graph
+  canvas dropped their per-edge stat tags entirely this pass (see **Done
+  this pass**) — the tag style itself is unchanged, it's just no longer
+  used on hover-tooltips over lines.
+- **Wordmark**: Gnomon\* Foreground (indestructible type\*, OFL-1.1),
+  self-hosted as a base64 `@font-face`, used *only* for the sidebar
+  wordmark — it's an 88-glyph WWII-poster display face, never body text.
+  Compiled from `github.com/indestructible-type/Gnomon`'s UFO source with
+  `fontmake` (pure Python, no FontForge binary needed) since the repo
+  only ships a prebuilt copy of the variable *shadow* layer, not the bold
+  display letterforms.
+- **Two typefaces, both deliberate**: `Jost` for all UI text (indestructible
+  type's own font, unchanged font choice — the weight/size got heavier
+  this pass, not the font), and a monospace stack reserved for genuine
+  numeric readouts (BPM values via `.tag`, cue timecodes, the countdown
+  timer, via the `.mono-num` class) — real hardware displays these as
+  monospace so digits align, so this is functional, not decorative.
   - **Font TODO**: the mono stack is `'Drafting Mono', 'IBM Plex Mono',
     ui-monospace, monospace`. Drafting Mono (Indestructible Type, OFL
-    licensed, free for commercial use — github.com/indestructible-type/
-    Drafting) is the intended font but isn't on Google Fonts or another
-    public CDN, so right now the app actually renders IBM Plex Mono (the
-    loaded fallback). Next step: download the actual webfont files from
-    that repo's `fonts/` folder (or self-host from
-    indestructibletype.com) and add a real `@font-face` pointing at
-    self-hosted files, or a verified CDN mirror — don't guess a CDN URL
-    for this one, confirm it actually resolves before shipping it.
+    licensed — github.com/indestructible-type/Drafting) is the intended
+    font but isn't on Google Fonts or another public CDN, so it currently
+    renders as IBM Plex Mono (the loaded fallback). Same fix pattern as
+    Gnomon above would work here (clone, compile with fontmake, self-host
+    as base64) if this becomes worth doing — Drafting Mono's repo should
+    be checked for whether it ships a prebuilt binary before repeating
+    the from-source compile step.
 - Tight radius (2px) and hairline borders throughout; tags go all the way
   to 0 radius as the sharpest element on screen. Depth comes from the
   paper/panel/ink value steps, not shadows — shadows stay minimal, used
-  only on the floating transport/queue/pending/drawer panels that need to
+  only on the floating Sequence-pane-adjacent hover card that needs to
   read as layered above the canvas.

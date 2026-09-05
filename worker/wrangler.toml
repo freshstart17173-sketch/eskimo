@@ -1,0 +1,15 @@
+name = "eskimo-studio-upload"
+main = "upload-worker.js"
+compatibility_date = "2025-01-01"
+
+# Bind your R2 bucket — create it first with:
+#   npx wrangler r2 bucket create eskimo-studio-audio
+[[r2_buckets]]
+binding = "AUDIO_BUCKET"
+bucket_name = "eskimo-studio-audio"
+
+# The public base URL for that bucket (enable public access on the bucket
+# first — Cloudflare dashboard -> R2 -> your bucket -> Settings -> Public
+# access -> either the r2.dev subdomain or a custom domain you own).
+[vars]
+PUBLIC_BUCKET_URL = "https://REPLACE-WITH-YOUR-BUCKET-PUBLIC-URL"
