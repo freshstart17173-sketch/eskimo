@@ -1,8 +1,10 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { isSyncConfigured, isUploadConfigured } from '../core.js';
+import { estimateSeamlessLength } from '../graphEstimate.js';
 import { Field } from './shared.jsx';
 
-export default function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearAll, onRestore }) {
+export default function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearAll, onRestore, onSetAutoplay, onSetTransitionOnly }) {
+  const estimate = useMemo(() => estimateSeamlessLength(songs, edges), [songs, edges]);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const fileInputRef = useRef(null);
   const [importError, setImportError] = useState('');
@@ -81,6 +83,31 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
           <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => handleImportFile(e.target.files)} />
         </div>
         {importError && <div className="error-note">{importError}</div>}
+      </div>
+
+      <div className="section-label" style={{ marginTop: 24 }}>Autoplay</div>
+      <div className="autoplay-card">
+        <div className="autoplay-row">
+          <div>
+            <div className="autoplay-row-title">Autoplay</div>
+            <div className="autoplay-row-sub">picks randomly when nothing's queued</div>
+          </div>
+          <button className={'switch' + (session.autoplay ? ' on' : '')} onClick={() => onSetAutoplay(!session.autoplay)} />
+        </div>
+        <div className="autoplay-row">
+          <div>
+            <div className="autoplay-row-title">Transition-only</div>
+            <div className="autoplay-row-sub">a dead end stops the set instead of cutting</div>
+          </div>
+          <button className={'switch' + (session.transitionOnly ? ' on' : '')} onClick={() => onSetTransitionOnly(!session.transitionOnly)} />
+        </div>
+        {estimate.totalSongs > 0 && (
+          <div className="estimate-note">
+            {estimate.hasLoop
+              ? <>This graph has a closed loop — transition-only autoplay can run <b>forever</b> once it's in one. Up to <span className="mono-num">{estimate.upperBound}</span> of {estimate.totalSongs} songs reachable before it must repeat.</>
+              : <>No closed loop yet, so transition-only autoplay will eventually dead-end. Up to <span className="mono-num">{estimate.upperBound}</span> of {estimate.totalSongs} songs reachable in one run.</>}
+          </div>
+        )}
       </div>
 
       <div className="section-label" style={{ marginTop: 24 }}>Reset</div>

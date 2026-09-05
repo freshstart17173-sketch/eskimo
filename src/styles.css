@@ -33,8 +33,9 @@
   --good: #131313;
   --good-bg: #efefef;
 
-  /* the three graph states, in the order they matter: playing, next, later */
-  --state-playing: #131313;
+  /* the three graph states, in the order they matter: playing, next, later —
+     all one hue (the accent blue), just darker for "this one is live" */
+  --state-playing: #24506b;
   --state-next: #7fb3d9;
   --state-next-bg: #eef6fb;
   --state-later: #bcdcef;
@@ -193,6 +194,12 @@ a { color: var(--accent); }
 }
 .picker-chip-free { background: var(--panel); border-style: dashed; }
 .art-swatch { flex: none; border-radius: var(--radius); background: repeating-linear-gradient(45deg, rgba(19, 19, 19, .12) 0 3px, transparent 3px 6px); }
+/* the stripe pattern above is tuned for light panels — on the dark Playing
+   contexts it was nearly invisible (dark-on-dark), same bug as the button
+   text: swap to a light stripe wherever the art sits on --state-playing */
+.state-playing .art-swatch, .seq-now-card .art-swatch, .queue-chip-playing .art-swatch {
+  background: repeating-linear-gradient(45deg, rgba(252, 252, 252, .22) 0 3px, transparent 3px 6px), rgba(252, 252, 252, .06);
+}
 .picker-chip-art { width: 26px; height: 26px; }
 .picker-chip-text { flex: 1; min-width: 0; }
 .picker-chip-title { font-weight: 600; font-size: 12.5px; }
@@ -218,7 +225,7 @@ a { color: var(--accent); }
 .seq-scroll { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
 .seq-venue { font-size: 12px; font-weight: 600; color: var(--muted); }
 
-.seq-now-card { border-radius: var(--radius); background: var(--ink); color: var(--paper); padding: 12px; }
+.seq-now-card { border-radius: var(--radius); background: var(--state-playing); color: var(--paper); padding: 12px; }
 .seq-now-row { display: flex; align-items: center; gap: 10px; }
 .seq-play-btn { width: 34px; height: 34px; flex: none; border-radius: var(--radius); background: rgba(252, 252, 252, .16); color: var(--paper); display: flex; align-items: center; justify-content: center; }
 .seq-now-text { flex: 1; min-width: 0; }
@@ -226,9 +233,14 @@ a { color: var(--accent); }
 .seq-now-artist { font-size: 11.5px; color: rgba(252, 252, 252, .65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-now-tags { display: flex; gap: 5px; margin-top: 9px; }
 .seq-now .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper); }
-.seq-countdown-track { height: 3px; border-radius: 2px; background: rgba(252, 252, 252, .18); overflow: hidden; margin-top: 10px; }
-.seq-countdown-fill { height: 100%; background: var(--accent); float: right; }
-.seq-countdown-label { font-size: 10px; color: rgba(252, 252, 252, .55); margin-top: 4px; text-align: right; }
+/* a regular playhead — elapsed/total, not a countdown — plus the missing
+   manual "skip to next" action right where you'd look for it */
+.playhead-track { position: relative; height: 4px; border-radius: 2px; background: rgba(252, 252, 252, .18); margin-top: 10px; }
+.playhead-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent); }
+.playhead-scrubber { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--paper); transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--accent); }
+.playhead-times { display: flex; justify-content: space-between; font-size: 10px; color: rgba(252, 252, 252, .55); margin-top: 6px; }
+.playhead-next-btn { width: 100%; margin-top: 10px; background: rgba(252, 252, 252, .12); color: var(--paper); }
+.playhead-next-btn:hover { background: rgba(252, 252, 252, .2); }
 
 .seq-ending-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 11px; padding-top: 11px; border-top: 1px solid rgba(252, 252, 252, .14); }
 .seq-ending-label { font-size: 10.5px; color: rgba(252, 252, 252, .55); text-transform: uppercase; letter-spacing: .04em; }
@@ -284,12 +296,11 @@ a { color: var(--accent); }
 
 .legend { display: flex; align-items: center; gap: 9px; font-size: 10.5px; color: var(--faint); }
 .legend span { display: inline-flex; align-items: center; }
-.swatch { display: inline-block; width: 10px; height: 3px; margin-right: 4px; border-radius: 1px; }
-.swatch-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
-.swatch-base { background: #c7c7c7; }
+/* three plain squares, color is the whole point — no shape variation to read */
+.swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+.swatch-playing { background: var(--state-playing); }
 .swatch-next { background: var(--state-next); }
 .swatch-later { background: var(--state-later); }
-.swatch-line { background: var(--ink); height: 3px; }
 
 .toolbar-btn {
   display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
@@ -406,9 +417,17 @@ a { color: var(--accent); }
    fragment for that option) stay in the group, struck through, rather
    than disappearing — so it's visible that the option exists but this
    pair of songs doesn't have it built yet. */
-.segmented { display: flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--paper); }
-.segmented > button { flex: 1; border-radius: 0; background: transparent; border: 0; border-right: 1px solid var(--line); }
+/* Deliberately doesn't force its own background/text color — each button
+   keeps whatever resting style it already has for its context (light row
+   vs. the dark Playing card); this wrapper only joins them into one pill
+   with shared dividers. Forcing a background here previously fought with
+   dark-context buttons (e.g. seq-ending-btn) and left near-white text on a
+   near-white pill — exactly the invisible-button bug to watch for. */
+.segmented { display: flex; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
+.segmented > button { flex: 1; border-radius: 0; border: 0; border-right: 1px solid var(--line); }
 .segmented > button:last-child { border-right: 0; }
+.seq-now-card .segmented { border-color: rgba(252, 252, 252, .18); }
+.seq-now-card .segmented > button { border-right-color: rgba(252, 252, 252, .18); }
 
 /* ---------------------------------------------------------------
    Add Audio: detected summary / cue preview
@@ -440,7 +459,7 @@ a { color: var(--accent); }
   border-radius: var(--radius); background: var(--panel); border: 1px solid transparent; font-size: 12px; font-weight: 600;
   white-space: nowrap;
 }
-.queue-chip-playing { background: var(--ink); color: var(--paper); }
+.queue-chip-playing { background: var(--state-playing); color: var(--paper); }
 .queue-chip-autoplay { border-style: dashed; border-color: var(--line); color: var(--muted); font-weight: 500; }
 .queue-chip-art { width: 18px; height: 18px; border-radius: 2px; flex: none; }
 .queue-chip-remove { opacity: .5; font-size: 11px; }

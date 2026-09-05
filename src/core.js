@@ -245,6 +245,31 @@ export function pickAutoplayNext(songs, visibleEdges, currentId, transitionOnly)
   return { id: pool[Math.floor(Math.random() * pool.length)], mode: 'cut' };
 }
 
+// The single "what happens when it's time to move on" rule — used both by
+// the set-clock's automatic tick (timeLeft hits 0) and by a manual "Next
+// song" button, so a click and a natural countdown always do the same
+// thing rather than two hand-maintained copies of this branching.
+export function advanceSession(prev, songs, visibleEdges) {
+  if (!prev.nowPlayingId) return prev;
+  const head = prev.queue[0];
+  if (head) {
+    if (head.id === END) return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0 };
+    const nextSong = songs[head.id];
+    return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut' };
+  }
+  if (prev.autoplay) {
+    const pick = pickAutoplayNext(songs, visibleEdges, prev.nowPlayingId, prev.transitionOnly);
+    if (pick) {
+      const nextSong = songs[pick.id];
+      return {
+        ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut',
+        autoHistory: [...prev.autoHistory, { id: pick.id, mode: pick.mode }].slice(-40),
+      };
+    }
+  }
+  return { ...prev, isPlaying: false, setEnded: true, timeLeft: 0 };
+}
+
 // Removing a song must not leave dangling edges pointing at it.
 export function removeSongCascade(songs, edges, songId) {
   const nextSongs = { ...songs };

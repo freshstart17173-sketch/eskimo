@@ -12,7 +12,7 @@ function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode
           <div className="seq-row-title">{row.title}</div>
           {!isEnd && <div className="seq-row-artist">{row.artist}</div>}
         </div>
-        {!isEnd && row.secondsLeft != null && <span className="seq-row-countdown mono-num">{fmtTime(row.secondsLeft)}</span>}
+        {!isEnd && <span className="seq-row-countdown mono-num">{fmtTime(row.secondsLeft)}</span>}
       </div>
       {showToggles && !isEnd && (
         <div className="seq-row-toggles segmented">
@@ -27,10 +27,10 @@ function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode
 }
 
 export default function SequencePane({
-  songs, session, venueName, hasStarted, nowSong, cueBarPct, hasOutroForPlaying, estimate,
+  songs, session, venueName, hasStarted, nowSong, cueBarPct, hasOutroForPlaying,
   nextRows, laterRows, stagedId, stagedMode,
   onTogglePlaying, onResumeSet, onStartSet, onSetEndingChoice,
-  onStage, onCommitStaged, onSetStagedMode, onSetAutoplay, onSetTransitionOnly,
+  onStage, onCommitStaged, onSetStagedMode, onSkipNext,
 }) {
   const [startPickId, setStartPickId] = useState(null);
   const [startStarting, setStartStarting] = useState('cut');
@@ -71,8 +71,15 @@ export default function SequencePane({
               <span className="tag">{nowSong.bpm} BPM</span>
               <span className="tag">{nowSong.key}</span>
             </div>
-            <div className="seq-countdown-track"><div className="seq-countdown-fill" style={{ width: cueBarPct + '%' }} /></div>
-            <div className="seq-countdown-label mono-num">{fmtTime(session.timeLeft)} left to cue</div>
+            <div className="playhead-track">
+              <div className="playhead-fill" style={{ width: cueBarPct + '%' }} />
+              <div className="playhead-scrubber" style={{ left: cueBarPct + '%' }} />
+            </div>
+            <div className="playhead-times">
+              <span className="mono-num">{fmtTime(nowSong.durationSec - session.timeLeft)}</span>
+              <span className="mono-num">{fmtTime(nowSong.durationSec)}</span>
+            </div>
+            <button className="btn playhead-next-btn" onClick={onSkipNext}>Next song →</button>
 
             <div className="seq-ending-row">
               <span className="seq-ending-label">How it ends</span>
@@ -90,30 +97,6 @@ export default function SequencePane({
             <button className="btn btn-primary btn-sm" onClick={onResumeSet}>Start a new set</button>
           </div>
         )}
-
-        <div className="autoplay-card">
-          <div className="autoplay-row">
-            <div>
-              <div className="autoplay-row-title">Autoplay</div>
-              <div className="autoplay-row-sub">picks randomly when nothing's queued</div>
-            </div>
-            <button className={'switch' + (session.autoplay ? ' on' : '')} onClick={() => onSetAutoplay(!session.autoplay)} />
-          </div>
-          <div className="autoplay-row">
-            <div>
-              <div className="autoplay-row-title">Transition-only</div>
-              <div className="autoplay-row-sub">a dead end stops the set instead of cutting</div>
-            </div>
-            <button className={'switch' + (session.transitionOnly ? ' on' : '')} onClick={() => onSetTransitionOnly(!session.transitionOnly)} />
-          </div>
-          {estimate.totalSongs > 0 && (
-            <div className="estimate-note">
-              {estimate.hasLoop
-                ? <>This graph has a closed loop — transition-only autoplay can run <b>forever</b> once it's in one. Up to <span className="mono-num">{estimate.upperBound}</span> of {estimate.totalSongs} songs reachable before it must repeat.</>
-                : <>No closed loop yet, so transition-only autoplay will eventually dead-end. Up to <span className="mono-num">{estimate.upperBound}</span> of {estimate.totalSongs} songs reachable in one run.</>}
-            </div>
-          )}
-        </div>
 
         {hasStarted && !session.setEnded && (
           <>

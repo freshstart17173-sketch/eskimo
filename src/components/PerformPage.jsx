@@ -2,10 +2,9 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
-  END, clamp, getVisibleEdges, inOutCounts, oneHopReachable, computeReachability,
+  END, clamp, getVisibleEdges, inOutCounts, oneHopReachable, computeReachability, advanceSession,
 } from '../core.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
-import { estimateSeamlessLength } from '../graphEstimate.js';
 import GraphPane from './GraphPane.jsx';
 import SequencePane from './SequencePane.jsx';
 import QueueBar from './QueueBar.jsx';
@@ -99,9 +98,9 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
   function togglePlaying() { setSession(prev => ({ ...prev, isPlaying: !prev.isPlaying })); }
   function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, endingChoice: 'cut', autoHistory: [] })); }
   function setEndingChoice(choice) { setSession(prev => ({ ...prev, endingChoice: choice })); }
-  function setAutoplay(on) { setSession(prev => ({ ...prev, autoplay: on })); }
-  function setTransitionOnly(on) { setSession(prev => ({ ...prev, transitionOnly: on })); }
   function removeQueueFrom(index) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, index) })); }
+  // the manual "Next song" button — same rule the set-clock's timer uses (advanceSession, core.js)
+  function skipNow() { setSession(prev => advanceSession(prev, songs, visibleEdges)); }
 
   // ---------------- layout: manual (stored x/y) or auto (dagre) ----------------
   const autoPositions = useMemo(() => layoutMode === 'auto' ? computeDagreLayout(songs, edges) : null, [layoutMode, songs, edges]);
@@ -136,10 +135,6 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
   }), [transitionEdgesRaw, fromId, tier1, stagedId, laterIds]);
 
   const hasOutroForPlaying = !!findEdge(e => e.type === 'outro' && e.l === session.nowPlayingId);
-
-  // ---------------- estimated seamless-play length (see graphEstimate.js for why
-  // this is a computed upper bound, not an exact count) ----------------
-  const estimate = useMemo(() => estimateSeamlessLength(songs, edges), [songs, edges]);
 
   // ---------------- search (Fuse.js) ----------------
   const fuse = useMemo(() => new Fuse(Object.values(songs), { keys: ['title', 'artist'], threshold: 0.35, ignoreLocation: true }), [songs]);
@@ -210,14 +205,17 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     const elapsed = nowSong ? nowSong.durationSec - session.timeLeft : 0;
     const rows = Array.from(tier1).map(id => {
       const opts = optionsFor(id);
-      const secondsLeft = (opts.transitionEdge && opts.transitionEdge.outSeconds != null)
-        ? Math.max(0, opts.transitionEdge.outSeconds - elapsed) : null;
-      return { ...opts, secondsLeft };
+      const hasRealCue = !!(opts.transitionEdge && opts.transitionEdge.outSeconds != null);
+      // every row shows a countdown — a real per-edge cue point when one's
+      // been built, otherwise the shared "time left in Now Playing" clock
+      // as a sane default, never blank
+      const secondsLeft = hasRealCue ? Math.max(0, opts.transitionEdge.outSeconds - elapsed) : session.timeLeft;
+      return { ...opts, secondsLeft, hasRealCue };
     });
     return rows.sort((a, b) => {
-      if (a.secondsLeft != null && b.secondsLeft != null) return a.secondsLeft - b.secondsLeft;
-      if (a.secondsLeft != null) return -1;
-      if (b.secondsLeft != null) return 1;
+      if (a.hasRealCue && b.hasRealCue) return a.secondsLeft - b.secondsLeft;
+      if (a.hasRealCue) return -1;
+      if (b.hasRealCue) return 1;
       return 0;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -277,7 +275,7 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
         </button>
 
         <div className="legend toolbar-spacer">
-          <span><i className="swatch swatch-dot" />playing</span>
+          <span><i className="swatch swatch-playing" />playing</span>
           <span><i className="swatch swatch-next" />next</span>
           <span><i className="swatch swatch-later" />later</span>
         </div>
@@ -296,12 +294,11 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
         </div>
 
         <SequencePane
-          songs={songs} session={session} venueName={venueName} estimate={estimate}
+          songs={songs} session={session} venueName={venueName}
           hasStarted={hasStarted} nowSong={nowSong} cueBarPct={cueBarPct} hasOutroForPlaying={hasOutroForPlaying}
           nextRows={nextRows} laterRows={laterRows} stagedId={stagedId} stagedMode={stagedMode}
           onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onStartSet={startSet} onSetEndingChoice={setEndingChoice}
-          onStage={stage} onCommitStaged={commitStaged} onSetStagedMode={setStagedMode}
-          onSetAutoplay={setAutoplay} onSetTransitionOnly={setTransitionOnly}
+          onStage={stage} onCommitStaged={commitStaged} onSetStagedMode={setStagedMode} onSkipNext={skipNow}
         />
       </div>
     </div>

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { Store, freshState, emptySession, removeSongCascade, END, getVisibleEdges, pickAutoplayNext } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, END, getVisibleEdges, advanceSession } from './core.js';
 import Sidebar from './components/Sidebar.jsx';
 import PerformPage from './components/PerformPage.jsx';
 import LibraryPage from './components/Library.jsx';
@@ -46,43 +46,23 @@ export default function App() {
     return () => clearTimeout(saveTimer.current);
   }, [songs, edges, session, venueName]);
 
-  // ---- the set clock: ticks Now Playing's countdown, promotes Next when it hits 0.
-  // If nothing is queued and autoplay is off, the set just ends — no looping trick to
-  // paper over there being nothing next ("letting the song end naturally"). If
-  // autoplay is on, pickAutoplayNext chooses instead — a built transition when one
-  // exists, otherwise a random cut to keep an infinite playlist going (unless
-  // transitionOnly is set, in which case a dead end still ends the set: that's the
-  // "truly seamless" guarantee). ----
+  // ---- the set clock: ticks Now Playing's countdown, then hands off to
+  // advanceSession (core.js) — the same function a manual "Next song" click
+  // uses — when it hits 0, so the timer and the button can never disagree
+  // about what happens next. ----
   useEffect(() => {
     const t = setInterval(() => {
       setSession(prev => {
         if (!prev.isPlaying || !prev.nowPlayingId) return prev;
-        if (prev.timeLeft <= 1) {
-          const head = prev.queue[0];
-          if (!head) {
-            if (prev.autoplay) {
-              const pick = pickAutoplayNext(songs, getVisibleEdges(edges), prev.nowPlayingId, prev.transitionOnly);
-              if (pick) {
-                const nextSong = songs[pick.id];
-                return {
-                  ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut',
-                  autoHistory: [...prev.autoHistory, { id: pick.id, mode: pick.mode }].slice(-40),
-                };
-              }
-            }
-            return { ...prev, isPlaying: false, setEnded: true, timeLeft: 0 };
-          }
-          if (head.id === END) {
-            return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0 };
-          }
-          const nextSong = songs[head.id];
-          return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut' };
-        }
+        if (prev.timeLeft <= 1) return advanceSession(prev, songs, getVisibleEdges(edges));
         return { ...prev, timeLeft: prev.timeLeft - 1 };
       });
     }, 1000);
     return () => clearInterval(t);
   }, [songs, edges]);
+
+  const setAutoplay = useCallback((on) => setSession(prev => ({ ...prev, autoplay: on })), []);
+  const setTransitionOnly = useCallback((on) => setSession(prev => ({ ...prev, transitionOnly: on })), []);
 
   const deleteSong = useCallback((songId) => {
     const result = removeSongCascade(songs, edges, songId);
@@ -178,6 +158,7 @@ export default function App() {
             songs={songs} edges={edges} session={session}
             onClearAll={clearAllData}
             onRestore={(data) => { setSongs(data.songs); setEdges(data.edges); setSession(data.session); setVenueName(data.venueName); }}
+            onSetAutoplay={setAutoplay} onSetTransitionOnly={setTransitionOnly}
           />
         )}
       </div>
