@@ -684,6 +684,10 @@ window.Core = {
 </script>
 
 <script type="text/babel" data-presets="react">
+// Wrapped in an IIFE: classic (non-module) <script> tags share one global lexical
+// scope, so top-level const/let here would collide with the plain <script> above
+// (both declare END / END_NODE) and throw a SyntaxError before anything can render.
+(function () {
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 const {
   END, Store, freshState,
@@ -2063,6 +2067,7 @@ class ErrorBoundary extends React.Component {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<ErrorBoundary><App /></ErrorBoundary>);
+})();
 </script>
 </body>
 </html>
