@@ -1,9 +1,11 @@
 name: Deploy to GitHub Pages
 
-# Static single-file app, no build step — this just injects your config
-# values (repo secrets, never committed) into a copy of index.html and
-# publishes it. Leave the secrets unset and it deploys exactly as
-# committed (local-storage only, sync/upload off).
+# Vite static build, deployed to Pages. Supabase/R2 config already lives in
+# src/config.js (the Supabase piece is real; the R2 upload URL is blank
+# until worker/upload-worker.js is deployed) — this workflow can override
+# it at build time from repo secrets if you'd rather not commit values
+# directly, but committing src/config.js's anon key is fine (see TODO.md
+# for why that key is safe to ship).
 
 on:
   push:
@@ -28,28 +30,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Inject config from repo secrets
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Override config from repo secrets, if set
+        if: ${{ secrets.SUPABASE_URL != '' || secrets.SUPABASE_ANON_KEY != '' || secrets.UPLOAD_WORKER_URL != '' }}
         run: |
           set -eu
-          mkdir -p dist
-          cp index.html dist/index.html
-          # Only replaces the three empty placeholders declared in index.html —
-          # a no-op (deploys as-is) if you haven't added the secrets yet.
           python3 - "$SUPABASE_URL" "$SUPABASE_ANON_KEY" "$UPLOAD_WORKER_URL" <<'PY'
           import re, sys
           supabase_url, anon_key, worker_url = sys.argv[1:4]
-          with open('dist/index.html') as f:
-              html = f.read()
-          html = html.replace("SUPABASE_URL: '',", "SUPABASE_URL: '%s'," % supabase_url)
-          html = html.replace("SUPABASE_ANON_KEY: '',", "SUPABASE_ANON_KEY: '%s'," % anon_key)
-          html = html.replace("UPLOAD_WORKER_URL: '',", "UPLOAD_WORKER_URL: '%s'," % worker_url)
-          with open('dist/index.html', 'w') as f:
-              f.write(html)
+          path = 'src/config.js'
+          with open(path) as f:
+              src = f.read()
+          def replace(field, value):
+              global src
+              if value:
+                  src = re.sub(field + r": '[^']*'", field + ": '%s'" % value, src)
+          replace('SUPABASE_URL', supabase_url)
+          replace('SUPABASE_ANON_KEY', anon_key)
+          replace('UPLOAD_WORKER_URL', worker_url)
+          with open(path, 'w') as f:
+              f.write(src)
           PY
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           UPLOAD_WORKER_URL: ${{ secrets.UPLOAD_WORKER_URL }}
+
+      - name: Build
+        run: npm run build
+        env:
+          GITHUB_PAGES: 'true'
 
       - uses: actions/upload-pages-artifact@v3
         with:
