@@ -1,0 +1,2068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eskimo Studio</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<!--
+  Eskimo Studio — single-file build
+
+  Stack: React 18 + Babel Standalone, loaded from CDN, no build step.
+  Data lives in this browser's localStorage (see the Store object in the
+  first <script> below) — that's the seam where Supabase (data) and
+  Cloudflare (file storage) plug in later. Nothing here is demo/seed data;
+  the app starts completely empty and everything comes from what you add.
+
+  See TODO.md (shipped alongside this file) for the planned feature work,
+  the business model, and the design-system reasoning — read that before
+  making changes.
+
+  Font note: the mono stack is set to 'Drafting Mono' (Indestructible
+  Type, OFL-licensed) first, falling back to IBM Plex Mono, which is what
+  actually renders right now — Drafting Mono isn't on a public CDN, so it
+  needs to be self-hosted. See TODO.md for the exact next step.
+
+  Files:
+    - core.js    (inlined below, plain JS)   data model, persistence, pure logic
+    - app.jsx    (inlined below, JSX)        React components / UI
+    - styles.css (inlined below)             all styling
+
+  To split this back into real files for a bundler (Vite, etc.), the three
+  <script>/<style> blocks below are exactly core.js / app.jsx / styles.css.
+-->
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+/* ===================================================================
+   Eskimo Studio — design tokens & styles
+   Monochrome light system (paper/ink/grays) with one accent — a dusty
+   pastel purple — spent only on interactive/active state. Data tags
+   (BPM, key, warnings) are plain bordered mono boxes, not colored
+   pills: the content says what it is, color doesn't need to.
+   =================================================================== */
+
+:root {
+  --ink: #131313;
+  --paper: #fcfcfc;
+  --panel: #efefef;
+  --line: #cfcfcf;
+  --line-soft: #e1e1e1;
+  --muted: #5c5c5c;
+  --faint: #8a8a8a;
+
+  --accent: #8b7bb8;          /* dusty pastel purple — the one accent color */
+  --accent-bg: #eeeaf7;
+  --accent-light: #c9bfe0;    /* lighter tint — secondary/two-hops-out state */
+  --accent-ink: #2a2338;      /* dark text for use on a solid accent fill */
+
+  --danger: #8a2f28;
+  --danger-bg: #f7ece9;
+  --good: #131313;
+  --good-bg: #efefef;
+
+  --radius: 2px;
+  --font: 'Jost', 'Avenir Next', 'Segoe UI', Arial, sans-serif;
+  --font-mono: 'Drafting Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+}
+
+* { box-sizing: border-box; scrollbar-width: thin; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14.5px;
+  -webkit-font-smoothing: antialiased;
+}
+button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+input { font: inherit; color: inherit; }
+a { color: var(--accent); }
+table { font-family: inherit; }
+
+/* numeric readouts — BPM, timecodes, countdown — read like a hardware display */
+.mono-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+@keyframes pulseRing {
+  0% { box-shadow: 0 0 0 0 rgba(139, 123, 184, .4); }
+  70% { box-shadow: 0 0 0 8px rgba(139, 123, 184, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(139, 123, 184, 0); }
+}
+
+/* ---------------------------------------------------------------
+   App shell / sidebar
+   --------------------------------------------------------------- */
+.app-shell { height: 100vh; display: flex; }
+
+.sidebar {
+  width: 184px; flex: none; background: var(--panel);
+  display: flex; flex-direction: column; padding: 16px 8px;
+  border-right: 1px solid var(--line-soft);
+}
+.sidebar-brand { font-weight: 500; font-size: 15px; letter-spacing: .01em; padding: 0 8px 16px; }
+.nav-btn {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 500; padding: 7px 9px; border-radius: var(--radius);
+  text-align: left; width: 100%; color: var(--muted); margin-bottom: 1px;
+}
+.nav-btn:hover { background: rgba(19, 19, 19, .04); }
+.nav-btn.active { color: var(--paper); background: var(--ink); }
+.nav-btn.active:hover { background: var(--ink); }
+.sidebar-footer { margin-top: auto; padding: 8px 9px 2px; font-size: 11px; color: var(--faint); line-height: 1.55; }
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; position: relative; }
+
+/* ---------------------------------------------------------------
+   Generic page scaffolding
+   --------------------------------------------------------------- */
+.page { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.page-scroll { padding: 22px 24px; overflow-y: auto; }
+.page-narrow { max-width: 540px; margin: 0 auto; width: 100%; }
+.page-narrow-wide { max-width: 620px; margin: 0 auto; width: 100%; }
+.page-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
+.page-title { font-weight: 500; font-size: 19px; }
+.page-sub { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+
+.section-label {
+  font-size: 11px; letter-spacing: .02em;
+  color: var(--muted); font-weight: 500; margin-bottom: 6px;
+}
+.section-label-dark { color: rgba(252, 252, 252, .55); margin-top: 10px; }
+
+.empty-state {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; text-align: center; padding: 36px; color: var(--muted);
+}
+.empty-state-title { font-size: 17px; font-weight: 500; color: var(--ink); }
+.empty-state-sub { font-size: 13px; color: var(--muted); max-width: 320px; }
+.empty-note { font-size: 13px; color: var(--faint); font-style: italic; padding: 16px 4px; }
+.empty-note-sm { font-size: 11px; color: var(--muted); font-style: italic; }
+.hint-text { font-size: 11px; color: var(--faint); font-style: italic; }
+.error-note { font-size: 12px; color: var(--danger); background: var(--danger-bg); padding: 6px 10px; border-radius: var(--radius); margin: 4px 0; }
+.success-note {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 12px; padding: 7px 11px; border-radius: var(--radius); background: var(--good-bg); color: var(--good); margin-top: 8px;
+  border: 1px solid var(--line);
+}
+
+/* ---------------------------------------------------------------
+   Buttons / inputs / tags
+   --------------------------------------------------------------- */
+.btn { font-size: 13px; font-weight: 500; padding: 7px 14px; border-radius: var(--radius); }
+.btn-primary { background: var(--ink); color: var(--paper); }
+.btn-accent { background: var(--accent); color: var(--accent-ink); }
+.btn-ghost { background: var(--panel); color: var(--ink); }
+.btn-danger { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+.btn-sm { font-size: 12px; padding: 5px 10px; }
+.btn-xs { font-size: 11px; padding: 3px 7px; }
+.btn-self-start { align-self: flex-start; }
+
+.input {
+  width: 100%; min-height: 32px; padding: 5px 9px; font-size: 13px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink);
+}
+.input:focus { outline: 2px solid var(--accent-light); outline-offset: -1px; }
+
+.icon-btn {
+  width: 24px; height: 24px; border-radius: var(--radius); background: var(--panel);
+  display: flex; align-items: center; justify-content: center; color: #363636; flex: none;
+}
+.icon-btn-dark { background: rgba(252, 252, 252, .14); color: var(--paper); width: 20px; height: 20px; }
+
+/* brutalist data tag: plain bordered box, monospace, no fill, no color-coding */
+.tag {
+  display: inline-flex; font-family: var(--font-mono); font-size: 10px; font-weight: 400; padding: 1px 5px;
+  border-radius: 0; line-height: 1.6; border: 1px solid var(--ink); color: var(--ink); background: transparent;
+}
+.tag-accent, .tag-good, .tag-warn, .tag-purple, .tag-neutral, .tag-on-dark { border-color: var(--ink); color: var(--ink); background: transparent; }
+.tag-row { display: flex; gap: 5px; margin-bottom: 14px; }
+
+.pill-group { display: flex; gap: 4px; }
+.pill { font-size: 11px; font-weight: 500; padding: 4px 9px; border-radius: var(--radius); background: var(--panel); color: var(--muted); }
+.pill.active { background: var(--accent); color: var(--accent-ink); }
+
+.field { margin-bottom: 12px; }
+.field-label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--muted); }
+
+.form-card { border-radius: var(--radius); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 2px; }
+.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; }
+.settings-row-title { font-size: 13px; font-weight: 500; }
+.settings-row-sub { font-size: 11.5px; color: var(--muted); max-width: 420px; }
+
+/* dropzone */
+.dropzone {
+  min-height: 50px; padding: 9px; font-size: 12px; background: var(--paper);
+  border: 1px dashed #b0b0b0; border-radius: var(--radius);
+  display: flex; align-items: center; gap: 8px; color: var(--muted); cursor: pointer;
+}
+.dropzone-active { border-color: var(--accent); background: var(--accent-bg); }
+.dropzone-hint { color: var(--muted); }
+.dropzone-file { display: flex; flex-direction: column; gap: 1px; }
+.dropzone-file-name { font-weight: 500; color: var(--ink); font-size: 12.5px; }
+.dropzone-file-size { color: var(--muted); font-size: 11px; font-family: var(--font-mono); }
+.analyzing-hint { margin: 4px 0 8px; }
+
+/* searchable song picker */
+.picker-chip {
+  display: flex; align-items: center; gap: 9px; padding: 7px 9px;
+  border-radius: var(--radius); background: var(--paper); border: 1px solid var(--line);
+}
+.picker-chip-free { background: var(--panel); border-style: dashed; }
+.picker-chip-art { width: 26px; height: 26px; flex: none; border-radius: var(--radius); background: repeating-linear-gradient(45deg, rgba(19, 19, 19, .12) 0 3px, transparent 3px 6px); }
+.picker-chip-text { flex: 1; min-width: 0; }
+.picker-chip-title { font-weight: 500; font-size: 12.5px; }
+.picker-chip-artist { font-size: 11px; color: var(--muted); }
+.picker-open { display: flex; flex-direction: column; gap: 5px; }
+.picker-results { max-height: 170px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius); padding: 3px; background: var(--paper); }
+.picker-result { display: flex; justify-content: space-between; gap: 8px; padding: 5px 7px; border-radius: var(--radius); font-size: 12.5px; text-align: left; }
+.picker-result:hover { background: var(--panel); }
+.picker-result-free { color: var(--muted); font-style: italic; }
+.picker-result-title { font-weight: 500; }
+.picker-result-artist { color: var(--muted); font-size: 11px; }
+.picker-result-empty { font-size: 12px; color: var(--faint); padding: 7px; font-style: italic; }
+
+/* ---------------------------------------------------------------
+   Perform: toolbar / legend / zoom
+   --------------------------------------------------------------- */
+.page-perform { position: relative; }
+.toolbar {
+  display: flex; align-items: center; gap: 12px; padding: 8px 18px;
+  border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; flex: none;
+}
+.toolbar-search { width: 210px; }
+.legend { display: flex; align-items: center; gap: 9px; font-size: 10.5px; color: var(--faint); }
+.legend span { display: inline-flex; align-items: center; }
+.swatch { display: inline-block; width: 8px; height: 8px; margin-right: 4px; }
+.swatch-dot { border-radius: 50%; background: var(--ink); }
+.swatch-ring { border-radius: 0; border: 2px solid var(--accent); width: 6px; height: 6px; }
+.swatch-dash { border-top: 2px dashed var(--accent-light); width: 11px; height: 0; }
+.swatch-line { border-top: 3px solid var(--ink); width: 11px; height: 0; }
+.zoom-controls { margin-left: auto; display: flex; gap: 2px; align-items: center; }
+.zoom-btn { width: 22px; height: 22px; border-radius: var(--radius); background: var(--panel); font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; }
+.zoom-label { font-size: 11px; color: var(--muted); width: 36px; text-align: center; font-family: var(--font-mono); }
+
+/* ---------------------------------------------------------------
+   Perform: canvas / graph
+   --------------------------------------------------------------- */
+.canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.canvas-scroll { position: absolute; inset: 0; overflow: auto; background: var(--panel); }
+.canvas-sizer { position: relative; }
+.canvas-scale { width: 1400px; height: 820px; position: relative; transform-origin: top left; }
+.edge-svg { position: absolute; left: 0; top: 0; }
+.edge-hit { cursor: pointer; }
+.edge-tooltip { position: absolute; pointer-events: none; z-index: 2; white-space: nowrap; display: flex; gap: 3px; }
+
+.node-card {
+  position: absolute; width: 178px; border-radius: var(--radius); padding: 9px;
+  cursor: pointer; background: var(--paper); color: var(--ink); border: 1px solid var(--line);
+  user-select: none;
+}
+.node-dark { background: var(--ink); color: var(--paper); border-color: var(--accent); }
+.node-now { border-color: var(--ink) !important; animation: pulseRing 2.2s ease-in-out infinite; }
+.node-tier1 { border: 2px solid var(--accent); }
+.node-tier2 { border: 1px dashed var(--accent-light); }
+.node-badge {
+  position: absolute; left: -7px; top: -7px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 500; font-family: var(--font-mono);
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+}
+.node-inspect-btn {
+  position: absolute; top: 5px; right: 5px; width: 17px; height: 17px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 500;
+  background: rgba(19, 19, 19, .08); color: var(--muted);
+}
+.node-dark .node-inspect-btn { background: rgba(252, 252, 252, .18); color: var(--paper); }
+.node-title { font-weight: 500; font-size: 13px; line-height: 1.2; padding-right: 12px; }
+.node-artist { font-size: 11px; margin-bottom: 4px; color: var(--muted); }
+.node-dark .node-artist { color: rgba(252, 252, 252, .7); }
+.node-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.node-dark .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper); }
+.node-versions { display: flex; gap: 3px; margin-top: 5px; flex-wrap: wrap; }
+.version-chip { font-size: 9px; padding: 2px 5px; border-radius: 0; background: #d7d7d7; color: #363636; font-family: var(--font-mono); }
+.version-chip.active { background: var(--ink); color: var(--paper); }
+.node-dark .version-chip:not(.active) { background: rgba(252, 252, 252, .25); color: rgba(252, 252, 252, .85); }
+.node-inout { font-size: 10px; margin-top: 5px; color: #8a8a8a; font-family: var(--font-mono); }
+.node-dark .node-inout { color: rgba(252, 252, 252, .55); }
+
+.end-node {
+  position: absolute; width: 128px; border-radius: var(--radius); padding: 8px;
+  cursor: pointer; background: var(--paper); color: var(--ink); border: 1px solid var(--line);
+}
+.end-node-title { display: flex; align-items: center; gap: 5px; font-weight: 500; font-size: 12px; }
+.end-node-hint { font-size: 10px; margin-top: 2px; color: #8a8a8a; }
+.end-node.node-dark .end-node-hint { color: rgba(252, 252, 252, .7); }
+
+/* ---------------------------------------------------------------
+   Perform: floating transport / queue strip / pending panel
+   --------------------------------------------------------------- */
+.transport-card {
+  position: absolute; left: 14px; bottom: 14px; width: 260px; background: var(--paper);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 12px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, .12); z-index: 5;
+}
+.transport-row { display: flex; align-items: center; gap: 9px; }
+.play-btn { width: 36px; height: 36px; flex: none; border-radius: var(--radius); background: var(--ink); color: var(--paper); display: flex; align-items: center; justify-content: center; }
+.transport-text { flex: 1; min-width: 0; }
+.now-title { font-weight: 500; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now-artist { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.progress-block { margin-top: 10px; }
+.progress-track { height: 4px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); }
+.progress-label { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.ended-banner {
+  margin-top: 10px; padding: 7px 9px; border-radius: var(--radius); background: var(--panel);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 500;
+}
+
+.queue-strip {
+  position: absolute; left: 288px; right: 14px; bottom: 14px; background: var(--paper);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 11px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, .12); display: flex; align-items: center; gap: 7px;
+  overflow-x: auto; z-index: 5;
+}
+.queue-strip-label { font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); flex: none; }
+.queue-arrow { font-size: 13px; color: #b0b0b0; flex: none; }
+.queue-chip { display: flex; align-items: center; gap: 7px; padding: 4px 9px; border-radius: var(--radius); background: var(--panel); flex: none; min-width: 92px; }
+.queue-chip-now { background: var(--panel); flex-direction: column; align-items: flex-start; min-width: 76px; }
+.queue-chip-head { background: var(--ink); color: var(--paper); }
+.queue-chip-title { font-size: 12px; font-weight: 500; }
+.queue-chip-sub { font-size: 10px; color: var(--muted); }
+.queue-chip-head .queue-chip-sub { color: rgba(252, 252, 252, .65); }
+.queue-remove { flex: none; font-size: 12px; opacity: .6; }
+.queue-empty-hint { white-space: nowrap; }
+
+.pending-panel {
+  position: absolute; right: 14px; top: 14px; width: 300px; background: var(--ink); color: var(--paper);
+  border-radius: var(--radius); padding: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, .3); z-index: 6;
+  max-height: calc(100% - 28px); overflow-y: auto;
+}
+.pending-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.pending-title { font-weight: 500; font-size: 15px; }
+.pending-subtitle { font-size: 11px; color: rgba(252, 252, 252, .6); margin-bottom: 10px; }
+.pending-actions { display: flex; gap: 6px; margin-top: 10px; }
+
+.opt-row { border-radius: var(--radius); padding: 8px 9px; cursor: pointer; background: rgba(252, 252, 252, .08); color: var(--paper); border: 1px solid rgba(252, 252, 252, .25); margin-bottom: 5px; }
+.opt-row-disabled { color: rgba(252, 252, 252, .35); cursor: not-allowed; }
+.opt-row-selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.opt-row-main { display: flex; align-items: center; gap: 7px; }
+.opt-row-label { font-weight: 500; font-size: 13px; }
+.opt-row-note { font-size: 11px; color: rgba(252, 252, 252, .4); margin-top: 3px; }
+.opt-pair { display: flex; gap: 5px; margin-bottom: 5px; }
+.opt-pair .opt-row { flex: 1; text-align: center; margin-bottom: 0; }
+.or-divider { display: flex; align-items: center; gap: 8px; margin: 10px 0 5px; font-size: 10px; color: rgba(252, 252, 252, .4); letter-spacing: .06em; text-transform: uppercase; }
+.or-divider::before, .or-divider::after { content: ''; flex: 1; height: 1px; background: rgba(252, 252, 252, .15); }
+
+/* ---------------------------------------------------------------
+   Library table
+   --------------------------------------------------------------- */
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table thead tr { border-bottom: 1px solid var(--line); text-align: left; }
+.table th { padding: 7px 9px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+.th-sortable { cursor: pointer; }
+.th-sortable:hover { color: var(--ink); }
+.table-row { border-bottom: 1px solid #e6e6e6; cursor: pointer; }
+.table-row:hover { background: rgba(19, 19, 19, .03); }
+.table-row-selected { background: var(--accent-bg) !important; }
+.table td { padding: 8px 9px; }
+.td-strong { font-weight: 500; }
+.td-muted { color: var(--muted); }
+
+/* ---------------------------------------------------------------
+   Add Audio: detected summary / cue preview
+   --------------------------------------------------------------- */
+.detected-label { font-size: 11px; letter-spacing: .02em; color: var(--muted); font-weight: 500; margin: 8px 0 8px; }
+.pair-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.detected-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.cue-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.waveform-bar { position: relative; height: 40px; background: repeating-linear-gradient(90deg, rgba(19, 19, 19, .14) 0 2px, transparent 2px 6px), var(--line-soft); border-radius: var(--radius); overflow: hidden; }
+.waveform-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
+.waveform-marker-label { position: absolute; top: 0; transform: translateX(-50%); font-size: 9px; font-family: var(--font-mono); background: var(--ink); color: var(--paper); padding: 2px 4px; border-radius: 0; white-space: nowrap; }
+
+/* ---------------------------------------------------------------
+   Inspect drawer
+   --------------------------------------------------------------- */
+.drawer {
+  position: absolute; right: 14px; top: 14px; width: 310px; max-height: calc(100% - 28px);
+  overflow-y: auto; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px; box-shadow: 0 6px 20px rgba(0, 0, 0, .15); z-index: 8;
+}
+.drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; gap: 8px; }
+.drawer-title { font-weight: 500; font-size: 17px; }
+.drawer-title-input { font-weight: 500; font-size: 15px; flex: 1; margin-right: 8px; }
+.drawer-artist { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.drawer-actions-row { display: flex; gap: 7px; margin-bottom: 16px; align-items: center; }
+.drawer-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 18px; }
+.drawer-frag { border-radius: var(--radius); background: var(--panel); padding: 7px 9px; }
+.drawer-frag-inheritable { background: transparent; border: 1px dashed #b0b0b0; }
+.drawer-frag-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.drawer-frag-label { font-size: 12px; font-weight: 500; }
+.drawer-frag-label-muted { color: var(--muted); }
+.drawer-frag-actions { display: flex; gap: 4px; flex: none; }
+.drawer-frag-dest { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.dot-verified { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); flex: none; }
+
+.version-row { display: flex; gap: 5px; margin-bottom: 10px; }
+.seg-btn { font-size: 12px; padding: 5px 10px; border-radius: var(--radius); flex: 1; background: var(--panel); color: #363636; }
+.seg-btn.active { background: var(--ink); color: var(--paper); }
+
+.linking-panel { margin-top: 14px; border-radius: var(--radius); background: var(--panel); padding: 11px; }
+.linking-title { font-size: 12px; font-weight: 500; margin-bottom: 7px; }
+.linking-waveform { height: 40px; background: repeating-linear-gradient(90deg, rgba(19, 19, 19, .15) 0 2px, transparent 2px 6px), var(--line-soft); border-radius: var(--radius); margin-bottom: 7px; }
+.linking-nudge { display: flex; align-items: center; gap: 8px; }
+.linking-nudge-label { font-size: 11px; color: var(--muted); flex: 1; text-align: center; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// =====================================================================================
+// DJ Flow — core data model & pure logic (no React/JSX here — plain JS, easy to unit test)
+// =====================================================================================
+
+const END = '__end__';
+const STORAGE_KEY = 'djflow:v1';
+
+// ---------------------------------------------------------------------------
+// Real app state starts empty — no demo/sample data is ever loaded into the app.
+// The functions below (sample*ForTests) exist purely so the pure-logic unit
+// tests have some realistic data shaped like real library data to exercise;
+// nothing in the app itself calls them.
+// ---------------------------------------------------------------------------
+function sampleSongsForTests() {
+  return {
+    hd: { id: 'hd', title: 'Horizon Drift', artist: 'Nomi Sato', x: 40, y: 360, versions: [{ id: 'v1', label: 'Original', bpm: 124, key: 'A min' }] },
+    cb: { id: 'cb', title: 'Concrete Bloom', artist: 'Ledger', x: 320, y: 300, versions: [{ id: 'v1', label: 'Original', bpm: 128, key: 'F# min' }, { id: 'v2', label: 'VIP Remix', bpm: 132, key: 'F# min' }] },
+    gs: { id: 'gs', title: 'Glass Static', artist: 'Rook & Vale', x: 620, y: 440, versions: [{ id: 'v1', label: 'Original', bpm: 126, key: 'G min' }, { id: 'v2', label: 'Radio Edit', bpm: 126, key: 'G min' }] },
+    lr: { id: 'lr', title: 'Late Return', artist: 'Nomi Sato', x: 900, y: 480, versions: [{ id: 'v1', label: 'Original', bpm: 120, key: 'D min' }] },
+    wr: { id: 'wr', title: 'Wire & Rust', artist: 'Rook & Vale', x: 900, y: 600, versions: [{ id: 'v1', label: 'Original', bpm: 129, key: 'D min' }] },
+  };
+}
+function sampleEdgesForTests() {
+  return [
+    { id: 'e1', type: 'intro', r: 'hd', rv: 'v1', verified: true },
+    { id: 'e2', type: 'transition', l: 'hd', lv: 'v1', r: 'cb', rv: 'v1', verified: true, bpmDelta: 4, keyChange: true, remix: false },
+    { id: 'e4', type: 'transition', l: 'cb', lv: 'v1', r: 'gs', rv: 'v1', verified: true, bpmDelta: -2, keyChange: false, remix: true },
+    { id: 'e5', type: 'outro', l: 'cb', lv: 'v1', verified: true },
+    { id: 'e6', type: 'transition', l: 'gs', lv: 'v1', r: 'lr', rv: 'v1', verified: false, bpmDelta: -6, keyChange: true, remix: false },
+    { id: 'e13', type: 'transition', l: 'gs', lv: 'v1', r: 'wr', rv: 'v1', verified: true, bpmDelta: 3, keyChange: true, remix: false },
+    { id: 'e14', type: 'outro', l: 'gs', lv: 'v1', verified: true },
+  ];
+}
+
+function emptySession() {
+  return {
+    nowPlayingId: null, nowPlayingVersion: null, startMethod: null,
+    versionOf: {}, queue: [], nextCountdown: 34, isPlaying: false, setEnded: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Persistence (localStorage stand-in for the eventual Supabase-backed store).
+// Everything reads/writes through these three functions — when it's time to
+// swap in real Supabase + Cloudflare storage, this is the only file that
+// should need to change. Keep the shape of `load()`'s return value stable.
+// ---------------------------------------------------------------------------
+const Store = {
+  load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return parsed;
+    } catch (e) {
+      console.warn('DJ Flow: could not read saved data, starting fresh.', e);
+      return null;
+    }
+  },
+  save(data) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      return true;
+    } catch (e) {
+      console.warn('DJ Flow: could not save — storage may be full or disabled.', e);
+      return false;
+    }
+  },
+  clear() {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+  },
+};
+
+// The one and only "no saved state yet" starting point — a genuinely empty
+// library. Nothing is seeded; the person adds their own songs and audio.
+function freshState() {
+  return { songs: {}, edges: [], session: emptySession(), venueName: '' };
+}
+
+// ---------------------------------------------------------------------------
+// Small generic helpers
+// ---------------------------------------------------------------------------
+function uid(prefix) { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+function fmtTime(s) { s = Math.max(0, Math.round(s)); const m = Math.floor(s / 60); const sec = s % 60; return m + ':' + (sec < 10 ? '0' : '') + sec; }
+function fmtSignedBpm(n) { if (n == null) return ''; return (n > 0 ? '+' : '') + n + ' BPM'; }
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function hashString(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+// A short, deterministic pseudo-cue-point pair derived from two song ids, so the
+// "detected" cue markers in Add Audio vary per pair instead of always looking identical.
+function pseudoCuePoints(leftId, rightId) {
+  const h = hashString((leftId || '_') + '|' + (rightId || '_'));
+  const out = 90 + (h % 90); // 90s..180s "out" point on the left song
+  const inp = 3 + ((h >> 5) % 20); // 3s..23s "in" point on the right song
+  return { outSeconds: out, inSeconds: inp };
+}
+
+// Stands in for real audio-fingerprint detection: turns a filename+size into a
+// deterministic pick of one or two songs from the library, so "uploading" a file
+// consistently "detects" the same match every time you try it.
+function pickDetectedSongs(songIds, seedText, count) {
+  const h = hashString(seedText || 'x');
+  const picks = [];
+  for (let i = 0; i < count; i++) {
+    if (songIds.length === 0) break;
+    const idx = (h + i * 2654435761) % songIds.length;
+    const id = songIds[Math.abs(idx) % songIds.length];
+    if (!picks.includes(id)) picks.push(id);
+  }
+  // pad out with the next distinct ids if a collision shrank the list
+  let j = 0;
+  while (picks.length < count && j < songIds.length) {
+    if (!picks.includes(songIds[j])) picks.push(songIds[j]);
+    j++;
+  }
+  return picks;
+}
+
+// ---------------------------------------------------------------------------
+// Song / edge helpers shared by multiple pages
+// ---------------------------------------------------------------------------
+function activeVersionId(song, versionOf) {
+  if (!song) return null;
+  return versionOf[song.id] || song.versions[0].id;
+}
+function activeVersion(song, versionOf) {
+  if (!song) return null;
+  const vid = activeVersionId(song, versionOf);
+  return song.versions.find(v => v.id === vid) || song.versions[0];
+}
+function edgeVersionMatches(songs, versionOf, e) {
+  const lOk = !e.l || activeVersionId(songs[e.l], versionOf) === e.lv;
+  const rOk = !e.r || activeVersionId(songs[e.r], versionOf) === e.rv;
+  return lOk && rOk;
+}
+function getVisibleEdges(songs, edges, versionOf) {
+  return edges.filter(e => e.verified && edgeVersionMatches(songs, versionOf, e));
+}
+function inOutCounts(edges, songId, versionId) {
+  const inCount = edges.filter(e => e.verified && e.type !== 'outro' && e.r === songId && e.rv === versionId).length;
+  const outCount = edges.filter(e => e.verified && e.type !== 'intro' && e.l === songId && e.lv === versionId).length;
+  return { inCount, outCount };
+}
+
+// Removing a song must not leave dangling edges pointing at it.
+function removeSongCascade(songs, edges, songId) {
+  const nextSongs = { ...songs };
+  delete nextSongs[songId];
+  const nextEdges = edges.filter(e => e.l !== songId && e.r !== songId);
+  return { songs: nextSongs, edges: nextEdges };
+}
+
+// ---------------------------------------------------------------------------
+// Graph geometry
+// ---------------------------------------------------------------------------
+const CARD_W = 180;
+const END_NODE = { x: 1250, y: 20, w: 130 };
+
+function centerOf(songs, id) {
+  if (id === END) return { x: END_NODE.x + END_NODE.w / 2, y: END_NODE.y + 24 };
+  const s = songs[id];
+  const extra = s.versions.length > 1 ? 12 : 0;
+  return { x: s.x + CARD_W / 2, y: s.y + 38 + extra };
+}
+function shorten(x1, y1, x2, y2, pad1, pad2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  return { x1: x1 + ux * pad1, y1: y1 + uy * pad1, x2: x2 - ux * pad2, y2: y2 - uy * pad2 };
+}
+
+// ---------------------------------------------------------------------------
+// Reachability from the tail of the current queue (or Now Playing if the queue
+// is empty). Returns which songs have a *built* path to them right now.
+// ---------------------------------------------------------------------------
+function computeReachability(songs, visibleEdges, nowPlayingId, nowPlayingVersion, versionOf, queue) {
+  const queueHasId = (id) => queue.some(q => q.id === id);
+  const tail = queue.length ? queue[queue.length - 1] : null;
+  const fromId = tail ? (tail.id === END ? null : tail.id) : nowPlayingId;
+  const fromVer = tail ? (tail.id === END ? null : tail.version) : nowPlayingVersion;
+
+  const tier1 = new Set();
+  const tier2 = new Set();
+  if (fromId) {
+    visibleEdges.filter(e => e.type === 'transition' && e.l === fromId && e.lv === fromVer).forEach(e => {
+      if (e.r !== nowPlayingId && !queueHasId(e.r)) tier1.add(e.r);
+    });
+    visibleEdges.filter(e => e.type === 'intro').forEach(e => {
+      if (e.r !== nowPlayingId && !queueHasId(e.r)) tier1.add(e.r);
+    });
+    if (!queueHasId(END)) tier1.add(END);
+    tier1.forEach(id => {
+      if (id === END) return;
+      visibleEdges.filter(e => e.type === 'transition' && e.l === id).forEach(e => {
+        if (e.r !== nowPlayingId && !queueHasId(e.r) && !tier1.has(e.r)) tier2.add(e.r);
+      });
+    });
+  }
+  return { fromId, fromVer, tier1, tier2 };
+}
+
+// quality: 3 = produced transition (solid, thick); 2 = both halves built (solid, medium);
+// 1 = one half built (dashed, medium); 0 = raw cut (dashed, fine)
+function hopQuality(hop, isEndHop) {
+  if (isEndHop) return hop.ending === 'outro' ? 2 : 0;
+  if (hop.mode === 'transition') return 3;
+  const eOk = hop.ending === 'outro', sOk = hop.starting === 'intro';
+  return (eOk && sOk) ? 2 : (eOk || sOk) ? 1 : 0;
+}
+function dashForQuality(quality) {
+  return { 3: { dash: '0', width: 4 }, 2: { dash: '0', width: 3 }, 1: { dash: '7,4', width: 2.5 }, 0: { dash: '2,5', width: 2.5 } }[quality];
+}
+function hopEndingLabel(e) { return e === 'outro' ? 'outro' : 'natural end'; }
+function hopStartingLabel(s) { return s === 'intro' ? 'intro' : 'cold cut'; }
+function hopSummary(hop) {
+  if (hop.id === END) return hopEndingLabel(hop.ending);
+  if (hop.mode === 'transition') return 'transition';
+  return hopEndingLabel(hop.ending) + ' \u2192 ' + hopStartingLabel(hop.starting);
+}
+
+// ---------------------------------------------------------------------------
+// Library table sort/filter
+// ---------------------------------------------------------------------------
+function libraryRows(songs, edges, versionOf, search, sortKey, sortDir) {
+  const q = search.trim().toLowerCase();
+  let rows = Object.keys(songs).map(id => {
+    const s = songs[id];
+    const v = activeVersion(s, versionOf);
+    const { inCount, outCount } = inOutCounts(edges, id, v.id);
+    return { id, title: s.title, artist: s.artist, bpmNum: v.bpm, bpm: v.bpm + ' BPM', key: v.key, versions: s.versions.length, inCount, outCount, isDeadEnd: outCount === 0 };
+  });
+  if (q) rows = rows.filter(r => r.title.toLowerCase().includes(q) || r.artist.toLowerCase().includes(q));
+  const val = (r) => sortKey === 'bpm' ? r.bpmNum : sortKey === 'artist' ? r.artist.toLowerCase() : sortKey === 'key' ? r.key : r.title.toLowerCase();
+  rows.sort((a, b) => { const av = val(a), bv = val(b); const c = av < bv ? -1 : av > bv ? 1 : 0; return sortDir === 'asc' ? c : -c; });
+  return rows;
+}
+
+// expose everything to the React script that follows
+window.Core = {
+  END, STORAGE_KEY,
+  sampleSongsForTests, sampleEdgesForTests, emptySession, freshState, Store,
+  uid, clamp, fmtTime, fmtSignedBpm, fmtBytes, hashString, pseudoCuePoints, pickDetectedSongs,
+  activeVersionId, activeVersion, edgeVersionMatches, getVisibleEdges, inOutCounts, removeSongCascade,
+  CARD_W, END_NODE, centerOf, shorten,
+  computeReachability, hopQuality, dashForQuality, hopEndingLabel, hopStartingLabel, hopSummary,
+  libraryRows,
+};
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+const {
+  END, Store, freshState,
+  uid, clamp, fmtTime, fmtSignedBpm, fmtBytes, pseudoCuePoints, pickDetectedSongs,
+  activeVersionId, activeVersion, getVisibleEdges, inOutCounts, removeSongCascade,
+  CARD_W, END_NODE, centerOf, shorten,
+  computeReachability, hopQuality, dashForQuality, hopEndingLabel, hopStartingLabel, hopSummary,
+  libraryRows,
+} = window.Core;
+
+const INITIAL = Store.load() || freshState();
+
+// =====================================================================================
+// Small shared bits
+// =====================================================================================
+
+function Icon({ path, size = 15, strokeWidth = 1.6, filled = false }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke={filled ? 'none' : 'currentColor'} strokeWidth={strokeWidth}>
+      {path}
+    </svg>
+  );
+}
+
+const ICONS = {
+  perform: <polygon points="6,4 20,12 6,20" fill="currentColor" />,
+  library: <><circle cx="7" cy="7" r="3"></circle><circle cx="17" cy="7" r="3"></circle><circle cx="7" cy="17" r="3"></circle><circle cx="17" cy="17" r="3"></circle></>,
+  upload: <><path d="M12 16V4"></path><path d="M6 10l6-6 6 6"></path><path d="M4 20h16"></path></>,
+  addAudio: <><path d="M9 17H7A5 5 0 0 1 7 7h2"></path><path d="M15 7h2a5 5 0 1 1 0 10h-2"></path><line x1="8" y1="12" x2="16" y2="12"></line></>,
+  settings: <><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"></path></>,
+  close: <><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></>,
+  play: <polygon points="6,4 20,12 6,20" fill="currentColor" />,
+  pause: <><rect x="5" y="4" width="5" height="16" fill="currentColor"></rect><rect x="14" y="4" width="5" height="16" fill="currentColor"></rect></>,
+  download: <><path d="M12 3v12"></path><path d="M7 10l5 5 5-5"></path><path d="M5 21h14"></path></>,
+  swap: <><path d="M9 17H7A5 5 0 0 1 7 7h2"></path><path d="M15 7h2a5 5 0 1 1 0 10h-2"></path><line x1="8" y1="12" x2="16" y2="12"></line></>,
+  cold: <><path d="M3 12h13"></path><path d="M11 6l6 6-6 6"></path></>,
+};
+
+// A small searchable song picker: shows a chip once a value is chosen, or a
+// filtered text search while empty / being changed.
+function SongPicker({ songs, value, onChange, allowFree, freeLabel, placeholder }) {
+  const [editing, setEditing] = useState(!value);
+  const [query, setQuery] = useState('');
+  const chosen = value ? songs[value] : null;
+
+  if (!editing && chosen) {
+    return (
+      <div className="picker-chip">
+        <div className="picker-chip-art" />
+        <div className="picker-chip-text">
+          <div className="picker-chip-title">{chosen.title}</div>
+          <div className="picker-chip-artist">{chosen.artist}</div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(true); setQuery(''); }}>Change</button>
+      </div>
+    );
+  }
+  if (!editing && !chosen) {
+    return (
+      <div className="picker-chip picker-chip-free">
+        <div className="picker-chip-text"><div className="picker-chip-title">{freeLabel}</div></div>
+        <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(true); setQuery(''); }}>Change</button>
+      </div>
+    );
+  }
+
+  const q = query.trim().toLowerCase();
+  const results = Object.values(songs)
+    .filter(s => !q || s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q))
+    .slice(0, 8);
+
+  return (
+    <div className="picker-open">
+      <input
+        className="input"
+        autoFocus
+        placeholder={placeholder || 'Search songs…'}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      <div className="picker-results">
+        {allowFree && (
+          <button className="picker-result picker-result-free" onClick={() => { onChange(null); setEditing(false); }}>
+            {freeLabel}
+          </button>
+        )}
+        {results.map(s => (
+          <button key={s.id} className="picker-result" onClick={() => { onChange(s.id); setEditing(false); }}>
+            <span className="picker-result-title">{s.title}</span>
+            <span className="picker-result-artist">{s.artist}</span>
+          </button>
+        ))}
+        {results.length === 0 && <div className="picker-result-empty">no matches</div>}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div className="field">
+      <label className="field-label">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function Dropzone({ file, onFile, hint }) {
+  const inputRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+
+  function handleFiles(fileList) {
+    if (fileList && fileList[0]) onFile({ name: fileList[0].name, size: fileList[0].size });
+  }
+  return (
+    <div
+      className={'dropzone' + (dragging ? ' dropzone-active' : '')}
+      onClick={() => inputRef.current && inputRef.current.click()}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}
+    >
+      <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={(e) => handleFiles(e.target.files)} />
+      <Icon path={ICONS.upload} size={16} />
+      {file ? (
+        <div className="dropzone-file">
+          <div className="dropzone-file-name">{file.name}</div>
+          <div className="dropzone-file-size">{fmtBytes(file.size)}</div>
+        </div>
+      ) : (
+        <div className="dropzone-hint">{hint}</div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================================
+// Sidebar
+// =====================================================================================
+
+function Sidebar({ tab, setTab, songCount, edgeCount, venueName }) {
+  const items = [
+    { id: 'perform', label: 'Perform', icon: ICONS.perform },
+    { id: 'library', label: 'Library', icon: ICONS.library },
+    { id: 'upload', label: 'Upload Song', icon: ICONS.upload },
+    { id: 'addAudio', label: 'Add Audio', icon: ICONS.addAudio },
+    { id: 'settings', label: 'Settings', icon: ICONS.settings },
+  ];
+  return (
+    <div className="sidebar">
+      <div className="sidebar-brand">Eskimo Studio</div>
+      {items.map(it => (
+        <button key={it.id} className={'nav-btn' + (tab === it.id ? ' active' : '')} onClick={() => setTab(it.id)}>
+          <Icon path={it.icon} size={15} />
+          {it.label}
+        </button>
+      ))}
+      <div className="sidebar-footer">
+        {venueName || 'Untitled session'}<br />{songCount} songs · {edgeCount} audio pieces
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================================
+// App shell — owns the durable data (songs / edges / session / venueName) and the
+// small bits of UI state that are shared across more than one page (the tab itself,
+// and which song's inspect drawer is open).
+// =====================================================================================
+
+function App() {
+  const [songs, setSongs] = useState(INITIAL.songs);
+  const [edges, setEdges] = useState(INITIAL.edges);
+  const [session, setSession] = useState(INITIAL.session);
+  const [venueName, setVenueName] = useState(INITIAL.venueName);
+
+  const [tab, setTab] = useState('perform');
+  const [selectedSongId, setSelectedSongId] = useState(null);
+  const [linkingId, setLinkingId] = useState(null);
+
+  // ---- debounced persistence ----
+  const saveTimer = useRef(null);
+  useEffect(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      Store.save({ songs, edges, session, venueName });
+    }, 400);
+    return () => clearTimeout(saveTimer.current);
+  }, [songs, edges, session, venueName]);
+
+  // ---- the set clock: advances nowPlaying when the queue's head countdown elapses ----
+  useEffect(() => {
+    const t = setInterval(() => {
+      setSession(prev => {
+        if (!prev.isPlaying || prev.queue.length === 0) return prev;
+        if (prev.nextCountdown <= 1) {
+          const head = prev.queue[0];
+          if (head.id === END) {
+            return { ...prev, isPlaying: false, setEnded: true, queue: [], nextCountdown: 34 };
+          }
+          return {
+            ...prev,
+            nowPlayingId: head.id, nowPlayingVersion: head.version,
+            versionOf: { ...prev.versionOf, [head.id]: head.version },
+            queue: prev.queue.slice(1), nextCountdown: 34,
+          };
+        }
+        return { ...prev, nextCountdown: prev.nextCountdown - 1 };
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // ---- cascade-safe song deletion (also closes the drawer / clears anything referencing it) ----
+  const deleteSong = useCallback((songId) => {
+    const result = removeSongCascade(songs, edges, songId);
+    setSongs(result.songs);
+    setEdges(result.edges);
+    setSelectedSongId(sel => (sel === songId ? null : sel));
+    setSession(prev => {
+      if (prev.nowPlayingId !== songId && !prev.queue.some(q => q.id === songId)) return prev;
+      // if the deleted song was involved in the live set, just stop cleanly rather than
+      // leave the app pointing at a song that no longer exists
+      return { ...prev, queue: prev.queue.filter(q => q.id !== songId), isPlaying: prev.nowPlayingId === songId ? false : prev.isPlaying, setEnded: prev.nowPlayingId === songId ? true : prev.setEnded };
+    });
+  }, [edges, songs]);
+
+  const updateSong = useCallback((songId, patch) => {
+    setSongs(prev => (prev[songId] ? { ...prev, [songId]: { ...prev[songId], ...patch } } : prev));
+  }, []);
+
+  const addVersion = useCallback((songId, versionData) => {
+    setSongs(prev => {
+      const s = prev[songId]; if (!s) return prev;
+      return { ...prev, [songId]: { ...s, versions: [...s.versions, versionData] } };
+    });
+  }, []);
+
+  const deleteEdge = useCallback((edgeId) => {
+    setEdges(prev => prev.filter(e => e.id !== edgeId));
+    setLinkingId(id => (id === edgeId ? null : id));
+  }, []);
+
+  const setVersionOf = useCallback((songId, versionId) => {
+    setSession(prev => ({ ...prev, versionOf: { ...prev.versionOf, [songId]: versionId } }));
+  }, []);
+
+  const clearAllData = useCallback(() => {
+    Store.clear();
+    const fresh = freshState();
+    setSongs(fresh.songs); setEdges(fresh.edges); setSession(fresh.session); setVenueName(fresh.venueName);
+    setSelectedSongId(null); setLinkingId(null); setTab('perform');
+  }, []);
+
+  const songCount = Object.keys(songs).length;
+  const edgeCount = edges.length;
+
+  return (
+    <div className="app-shell">
+      <Sidebar tab={tab} setTab={setTab} songCount={songCount} edgeCount={edgeCount} venueName={venueName} />
+      <div className="main">
+        {tab === 'perform' && (
+          <PerformPage
+            songs={songs} setSongs={setSongs} edges={edges} session={session} setSession={setSession}
+            onInspect={setSelectedSongId} goAddAudio={() => setTab('addAudio')} goUpload={() => setTab('upload')}
+          />
+        )}
+        {tab === 'library' && (
+          <LibraryPage songs={songs} edges={edges} session={session} onInspect={setSelectedSongId} selectedSongId={selectedSongId} goUpload={() => setTab('upload')} />
+        )}
+        {tab === 'upload' && (
+          <UploadSongPage
+            onAddSong={(song) => setSongs(prev => ({ ...prev, [song.id]: song }))}
+            onViewSong={(id) => { setTab('library'); setSelectedSongId(id); }}
+            existingCount={songCount}
+          />
+        )}
+        {tab === 'addAudio' && (
+          <AddAudioPage
+            songs={songs} session={session}
+            onAddEdge={(edge) => setEdges(prev => [...prev, edge])}
+            onAddVersion={addVersion}
+            onViewSong={(id) => { setTab('library'); setSelectedSongId(id); }}
+          />
+        )}
+        {tab === 'settings' && (
+          <SettingsPage
+            venueName={venueName} setVenueName={setVenueName}
+            songs={songs} edges={edges} session={session}
+            onClearAll={clearAllData}
+            onRestore={(data) => { setSongs(data.songs); setEdges(data.edges); setSession(data.session); setVenueName(data.venueName); }}
+          />
+        )}
+
+        {selectedSongId && songs[selectedSongId] && (
+          <InspectDrawer
+            song={songs[selectedSongId]}
+            songs={songs} edges={edges} versionOf={session.versionOf}
+            linkingId={linkingId} setLinkingId={setLinkingId}
+            onClose={() => { setSelectedSongId(null); setLinkingId(null); }}
+            onSetVersion={setVersionOf}
+            onVerifyEdge={(edgeId) => setEdges(prev => prev.map(e => e.id === edgeId ? { ...e, verified: true } : e))}
+            onDeleteEdge={deleteEdge}
+            onUpdateSong={updateSong}
+            onDeleteSong={deleteSong}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+// =====================================================================================
+// Perform — the master graph doubles as the live routing/queue-building surface.
+// =====================================================================================
+
+function PerformPage({ songs, setSongs, edges, session, setSession, onInspect, goAddAudio, goUpload }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [focusMode, setFocusMode] = useState('all'); // 'all' | 'reachable'
+  const [zoom, setZoom] = useState(1);
+  const [hoveredEdge, setHoveredEdge] = useState(null);
+  const [pendingId, setPendingId] = useState(null);
+  const [pendingKind, setPendingKind] = useState('song'); // 'start' | 'song' | 'end'
+  const [pendingMode, setPendingMode] = useState('custom'); // 'transition' | 'custom' (song hops only)
+  const [pendingEnding, setPendingEnding] = useState('natural');
+  const [pendingStarting, setPendingStarting] = useState('cold');
+
+  const zoomRef = useRef(zoom);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
+  // the reachable set (and therefore what a click even means) depends on nowPlaying —
+  // once the set clock advances, any half-open pick no longer applies to the new context.
+  useEffect(() => { setPendingId(null); }, [session.nowPlayingId]);
+
+  const hasStarted = session.nowPlayingId !== null;
+  const versionOf = session.versionOf;
+  const verOf = (id) => (id === END ? null : (versionOf[id] || songs[id].versions[0].id));
+
+  const visibleEdges = useMemo(() => getVisibleEdges(songs, edges, versionOf), [songs, edges, versionOf]);
+  const reach = useMemo(
+    () => hasStarted
+      ? computeReachability(songs, visibleEdges, session.nowPlayingId, session.nowPlayingVersion, versionOf, session.queue)
+      : { fromId: null, fromVer: null, tier1: new Set(Object.keys(songs)), tier2: new Set() },
+    [songs, visibleEdges, hasStarted, session.nowPlayingId, session.nowPlayingVersion, versionOf, session.queue]
+  );
+  const { fromId, fromVer, tier1, tier2 } = reach;
+  const findEdge = (pred) => visibleEdges.find(pred);
+
+  // ---------------- node click (open the pending panel / toggle queue membership) ----------------
+  function handleNodeClick(id) {
+    if (!hasStarted) {
+      if (id === END) return; // can't end a set that hasn't started
+      const nextVer = verOf(id);
+      const introEdge = findEdge(e => e.type === 'intro' && e.r === id && e.rv === nextVer);
+      setPendingId(id); setPendingKind('start'); setPendingStarting(introEdge ? 'intro' : 'cold');
+      onInspect(null);
+      return;
+    }
+    if (id === session.nowPlayingId) return;
+    const qIdx = session.queue.findIndex(q => q.id === id);
+    if (qIdx >= 0) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, qIdx) })); setPendingId(null); return; }
+    if (!fromId) return; // the plan already ends in "End Set" — nothing more to add
+    if (id === END) {
+      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId && e.lv === fromVer);
+      setPendingId(END); setPendingKind('end'); setPendingEnding(outroEdge ? 'outro' : 'natural'); onInspect(null); return;
+    }
+    const nextVer = verOf(id);
+    const transitionEdge = findEdge(e => e.type === 'transition' && e.l === fromId && e.lv === fromVer && e.r === id && e.rv === nextVer);
+    const introEdge = findEdge(e => e.type === 'intro' && e.r === id && e.rv === nextVer);
+    const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId && e.lv === fromVer);
+    setPendingId(id);
+    setPendingKind('song');
+    setPendingMode(transitionEdge ? 'transition' : 'custom');
+    setPendingEnding(outroEdge ? 'outro' : 'natural');
+    setPendingStarting(introEdge ? 'intro' : 'cold');
+    onInspect(null);
+  }
+  // kept in a ref so the (stable-identity) window drag handlers always call the latest version
+  const handleNodeClickRef = useRef(handleNodeClick);
+  handleNodeClickRef.current = handleNodeClick;
+
+  // ---------------- drag-to-reposition a node (vs. a plain click) ----------------
+  const dragInfo = useRef(null);
+  const onDragMove = useCallback((e) => {
+    const d = dragInfo.current; if (!d) return;
+    const dx = (e.clientX - d.startX) / zoomRef.current;
+    const dy = (e.clientY - d.startY) / zoomRef.current;
+    if (!d.moved && Math.hypot(dx, dy) > 4) d.moved = true;
+    if (d.moved) {
+      const nx = clamp(d.origX + dx, 0, 1400 - CARD_W);
+      const ny = clamp(d.origY + dy, 0, 820 - 60);
+      setSongs(prev => (prev[d.id] ? { ...prev, [d.id]: { ...prev[d.id], x: nx, y: ny } } : prev));
+    }
+  }, [setSongs]);
+  const onDragUp = useCallback(() => {
+    const d = dragInfo.current;
+    window.removeEventListener('mousemove', onDragMove);
+    window.removeEventListener('mouseup', onDragUp);
+    dragInfo.current = null;
+    if (d && !d.moved) handleNodeClickRef.current(d.id);
+  }, [onDragMove]);
+  function onNodeMouseDown(e, song) {
+    e.stopPropagation();
+    dragInfo.current = { id: song.id, startX: e.clientX, startY: e.clientY, origX: song.x, origY: song.y, moved: false };
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragUp);
+  }
+  useEffect(() => () => { window.removeEventListener('mousemove', onDragMove); window.removeEventListener('mouseup', onDragUp); }, [onDragMove, onDragUp]);
+
+  // ---------------- search / focus dimming ----------------
+  const q = searchQuery.trim().toLowerCase();
+  const searchActive = q.length > 0;
+  function matches(id) { const s = songs[id]; return s && (s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q)); }
+  function opacityFor(id, exempt) {
+    if (exempt) return 1;
+    if (searchActive) return matches(id) ? 1 : 0.2;
+    if (focusMode === 'reachable' && !tier1.has(id) && !tier2.has(id)) return 0.3;
+    return 1;
+  }
+
+  // ---------------- edge classification + drawing ----------------
+  function classify(e) {
+    if (e.l === fromId && e.lv === fromVer && tier1.has(e.r)) return 'tier1';
+    if (tier1.has(e.l) && tier2.has(e.r)) return 'tier2';
+    return 'base';
+  }
+  const EDGE_STYLE = { base: { stroke: '#c7c7c7', width: 1.5 }, tier2: { stroke: '#9cc3e8', width: 2 }, tier1: { stroke: '#2a5da3', width: 3 } };
+  function mkEdge(e, tier) {
+    const c1 = centerOf(songs, e.l), c2 = centerOf(songs, e.r);
+    const yOff = e.id === 'e8' ? 14 : 0; // small nudge so a parallel v2 transition doesn't overlap its v1 sibling
+    const sh = shorten(c1.x, c1.y + yOff, c2.x, c2.y + yOff, 62, 62);
+    const hovered = hoveredEdge === e.id;
+    const st = EDGE_STYLE[tier];
+    return { ...sh, id: e.id, stroke: st.stroke, strokeWidth: hovered ? st.width + 1.5 : st.width, marker: 'url(#arrow-' + tier + ')', e };
+  }
+  const transitionEdges = visibleEdges.filter(e => e.type === 'transition');
+  const baseEdges = transitionEdges.filter(e => classify(e) === 'base').map(e => mkEdge(e, 'base'));
+  const tier2Edges = transitionEdges.filter(e => classify(e) === 'tier2').map(e => mkEdge(e, 'tier2'));
+  const tier1Edges = transitionEdges.filter(e => classify(e) === 'tier1').map(e => mkEdge(e, 'tier1'));
+  const tooltipEdges = [...baseEdges, ...tier1Edges];
+
+  // ---------------- the committed plan-path, regardless of whether it follows built content ----------------
+  const chain = hasStarted ? [{ id: session.nowPlayingId, ver: session.nowPlayingVersion }, ...session.queue.map(q2 => ({ id: q2.id, ver: q2.version }))] : [];
+  const planSegments = [];
+  for (let i = 0; i < chain.length - 1; i++) {
+    const a = chain[i], b = chain[i + 1];
+    const hop = session.queue[i];
+    const c1 = centerOf(songs, a.id), c2 = centerOf(songs, b.id);
+    const pad1 = a.id === END ? 40 : 62, pad2 = b.id === END ? 40 : 62;
+    const sh = shorten(c1.x, c1.y, c2.x, c2.y, pad1, pad2);
+    const { dash, width } = dashForQuality(hopQuality(hop, b.id === END));
+    planSegments.push({ id: 'plan' + i, ...sh, dash, width });
+  }
+
+  const cueBarPct = Math.round((1 - session.nextCountdown / 34) * 100);
+  const hasQueueHead = session.queue.length > 0;
+  const nowSongData = hasStarted ? songs[session.nowPlayingId] : null;
+  const nowVer = nowSongData ? activeVersion(nowSongData, versionOf) : null;
+  const nowSongLabel = nowSongData ? nowSongData.title : null;
+
+  function togglePlaying() { setSession(prev => ({ ...prev, isPlaying: !prev.isPlaying })); }
+  function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, nowPlayingVersion: null, startMethod: null, queue: [], nextCountdown: 34 })); }
+
+  function confirmPending() {
+    if (pendingKind === 'start') {
+      const pver = verOf(pendingId);
+      setSession(prev => ({
+        ...prev, nowPlayingId: pendingId, nowPlayingVersion: pver, startMethod: pendingStarting,
+        versionOf: { ...prev.versionOf, [pendingId]: pver }, queue: [], isPlaying: true, nextCountdown: 34, setEnded: false,
+      }));
+      setPendingId(null);
+      return;
+    }
+    if (pendingKind === 'end') {
+      setSession(prev => ({ ...prev, queue: [...prev.queue, { id: END, ending: pendingEnding }] }));
+      setPendingId(null);
+      return;
+    }
+    const pver = verOf(pendingId);
+    const wasEmpty = session.queue.length === 0;
+    const item = pendingMode === 'transition'
+      ? { id: pendingId, version: pver, mode: 'transition' }
+      : { id: pendingId, version: pver, mode: 'custom', ending: pendingEnding, starting: pendingStarting };
+    setSession(prev => ({ ...prev, queue: [...prev.queue, item], nextCountdown: wasEmpty ? 34 : prev.nextCountdown }));
+    setPendingId(null);
+  }
+
+  function optRowClass(available, selected) {
+    return 'opt-row' + (!available ? ' opt-row-disabled' : selected ? ' opt-row-selected' : '');
+  }
+  function chooseEnding(ending) { setPendingMode('custom'); setPendingEnding(ending); }
+  function chooseStarting(starting) { setPendingMode('custom'); setPendingStarting(starting); }
+
+  // pending-panel derived bits
+  let pendingView = null;
+  if (pendingId) {
+    if (pendingKind === 'end') {
+      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId && e.lv === fromVer);
+      pendingView = { kind: 'end', title: 'End Set', subtitle: 'stop the set here — no next song needed', outroEdge };
+    } else if (pendingKind === 'start') {
+      const s = songs[pendingId]; const pver = verOf(pendingId);
+      const introEdge = findEdge(e => e.type === 'intro' && e.r === pendingId && e.rv === pver);
+      pendingView = { kind: 'start', title: s.title, subtitle: s.artist, introEdge };
+    } else {
+      const s = songs[pendingId]; const pver = verOf(pendingId);
+      const transitionEdge = findEdge(e => e.type === 'transition' && e.l === fromId && e.lv === fromVer && e.r === pendingId && e.rv === pver);
+      const introEdge = findEdge(e => e.type === 'intro' && e.r === pendingId && e.rv === pver);
+      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId && e.lv === fromVer);
+      pendingView = { kind: 'song', title: s.title, subtitle: s.artist, transitionEdge, introEdge, outroEdge };
+    }
+  }
+  const confirmLabel = pendingView && ({ start: 'Start Set', song: 'Add to Queue', end: 'Queue Ending' })[pendingView.kind];
+
+  if (Object.keys(songs).length === 0) {
+    return (
+      <div className="page page-perform">
+        <div className="empty-state">
+          <div className="empty-state-title">Your graph is empty</div>
+          <div className="empty-state-sub">Add your first song, then come back here to lay out your set and connect it to others.</div>
+          <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page page-perform">
+      <div className="toolbar">
+        <input className="input toolbar-search" placeholder="Find a song or artist…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+        <div className="pill-group">
+          <button className={'pill' + (focusMode === 'all' ? ' active' : '')} onClick={() => setFocusMode('all')}>All songs</button>
+          <button className={'pill' + (focusMode === 'reachable' ? ' active' : '')} onClick={() => setFocusMode('reachable')}>Reachable now</button>
+        </div>
+        <div className="legend">
+          <span><i className="swatch swatch-dot" />now / queued</span>
+          <span><i className="swatch swatch-ring" />built path available</span>
+          <span><i className="swatch swatch-dash" />two hops out</span>
+          <span><i className="swatch swatch-line" />your planned route</span>
+        </div>
+        <div className="zoom-controls">
+          <button className="zoom-btn" onClick={() => setZoom(z => clamp(Math.round((z - 0.1) * 10) / 10, 0.6, 1.4))}>−</button>
+          <span className="zoom-label">{Math.round(zoom * 100)}%</span>
+          <button className="zoom-btn" onClick={() => setZoom(z => clamp(Math.round((z + 0.1) * 10) / 10, 0.6, 1.4))}>+</button>
+        </div>
+      </div>
+
+      <div className="canvas-wrap">
+        <div className="canvas-scroll">
+          <div className="canvas-sizer" style={{ width: Math.round(1400 * zoom), height: Math.round(820 * zoom) }}>
+            <div className="canvas-scale" style={{ transform: 'scale(' + zoom + ')' }}>
+              <svg width="1400" height="820" className="edge-svg">
+                <defs>
+                  <marker id="arrow-base" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c7c7c7" /></marker>
+                  <marker id="arrow-tier2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9cc3e8" /></marker>
+                  <marker id="arrow-tier1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2a5da3" /></marker>
+                  <marker id="arrow-plan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#131313" /></marker>
+                </defs>
+                {[...baseEdges, ...tier2Edges, ...tier1Edges].map(be => (
+                  <g key={be.id}>
+                    <line x1={be.x1} y1={be.y1} x2={be.x2} y2={be.y2} stroke={be.stroke} strokeWidth={be.strokeWidth} markerEnd={be.marker} />
+                    <line x1={be.x1} y1={be.y1} x2={be.x2} y2={be.y2} stroke="transparent" strokeWidth={16} className="edge-hit" onMouseEnter={() => setHoveredEdge(be.id)} onMouseLeave={() => setHoveredEdge(null)} />
+                  </g>
+                ))}
+                {planSegments.map(ps => (
+                  <line key={ps.id} x1={ps.x1} y1={ps.y1} x2={ps.x2} y2={ps.y2} stroke="#131313" strokeWidth={ps.width} strokeDasharray={ps.dash} markerEnd="url(#arrow-plan)" />
+                ))}
+              </svg>
+
+              {tooltipEdges.map(be => (be.e.bpmDelta || be.e.keyChange || be.e.remix) && (
+                <div key={'tt-' + be.id} className="edge-tooltip" style={{ left: (be.x1 + be.x2) / 2 - 50, top: (be.y1 + be.y2) / 2 - 10 }}>
+                  {!!be.e.bpmDelta && <span className="tag tag-accent">{fmtSignedBpm(be.e.bpmDelta)}</span>}
+                  {be.e.keyChange && <span className="tag tag-good">key</span>}
+                  {be.e.remix && <span className="tag tag-purple">remix</span>}
+                </div>
+              ))}
+
+              {Object.values(songs).map(s => {
+                const isNow = s.id === session.nowPlayingId;
+                const qIdx = session.queue.findIndex(q2 => q2.id === s.id);
+                const isQueued = qIdx >= 0;
+                const isTier1 = !isNow && !isQueued && tier1.has(s.id);
+                const isTier2 = !isNow && !isQueued && !isTier1 && tier2.has(s.id);
+                const dark = isNow || isQueued;
+                const av = activeVersion(s, versionOf);
+                const { inCount, outCount } = inOutCounts(edges, s.id, av.id);
+                const cls = ['node-card', dark && 'node-dark', isNow && 'node-now', isTier1 && 'node-tier1', isTier2 && 'node-tier2'].filter(Boolean).join(' ');
+                return (
+                  <div
+                    key={s.id}
+                    className={cls}
+                    style={{ left: s.x, top: s.y, width: CARD_W, opacity: opacityFor(s.id, dark), zIndex: isNow ? 4 : isQueued ? 3 : isTier1 ? 2 : 1 }}
+                    onMouseDown={(e) => onNodeMouseDown(e, s)}
+                  >
+                    {(isNow || isQueued) && <div className="node-badge">{isNow ? 'NOW' : qIdx + 1}</div>}
+                    <button className="node-inspect-btn" onMouseDown={(e) => e.stopPropagation()} onClick={() => onInspect(s.id)}>i</button>
+                    <div className="node-title">{s.title}</div>
+                    <div className="node-artist">{s.artist}</div>
+                    <div className="node-tags">
+                      <span className="tag tag-accent">{av.bpm} BPM</span>
+                      <span className="tag tag-good">{av.key}</span>
+                    </div>
+                    {s.versions.length > 1 && (
+                      <div className="node-versions">
+                        {s.versions.map(v => (
+                          <button
+                            key={v.id}
+                            className={'version-chip' + (v.id === av.id ? ' active' : '')}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={() => setSession(prev => ({ ...prev, versionOf: { ...prev.versionOf, [s.id]: v.id } }))}
+                          >{v.label}</button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="node-inout">{inCount} in · {outCount} out</div>
+                  </div>
+                );
+              })}
+
+              {hasStarted && (() => {
+                const endIdx = session.queue.findIndex(q2 => q2.id === END);
+                const endQueued = endIdx >= 0;
+                const endTier1 = !endQueued && tier1.has(END);
+                const cls = ['end-node', endQueued && 'node-dark', endTier1 && 'node-tier1'].filter(Boolean).join(' ');
+                const opacity = (focusMode === 'reachable' && !endTier1 && !endQueued) ? 0.3 : 1;
+                return (
+                  <div className={cls} style={{ left: END_NODE.x, top: END_NODE.y, width: END_NODE.w, opacity }} onClick={() => handleNodeClick(END)}>
+                    {endQueued && <div className="node-badge">{endIdx + 1}</div>}
+                    <div className="end-node-title"><Icon path={<rect x="5" y="5" width="14" height="14" />} filled size={11} /> End Set</div>
+                    <div className="end-node-hint">{endQueued ? 'queued to close the set' : 'end here — no transition needed'}</div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+
+        <div className="transport-card">
+          <div className="section-label">Now Playing</div>
+          {!hasStarted ? (
+            <div className="hint-text">nothing playing — click any song on the graph to start the set</div>
+          ) : (
+            <>
+              <div className="transport-row">
+                <button className="play-btn" onClick={togglePlaying}>
+                  <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={14} />
+                </button>
+                <div className="transport-text">
+                  <div className="now-title">{nowSongLabel}</div>
+                  <div className="now-artist">{nowSongData.artist}</div>
+                </div>
+              </div>
+              {nowVer && (
+                <div className="tag-row">
+                  <span className="tag tag-accent">{nowVer.bpm} BPM</span>
+                  <span className="tag tag-good">{nowVer.key}</span>
+                </div>
+              )}
+              {hasQueueHead && (
+                <div className="progress-block">
+                  <div className="progress-track"><div className="progress-fill" style={{ width: cueBarPct + '%' }} /></div>
+                  <div className="progress-label">next move in <span className="mono-num">{fmtTime(session.nextCountdown)}</span></div>
+                </div>
+              )}
+              {!hasQueueHead && <div className="hint-text">nothing queued — click a highlighted node on the graph</div>}
+            </>
+          )}
+          {session.setEnded && (
+            <div className="ended-banner">
+              <span>— Set ended —</span>
+              <button className="btn btn-primary btn-sm" onClick={resumeSet}>Start a new set</button>
+            </div>
+          )}
+        </div>
+
+        <div className="queue-strip">
+          <div className="queue-strip-label">Queue</div>
+          {!hasStarted ? (
+            <div className="hint-text queue-empty-hint">start the set to begin building a queue</div>
+          ) : (
+            <>
+              <div className="queue-chip queue-chip-now">
+                <div className="queue-chip-title">{nowSongLabel}</div>
+                <div className="queue-chip-sub">playing now</div>
+              </div>
+              {session.queue.map((qi, i) => {
+                const label = qi.id === END ? 'End Set' : songs[qi.id] ? songs[qi.id].title : '(deleted)';
+                const sub = qi.id === END ? hopSummary(qi) : (songs[qi.id] ? songs[qi.id].artist + ' · ' + hopSummary(qi) : '');
+                return (
+                  <React.Fragment key={qi.id + i}>
+                    <span className="queue-arrow">→</span>
+                    <div className={'queue-chip' + (i === 0 ? ' queue-chip-head' : '')}>
+                      <div>
+                        <div className="queue-chip-title">{label}</div>
+                        <div className="queue-chip-sub">{sub}</div>
+                      </div>
+                      <button className="queue-remove" onClick={() => setSession(prev => ({ ...prev, queue: prev.queue.slice(0, i) }))}>✕</button>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+              {session.queue.length === 0 && <div className="hint-text queue-empty-hint">nothing queued yet — click a highlighted node</div>}
+            </>
+          )}
+        </div>
+
+        {pendingView && (
+          <div className="pending-panel">
+            <div className="pending-head">
+              <div className="pending-title">{pendingView.title}</div>
+              <button className="icon-btn icon-btn-dark" onClick={() => setPendingId(null)}><Icon path={ICONS.close} size={12} /></button>
+            </div>
+            <div className="pending-subtitle">{pendingView.kind === 'start' ? 'start the set with this' : pendingView.subtitle}</div>
+
+            {pendingView.kind === 'song' && (
+              <>
+                <div className={optRowClass(!!pendingView.transitionEdge, pendingMode === 'transition')} onClick={() => pendingView.transitionEdge && setPendingMode('transition')}>
+                  <div className="opt-row-main">
+                    <Icon path={ICONS.swap} size={15} />
+                    <span className="opt-row-label">Transition</span>
+                    {pendingView.transitionEdge && !!pendingView.transitionEdge.bpmDelta && <span className="tag tag-accent tag-on-dark">{fmtSignedBpm(pendingView.transitionEdge.bpmDelta)}</span>}
+                    {pendingView.transitionEdge && pendingView.transitionEdge.keyChange && <span className="tag tag-good tag-on-dark">key change</span>}
+                    {pendingView.transitionEdge && pendingView.transitionEdge.remix && <span className="tag tag-purple tag-on-dark">remix</span>}
+                  </div>
+                  {!pendingView.transitionEdge && <div className="opt-row-note">no transition built yet — <a href="#" onClick={(e) => { e.preventDefault(); goAddAudio(); }}>build one</a></div>}
+                </div>
+
+                <div className="or-divider"><span>or build it manually</span></div>
+
+                <div className="section-label section-label-dark">How {nowSongLabel} ends</div>
+                <div className="opt-pair">
+                  <div className={optRowClass(true, pendingMode === 'custom' && pendingEnding === 'natural')} onClick={() => chooseEnding('natural')}>Play out naturally</div>
+                  <div className={optRowClass(!!pendingView.outroEdge, pendingMode === 'custom' && pendingEnding === 'outro')} onClick={() => pendingView.outroEdge && chooseEnding('outro')}>Use outro fragment</div>
+                </div>
+
+                <div className="section-label section-label-dark">How {pendingView.title} starts</div>
+                <div className="opt-pair">
+                  <div className={optRowClass(true, pendingMode === 'custom' && pendingStarting === 'cold')} onClick={() => chooseStarting('cold')}>Cold cut</div>
+                  <div className={optRowClass(!!pendingView.introEdge, pendingMode === 'custom' && pendingStarting === 'intro')} onClick={() => pendingView.introEdge && chooseStarting('intro')}>Play its intro</div>
+                </div>
+              </>
+            )}
+
+            {pendingView.kind === 'start' && (
+              <>
+                <div className="section-label section-label-dark">How {pendingView.title} starts</div>
+                <div className={optRowClass(true, pendingStarting === 'cold')} onClick={() => setPendingStarting('cold')}><span className="opt-row-label">Cold cut</span></div>
+                <div className={optRowClass(!!pendingView.introEdge, pendingStarting === 'intro')} onClick={() => pendingView.introEdge && setPendingStarting('intro')}>
+                  <span className="opt-row-label">Play its intro</span>
+                  {!pendingView.introEdge && <div className="opt-row-note">no intro built yet — <a href="#" onClick={(e) => { e.preventDefault(); goAddAudio(); }}>build one</a></div>}
+                </div>
+              </>
+            )}
+
+            {pendingView.kind === 'end' && (
+              <>
+                <div className="section-label section-label-dark">How {nowSongLabel} ends</div>
+                <div className={optRowClass(true, pendingEnding === 'natural')} onClick={() => setPendingEnding('natural')}><span className="opt-row-label">Play out naturally</span></div>
+                <div className={optRowClass(!!pendingView.outroEdge, pendingEnding === 'outro')} onClick={() => pendingView.outroEdge && setPendingEnding('outro')}>
+                  <span className="opt-row-label">Use outro fragment</span>
+                  {!pendingView.outroEdge && <div className="opt-row-note">no outro built yet — <a href="#" onClick={(e) => { e.preventDefault(); goAddAudio(); }}>build one</a></div>}
+                </div>
+              </>
+            )}
+
+            <div className="pending-actions">
+              <button className="btn btn-accent" onClick={confirmPending}>{confirmLabel}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+// =====================================================================================
+// Library — a sortable, searchable table over every song in the crate.
+// =====================================================================================
+
+function LibraryPage({ songs, edges, session, onInspect, selectedSongId, goUpload }) {
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('title');
+  const [sortDir, setSortDir] = useState('asc');
+
+  const totalSongs = Object.keys(songs).length;
+  const rows = useMemo(() => libraryRows(songs, edges, session.versionOf, search, sortKey, sortDir), [songs, edges, session.versionOf, search, sortKey, sortDir]);
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  }
+  function sortHeader(key, label) {
+    const active = sortKey === key;
+    return (
+      <th className="th-sortable" onClick={() => toggleSort(key)}>
+        {label} {active ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+      </th>
+    );
+  }
+
+  if (totalSongs === 0) {
+    return (
+      <div className="page page-scroll">
+        <div className="page-header">
+          <div className="page-title">Library</div>
+        </div>
+        <div className="empty-state">
+          <div className="empty-state-title">No songs yet</div>
+          <div className="empty-state-sub">Upload your first track to start building your library.</div>
+          <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page page-scroll">
+      <div className="page-header">
+        <div className="page-title">Library</div>
+        <button className="btn btn-primary" onClick={goUpload}>+ New song</button>
+      </div>
+      <div className="page-sub">Every song in the crate. Search, sort, and click a row to inspect its built audio and versions.</div>
+
+      <input className="input" style={{ maxWidth: 320, marginBottom: 16 }} placeholder="Find a song or artist…" value={search} onChange={(e) => setSearch(e.target.value)} />
+
+      <table className="table">
+        <thead>
+          <tr>
+            {sortHeader('title', 'Title')}
+            {sortHeader('artist', 'Artist')}
+            {sortHeader('bpm', 'BPM')}
+            {sortHeader('key', 'Key')}
+            <th>Versions</th><th>In</th><th>Out</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.id} className={'table-row' + (selectedSongId === r.id ? ' table-row-selected' : '')} onClick={() => onInspect(r.id)}>
+              <td className="td-strong">{r.title}</td>
+              <td className="td-muted">{r.artist}</td>
+              <td><span className="tag tag-accent">{r.bpm}</span></td>
+              <td><span className="tag tag-good">{r.key}</span></td>
+              <td className="td-muted">{r.versions}</td>
+              <td className="td-muted">{r.inCount}</td>
+              <td className="td-muted">{r.outCount}</td>
+              <td>{r.isDeadEnd && <span className="tag tag-warn">dead end</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length === 0 && <div className="empty-note">no songs match "{search}"</div>}
+    </div>
+  );
+}
+
+// =====================================================================================
+// Upload Song — add a brand-new master to the library.
+// =====================================================================================
+
+function UploadSongPage({ onAddSong, onViewSong, existingCount }) {
+  const [title, setTitle] = useState('');
+  const [artist, setArtist] = useState('');
+  const [bpm, setBpm] = useState('');
+  const [key, setKey] = useState('');
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(null); // { id, title } | null
+
+  function save() {
+    if (!title.trim()) { setError('Give the song a title.'); return; }
+    const bpmNum = Number(bpm);
+    if (bpm.trim() && (!Number.isFinite(bpmNum) || bpmNum <= 0)) { setError('BPM should be a positive number.'); return; }
+    setError('');
+    const id = uid('s');
+    const song = {
+      id, title: title.trim(), artist: artist.trim() || 'Unknown',
+      x: 60 + (existingCount * 47) % 1180, y: 60 + (existingCount * 83) % 700,
+      versions: [{ id: 'v1', label: 'Original', bpm: bpmNum || 120, key: key.trim() || '—' }],
+    };
+    onAddSong(song);
+    setSaved({ id, title: song.title });
+    setTitle(''); setArtist(''); setBpm(''); setKey(''); setFile(null);
+  }
+
+  return (
+    <div className="page page-scroll page-narrow">
+      <div className="page-title">Upload Song</div>
+      <div className="page-sub">Add a new master to the library. Full-body differences (instrumental, acapella, remaster) are their own song — use Add Audio → Remix instead if this is just a new version.</div>
+
+      <div className="form-card">
+        <Field label="Title">
+          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Faultline Blue" />
+        </Field>
+        <Field label="Artist">
+          <input className="input" value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="e.g. Nomi Sato" />
+        </Field>
+        <div className="form-grid-2">
+          <Field label="BPM">
+            <input className="input" value={bpm} onChange={(e) => setBpm(e.target.value)} placeholder="126" inputMode="numeric" />
+          </Field>
+          <Field label="Key">
+            <input className="input" value={key} onChange={(e) => setKey(e.target.value)} placeholder="A min" />
+          </Field>
+        </div>
+        <Field label="Master audio">
+          <Dropzone file={file} onFile={setFile} hint="drop lossless master (WAV/AIFF/FLAC preferred; MP3 accepted, flagged)" />
+        </Field>
+        {error && <div className="error-note">{error}</div>}
+        <button className="btn btn-primary btn-self-start" onClick={save}>Add to library</button>
+        {saved && (
+          <div className="success-note">
+            <span>Added "{saved.title}" to the library.</span>
+            <button className="btn btn-primary btn-sm" onClick={() => onViewSong(saved.id)}>View in Library</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+// =====================================================================================
+// Add Audio — drop a produced piece; we detect what it connects and let you confirm.
+// Replaces the old manual "pick a type, pick both sides, generate a sync code" flow —
+// detection now does the matching, so the only controls left are the ones a human
+// actually needs: confirming (or correcting) the match, and how each hop is built.
+// =====================================================================================
+
+function AddAudioPage({ songs, session, onAddEdge, onAddVersion, onViewSong }) {
+  const [mode, setMode] = useState('pair'); // 'pair' | 'remix'
+  const [file, setFile] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [detected, setDetected] = useState(false);
+
+  const [leftId, setLeftId] = useState(null);
+  const [rightId, setRightId] = useState(null);
+  const [remixSongId, setRemixSongId] = useState(null);
+  const [versionLabel, setVersionLabel] = useState('');
+  const [remixBpm, setRemixBpm] = useState('');
+  const [remixKey, setRemixKey] = useState('');
+  const [fragLabel, setFragLabel] = useState('');
+
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(null); // { kind, label, songId }
+
+  const songIds = Object.keys(songs);
+
+  function reset() {
+    setFile(null); setAnalyzing(false); setDetected(false);
+    setLeftId(null); setRightId(null); setRemixSongId(null);
+    setVersionLabel(''); setRemixBpm(''); setRemixKey(''); setFragLabel(''); setError('');
+  }
+
+  function handleFile(f) {
+    setFile(f); setAnalyzing(true); setDetected(false); setSaved(null);
+    const seed = f.name + '|' + f.size;
+    setTimeout(() => {
+      if (mode === 'pair') {
+        const [a, b] = pickDetectedSongs(songIds, seed, 2);
+        setLeftId(a || null); setRightId(b || null);
+      } else {
+        const [a] = pickDetectedSongs(songIds, seed, 1);
+        setRemixSongId(a || null);
+        if (a && songs[a]) {
+          const v = activeVersion(songs[a], session.versionOf);
+          setRemixBpm(String(v.bpm)); setRemixKey(v.key);
+        }
+      }
+      setAnalyzing(false); setDetected(true);
+    }, 700);
+  }
+
+  const leftSong = leftId ? songs[leftId] : null;
+  const rightSong = rightId ? songs[rightId] : null;
+  const derivedType = leftId && rightId ? 'transition' : rightId ? 'intro' : leftId ? 'outro' : null;
+  const cue = detected ? pseudoCuePoints(leftId, rightId) : null;
+
+  function saveEdgeOrVersion() {
+    if (mode === 'remix') {
+      if (!remixSongId) { setError('Pick which song this is a remix of.'); return; }
+      const bpmNum = Number(remixBpm);
+      if (!Number.isFinite(bpmNum) || bpmNum <= 0) { setError('BPM should be a positive number.'); return; }
+      const versionData = { id: uid('v'), label: versionLabel.trim() || 'New Version', bpm: bpmNum, key: remixKey.trim() || '—' };
+      onAddVersion(remixSongId, versionData);
+      setSaved({ kind: 'version', label: versionData.label, songId: remixSongId });
+      reset();
+      return;
+    }
+    if (!derivedType) { setError('This needs at least one song — pick a left and/or right side.'); return; }
+    const leftVer = leftId ? activeVersionId(songs[leftId], session.versionOf) : undefined;
+    const rightVer = rightId ? activeVersionId(songs[rightId], session.versionOf) : undefined;
+    const bpmDelta = leftSong && rightSong ? activeVersion(rightSong, session.versionOf).bpm - activeVersion(leftSong, session.versionOf).bpm : undefined;
+    const keyChange = leftSong && rightSong ? activeVersion(leftSong, session.versionOf).key !== activeVersion(rightSong, session.versionOf).key : false;
+    const edge = {
+      id: uid('e'), type: derivedType,
+      l: leftId || undefined, lv: leftVer, r: rightId || undefined, rv: rightVer,
+      verified: false, bpmDelta, keyChange, remix: false, label: fragLabel.trim() || undefined,
+    };
+    onAddEdge(edge);
+    setSaved({ kind: 'edge', label: derivedType, songId: rightId || leftId });
+    reset();
+  }
+
+  const typeLabel = derivedType ? ({ transition: 'Transition', intro: 'Intro', outro: 'Outro' })[derivedType] : '—';
+
+  if (songIds.length === 0) {
+    return (
+      <div className="page page-scroll page-narrow-wide">
+        <div className="page-title">Add Audio</div>
+        <div className="empty-state">
+          <div className="empty-state-title">Add a song first</div>
+          <div className="empty-state-sub">You'll need at least one song in the library before there's anything to connect.</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page page-scroll page-narrow-wide">
+      <div className="page-title">Add Audio</div>
+      <div className="page-sub">Drop a produced transition, intro, outro, or remix — we detect the song(s), type, and cue points automatically.</div>
+
+      <div className="pill-group" style={{ marginBottom: 18 }}>
+        <button className={'pill' + (mode === 'pair' ? ' active' : '')} onClick={() => { setMode('pair'); reset(); }}>Transition / Intro / Outro</button>
+        <button className={'pill' + (mode === 'remix' ? ' active' : '')} onClick={() => { setMode('remix'); reset(); }}>Remix (new version)</button>
+      </div>
+
+      <div className="form-card">
+        <Field label={mode === 'remix' ? 'Remix audio' : 'Produced audio'}>
+          <Dropzone file={file} onFile={handleFile} hint={mode === 'remix' ? 'drop the remixed/edited audio' : 'drop the finished transition, intro, or outro render'} />
+        </Field>
+
+        {analyzing && <div className="hint-text analyzing-hint">Analyzing audio…</div>}
+
+        {detected && mode === 'pair' && (
+          <>
+            <div className="detected-label">Detected</div>
+            <div className="pair-grid">
+              <div>
+                <div className="field-label">Left side (what it plays out of)</div>
+                <SongPicker songs={songs} value={leftId} onChange={setLeftId} allowFree freeLabel="Free — starts the set" />
+              </div>
+              <div>
+                <div className="field-label">Right side (what it plays into)</div>
+                <SongPicker songs={songs} value={rightId} onChange={setRightId} allowFree freeLabel="Free — ends the set" />
+              </div>
+            </div>
+
+            <div className="detected-summary">
+              <span className="tag tag-neutral">Type: {typeLabel}</span>
+              {leftSong && rightSong && (
+                <>
+                  <span className="tag tag-accent">{activeVersion(leftSong, session.versionOf).bpm} → {activeVersion(rightSong, session.versionOf).bpm} BPM</span>
+                  <span className="tag tag-good">{activeVersion(leftSong, session.versionOf).key} → {activeVersion(rightSong, session.versionOf).key}</span>
+                </>
+              )}
+            </div>
+
+            {cue && (
+              <div className="cue-grid">
+                {leftSong && (
+                  <div>
+                    <div className="field-label">{leftSong.title} — detected out point</div>
+                    <div className="waveform-bar">
+                      <div className="waveform-marker" style={{ left: '71%' }} />
+                      <div className="waveform-marker-label" style={{ left: '71%' }}>OUT <span className="mono-num">{fmtTime(cue.outSeconds)}</span></div>
+                    </div>
+                  </div>
+                )}
+                {rightSong && (
+                  <div>
+                    <div className="field-label">{rightSong.title} — detected in point</div>
+                    <div className="waveform-bar">
+                      <div className="waveform-marker" style={{ left: '12%' }} />
+                      <div className="waveform-marker-label" style={{ left: '12%' }}>IN <span className="mono-num">{fmtTime(cue.inSeconds)}</span></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Field label="Note (optional)">
+              <input className="input" value={fragLabel} onChange={(e) => setFragLabel(e.target.value)} placeholder="e.g. Tempo drop into verse" />
+            </Field>
+          </>
+        )}
+
+        {detected && mode === 'remix' && (
+          <>
+            <div className="detected-label">Detected</div>
+            <Field label="Original song">
+              <SongPicker songs={songs} value={remixSongId} onChange={(id) => {
+                setRemixSongId(id);
+                if (id && songs[id]) { const v = activeVersion(songs[id], session.versionOf); setRemixBpm(String(v.bpm)); setRemixKey(v.key); }
+              }} placeholder="Search songs…" />
+            </Field>
+            <div className="form-grid-3">
+              <Field label="Version name"><input className="input" value={versionLabel} onChange={(e) => setVersionLabel(e.target.value)} placeholder="VIP Remix" /></Field>
+              <Field label="BPM"><input className="input" value={remixBpm} onChange={(e) => setRemixBpm(e.target.value)} /></Field>
+              <Field label="Key"><input className="input" value={remixKey} onChange={(e) => setRemixKey(e.target.value)} /></Field>
+            </div>
+          </>
+        )}
+
+        {error && <div className="error-note">{error}</div>}
+
+        {detected && (
+          <button className="btn btn-primary btn-self-start" onClick={saveEdgeOrVersion}>
+            {mode === 'remix' ? 'Add version' : 'Save ' + typeLabel}
+          </button>
+        )}
+
+        {saved && (
+          <div className="success-note">
+            <span>{saved.kind === 'version' ? 'Added "' + saved.label + '" as a new version.' : 'Saved — unverified. Preview it from the song panel to verify it.'}</span>
+            {saved.songId && <button className="btn btn-primary btn-sm" onClick={() => onViewSong(saved.songId)}>View in Library</button>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+// =====================================================================================
+// Settings — venue name, data reset, and a manual JSON export/import (a stand-in for
+// the eventual Supabase sync — swap these two buttons for real sync calls later).
+// =====================================================================================
+
+function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearAll, onRestore }) {
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const fileInputRef = useRef(null);
+  const [importError, setImportError] = useState('');
+
+  function downloadBackup() {
+    const data = { songs, edges, session, venueName };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'djflow-backup.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleImportFile(fileList) {
+    const f = fileList && fileList[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!data.songs || !data.edges || !data.session) throw new Error('missing fields');
+        onRestore(data);
+        setImportError('');
+      } catch (e) {
+        setImportError('That file doesn\u2019t look like a DJ Flow backup.');
+      }
+    };
+    reader.readAsText(f);
+  }
+
+  return (
+    <div className="page page-scroll page-narrow">
+      <div className="page-title">Settings</div>
+      <div className="page-sub">Data lives in this browser for now (localStorage) — this is the seam where Supabase + Cloudflare storage will plug in later.</div>
+
+      <div className="form-card">
+        <Field label="Venue / session name">
+          <input className="input" value={venueName} onChange={(e) => setVenueName(e.target.value)} placeholder="e.g. Friday Warehouse" />
+        </Field>
+      </div>
+
+      <div className="section-label" style={{ marginTop: 24 }}>Backup</div>
+      <div className="form-card">
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-title">Download a backup</div>
+            <div className="settings-row-sub">Saves your whole library and set state to a JSON file.</div>
+          </div>
+          <button className="btn btn-ghost" onClick={downloadBackup}>Download</button>
+        </div>
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-title">Restore from a backup</div>
+            <div className="settings-row-sub">Replaces everything currently in the browser.</div>
+          </div>
+          <button className="btn btn-ghost" onClick={() => fileInputRef.current && fileInputRef.current.click()}>Restore…</button>
+          <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => handleImportFile(e.target.files)} />
+        </div>
+        {importError && <div className="error-note">{importError}</div>}
+      </div>
+
+      <div className="section-label" style={{ marginTop: 24 }}>Reset</div>
+      <div className="form-card">
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-title">Clear all data</div>
+            <div className="settings-row-sub">Wipes every song, transition, and set state saved in this browser. This does not undo — download a backup first if you're not sure.</div>
+          </div>
+          {!confirmingReset ? (
+            <button className="btn btn-danger" onClick={() => setConfirmingReset(true)}>Clear…</button>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmingReset(false)}>Cancel</button>
+              <button className="btn btn-danger btn-sm" onClick={onClearAll}>Confirm — clear everything</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================================
+// Inspect drawer — song detail & curation. Shared by Perform's graph and Library's
+// table so there's exactly one place this logic lives.
+// =====================================================================================
+
+function InspectDrawer({ song, songs, edges, versionOf, linkingId, setLinkingId, onClose, onSetVersion, onVerifyEdge, onDeleteEdge, onUpdateSong, onDeleteSong }) {
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(song.title);
+  const [draftArtist, setDraftArtist] = useState(song.artist);
+  const [draftBpm, setDraftBpm] = useState('');
+  const [draftKey, setDraftKey] = useState('');
+
+  const vid = activeVersionId(song, versionOf);
+  const av = activeVersion(song, versionOf);
+
+  useEffect(() => {
+    setDraftTitle(song.title); setDraftArtist(song.artist);
+    setDraftBpm(String(av.bpm)); setDraftKey(av.key);
+    setEditing(false);
+  }, [song.id, vid]);
+
+  function saveEdits() {
+    const bpmNum = Number(draftBpm);
+    const versions = song.versions.map(v => v.id === vid ? { ...v, bpm: Number.isFinite(bpmNum) && bpmNum > 0 ? bpmNum : v.bpm, key: draftKey.trim() || v.key } : v);
+    onUpdateSong(song.id, { title: draftTitle.trim() || song.title, artist: draftArtist.trim() || song.artist, versions });
+    setEditing(false);
+  }
+
+  function destText(e) {
+    if (e.type === 'outro') return 'ends set';
+    if (e.type === 'intro') return 'cold-open';
+    const other = e.l === song.id ? e.r : e.l;
+    const otherSong = songs[other];
+    return (e.l === song.id ? '\u2192 ' : '\u2190 ') + (otherSong ? otherSong.title : '(deleted song)');
+  }
+  function labelOf(e) { return e.type === 'outro' ? 'Outro' : e.type === 'intro' ? 'Intro' : 'Transition'; }
+
+  const ownTransitions = edges.filter(e => (e.l === song.id && e.lv === vid) || (e.r === song.id && e.rv === vid));
+  const inheritable = edges.filter(e => !e.verified && ((e.l === song.id && e.lv !== vid) || (e.r === song.id && e.rv !== vid)));
+  const linking = linkingId ? edges.find(e => e.id === linkingId) : null;
+
+  function confirmDelete() {
+    if (window.confirm('Delete "' + song.title + '"? This also removes every transition/intro/outro that touches it.')) {
+      onDeleteSong(song.id);
+    }
+  }
+
+  return (
+    <div className="drawer">
+      <div className="drawer-head">
+        {!editing ? (
+          <div className="drawer-title">{song.title}</div>
+        ) : (
+          <input className="input drawer-title-input" value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} />
+        )}
+        <button className="icon-btn" onClick={onClose}><Icon path={ICONS.close} size={13} /></button>
+      </div>
+
+      {!editing ? (
+        <div className="drawer-artist">{song.artist}</div>
+      ) : (
+        <input className="input" style={{ marginBottom: 10 }} value={draftArtist} onChange={(e) => setDraftArtist(e.target.value)} placeholder="Artist" />
+      )}
+
+      {song.versions.length > 1 && (
+        <div className="version-row">
+          {song.versions.map(v => (
+            <button key={v.id} className={'seg-btn' + (v.id === vid ? ' active' : '')} onClick={() => onSetVersion(song.id, v.id)}>{v.label}</button>
+          ))}
+        </div>
+      )}
+
+      {!editing ? (
+        <div className="tag-row" style={{ marginBottom: 16 }}>
+          <span className="tag tag-accent">{av.bpm} BPM</span>
+          <span className="tag tag-good">{av.key}</span>
+        </div>
+      ) : (
+        <div className="form-grid-2" style={{ marginBottom: 12 }}>
+          <Field label="BPM"><input className="input" value={draftBpm} onChange={(e) => setDraftBpm(e.target.value)} /></Field>
+          <Field label="Key"><input className="input" value={draftKey} onChange={(e) => setDraftKey(e.target.value)} /></Field>
+        </div>
+      )}
+
+      <div className="drawer-actions-row">
+        {!editing ? (
+          <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>Edit details</button>
+        ) : (
+          <>
+            <button className="btn btn-primary btn-sm" onClick={saveEdits}>Save</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>Cancel</button>
+          </>
+        )}
+        <button className="btn btn-danger btn-sm" onClick={confirmDelete}>Delete song</button>
+      </div>
+
+      <div className="section-label">Audio — this version</div>
+      <div className="drawer-list">
+        {ownTransitions.map(e => (
+          <div key={e.id} className="drawer-frag">
+            <div className="drawer-frag-row">
+              <span className="drawer-frag-label">{labelOf(e)}</span>
+              {e.verified && <span className="dot-verified" />}
+              <div className="drawer-frag-actions">
+                {!e.verified && <button className="btn btn-ghost btn-xs" onClick={() => onVerifyEdge(e.id)}>Preview &amp; verify</button>}
+                <button className="btn btn-ghost btn-xs" onClick={() => { if (window.confirm('Remove this ' + labelOf(e).toLowerCase() + '?')) onDeleteEdge(e.id); }}>Remove</button>
+              </div>
+            </div>
+            <div className="drawer-frag-dest">{destText(e)}</div>
+          </div>
+        ))}
+        {ownTransitions.length === 0 && <div className="empty-note-sm">no audio attached to this version yet</div>}
+      </div>
+
+      <div className="section-label">Inherit from other versions</div>
+      <div className="drawer-list">
+        {inheritable.map(e => {
+          const sibVersion = song.versions.find(v => v.id === (e.l === song.id ? e.lv : e.rv));
+          return (
+            <div key={e.id} className="drawer-frag drawer-frag-inheritable">
+              <div className="drawer-frag-row">
+                <span className="drawer-frag-label drawer-frag-label-muted">from {sibVersion ? sibVersion.label : '?'}</span>
+                <button className="btn btn-primary btn-xs" onClick={() => setLinkingId(e.id)}>Link</button>
+              </div>
+              <div className="drawer-frag-dest">{destText(e)}</div>
+            </div>
+          );
+        })}
+        {inheritable.length === 0 && <div className="empty-note-sm">nothing to inherit for this version</div>}
+      </div>
+
+      {linking && (
+        <div className="linking-panel">
+          <div className="linking-title">Sync {linking.type === 'outro' ? 'outro' : linking.type === 'intro' ? 'intro' : 'transition'}</div>
+          <div className="linking-waveform" />
+          <div className="linking-nudge">
+            <button className="btn btn-ghost btn-xs">−10ms</button>
+            <span className="linking-nudge-label">nudge to align</span>
+            <button className="btn btn-ghost btn-xs">+10ms</button>
+          </div>
+          <div className="drawer-actions-row">
+            <button className="btn btn-ghost btn-sm" onClick={() => setLinkingId(null)}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={() => setLinkingId(null)}>Confirm link</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================================
+// A minimal error boundary — surfaces a readable message instead of a blank page
+// while this is still being developed.
+// =====================================================================================
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('DJ Flow crashed:', error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 40, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#a3312a' }}>
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>Something broke: {String(this.state.error && this.state.error.message || this.state.error)}</div>
+          {this.state.error && this.state.error.stack}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<ErrorBoundary><App /></ErrorBoundary>);
+</script>
+</body>
+</html>
