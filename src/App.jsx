@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { Store, freshState, removeSongCascade, END } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, END, getVisibleEdges, pickAutoplayNext } from './core.js';
 import Sidebar from './components/Sidebar.jsx';
 import PerformPage from './components/PerformPage.jsx';
 import LibraryPage from './components/Library.jsx';
@@ -8,7 +8,11 @@ import UploadSongPage from './components/UploadSong.jsx';
 import AddAudioPage from './components/AddAudio.jsx';
 import SettingsPage from './components/Settings.jsx';
 
-const INITIAL = Store.load() || freshState();
+// Merge onto a fresh default rather than trusting the saved shape wholesale —
+// older saved sessions predate fields like autoplay/autoHistory, and a
+// missing field should fall back cleanly instead of crashing downstream.
+const loaded = Store.load();
+const INITIAL = loaded ? { ...freshState(), ...loaded, session: { ...emptySession(), ...(loaded.session || {}) } } : freshState();
 
 export default function App() {
   const [songs, setSongs] = useState(INITIAL.songs);
@@ -24,7 +28,7 @@ export default function App() {
       if (remote && typeof remote === 'object') {
         if (remote.songs) setSongs(remote.songs);
         if (remote.edges) setEdges(remote.edges);
-        if (remote.session) setSession(remote.session);
+        if (remote.session) setSession({ ...emptySession(), ...remote.session });
         if (typeof remote.venueName === 'string') setVenueName(remote.venueName);
       }
     });
@@ -43,15 +47,31 @@ export default function App() {
   }, [songs, edges, session, venueName]);
 
   // ---- the set clock: ticks Now Playing's countdown, promotes Next when it hits 0.
-  // If nothing is queued when time runs out, the set just ends — no looping trick to
-  // paper over there being nothing next. That's "letting the song end naturally". ----
+  // If nothing is queued and autoplay is off, the set just ends — no looping trick to
+  // paper over there being nothing next ("letting the song end naturally"). If
+  // autoplay is on, pickAutoplayNext chooses instead — a built transition when one
+  // exists, otherwise a random cut to keep an infinite playlist going (unless
+  // transitionOnly is set, in which case a dead end still ends the set: that's the
+  // "truly seamless" guarantee). ----
   useEffect(() => {
     const t = setInterval(() => {
       setSession(prev => {
         if (!prev.isPlaying || !prev.nowPlayingId) return prev;
         if (prev.timeLeft <= 1) {
           const head = prev.queue[0];
-          if (!head) return { ...prev, isPlaying: false, setEnded: true, timeLeft: 0 };
+          if (!head) {
+            if (prev.autoplay) {
+              const pick = pickAutoplayNext(songs, getVisibleEdges(edges), prev.nowPlayingId, prev.transitionOnly);
+              if (pick) {
+                const nextSong = songs[pick.id];
+                return {
+                  ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut',
+                  autoHistory: [...prev.autoHistory, { id: pick.id, mode: pick.mode }].slice(-40),
+                };
+              }
+            }
+            return { ...prev, isPlaying: false, setEnded: true, timeLeft: 0 };
+          }
           if (head.id === END) {
             return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0 };
           }
@@ -62,7 +82,7 @@ export default function App() {
       });
     }, 1000);
     return () => clearInterval(t);
-  }, [songs]);
+  }, [songs, edges]);
 
   const deleteSong = useCallback((songId) => {
     const result = removeSongCascade(songs, edges, songId);
@@ -89,6 +109,34 @@ export default function App() {
     setTab('perform');
   }, []);
 
+  // Select a run of songs in Library, in the order you want them played,
+  // and queue the whole thing in one go instead of staging one at a time.
+  // Uses a built transition between consecutive picks where one exists,
+  // otherwise a cut — same as choosing one at a time would, just batched.
+  const queueSongsAsPlaylist = useCallback((orderedIds) => {
+    if (orderedIds.length === 0) return;
+    const visibleEdges = getVisibleEdges(edges);
+    const hasTransition = (a, b) => visibleEdges.some(e => e.type === 'transition' && e.l === a && e.r === b);
+    setSession(prev => {
+      let base = prev, startIdx = 0;
+      if (!prev.nowPlayingId) {
+        const first = orderedIds[0];
+        const song = songs[first];
+        base = { ...prev, nowPlayingId: first, startMethod: 'cut', isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, endingChoice: 'cut', queue: [] };
+        startIdx = 1;
+      }
+      const newItems = [];
+      let prevId = base.nowPlayingId;
+      for (let i = startIdx; i < orderedIds.length; i++) {
+        const id = orderedIds[i];
+        newItems.push(hasTransition(prevId, id) ? { id, mode: 'transition' } : { id, mode: 'cut', ending: 'cut', starting: 'cut' });
+        prevId = id;
+      }
+      return { ...base, queue: [...base.queue, ...newItems] };
+    });
+    setTab('perform');
+  }, [edges, songs]);
+
   const songCount = Object.keys(songs).length;
   const edgeCount = edges.length;
 
@@ -107,7 +155,7 @@ export default function App() {
         {tab === 'library' && (
           <LibraryPage songs={songs} edges={edges} goUpload={() => setTab('upload')}
             onUpdateSong={updateSong} onDeleteSong={deleteSong} onDeleteEdge={deleteEdge}
-            onVerifyEdge={(edgeId) => setEdges(prev => prev.map(e => e.id === edgeId ? { ...e, verified: true } : e))}
+            onQueueSongs={queueSongsAsPlaylist}
           />
         )}
         {tab === 'upload' && (

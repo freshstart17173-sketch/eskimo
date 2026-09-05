@@ -5,8 +5,10 @@ import {
   END, clamp, getVisibleEdges, inOutCounts, oneHopReachable, computeReachability,
 } from '../core.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
+import { estimateSeamlessLength } from '../graphEstimate.js';
 import GraphPane from './GraphPane.jsx';
 import SequencePane from './SequencePane.jsx';
+import QueueBar from './QueueBar.jsx';
 import { Icon, ICONS } from './shared.jsx';
 
 export default function PerformPage({ songs, setSongs, edges, session, setSession, venueName, goUpload }) {
@@ -95,8 +97,11 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     }));
   }
   function togglePlaying() { setSession(prev => ({ ...prev, isPlaying: !prev.isPlaying })); }
-  function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, endingChoice: 'cut' })); }
+  function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, endingChoice: 'cut', autoHistory: [] })); }
   function setEndingChoice(choice) { setSession(prev => ({ ...prev, endingChoice: choice })); }
+  function setAutoplay(on) { setSession(prev => ({ ...prev, autoplay: on })); }
+  function setTransitionOnly(on) { setSession(prev => ({ ...prev, transitionOnly: on })); }
+  function removeQueueFrom(index) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, index) })); }
 
   // ---------------- layout: manual (stored x/y) or auto (dagre) ----------------
   const autoPositions = useMemo(() => layoutMode === 'auto' ? computeDagreLayout(songs, edges) : null, [layoutMode, songs, edges]);
@@ -130,22 +135,11 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     return { ...e, _tier: tier };
   }), [transitionEdgesRaw, fromId, tier1, stagedId, laterIds]);
 
-  // ---------------- the committed plan-path overlay ----------------
-  const planSegments = useMemo(() => {
-    if (!hasStarted) return [];
-    const chain = [session.nowPlayingId, ...session.queue.map(q => q.id)];
-    const segs = [];
-    for (let i = 0; i < chain.length - 1; i++) {
-      const hop = session.queue[i];
-      const isEndHop = chain[i + 1] === END;
-      const eOk = hop.ending === 'outro', sOk = hop.starting === 'intro';
-      const width = hop.mode === 'transition' ? 4 : isEndHop ? (hop.ending === 'outro' ? 3.5 : 2) : (eOk && sOk) ? 3.5 : (eOk || sOk) ? 3 : 2;
-      segs.push({ from: chain[i], to: chain[i + 1], width });
-    }
-    return segs;
-  }, [hasStarted, session.nowPlayingId, session.queue]);
-
   const hasOutroForPlaying = !!findEdge(e => e.type === 'outro' && e.l === session.nowPlayingId);
+
+  // ---------------- estimated seamless-play length (see graphEstimate.js for why
+  // this is a computed upper bound, not an exact count) ----------------
+  const estimate = useMemo(() => estimateSeamlessLength(songs, edges), [songs, edges]);
 
   // ---------------- search (Fuse.js) ----------------
   const fuse = useMemo(() => new Fuse(Object.values(songs), { keys: ['title', 'artist'], threshold: 0.35, ignoreLocation: true }), [songs]);
@@ -203,10 +197,32 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasStarted, hoveredId, tier1, stagedId, stagedMode, fromId, songs]);
 
-  const nextRows = Array.from(tier1).map(id => optionsFor(id));
-  const laterRows = stagedId ? Array.from(laterIds).map(id => optionsFor(id)) : [];
   const nowSong = hasStarted ? songs[session.nowPlayingId] : null;
   const cueBarPct = nowSong && nowSong.durationSec ? Math.round((1 - session.timeLeft / nowSong.durationSec) * 100) : 0;
+
+  // Each candidate's countdown is its own transition's cue point, not a
+  // shared clock: a built transition edge carries a real outSeconds (when
+  // should must-trigger by, in Now Playing's own timeline). Candidates with
+  // time still on their clock float to the top, soonest-expiring first;
+  // candidates with no timed transition (reachable only via a cut, which
+  // never expires) sink below them, since there's no urgency to a cut.
+  const nextRows = useMemo(() => {
+    const elapsed = nowSong ? nowSong.durationSec - session.timeLeft : 0;
+    const rows = Array.from(tier1).map(id => {
+      const opts = optionsFor(id);
+      const secondsLeft = (opts.transitionEdge && opts.transitionEdge.outSeconds != null)
+        ? Math.max(0, opts.transitionEdge.outSeconds - elapsed) : null;
+      return { ...opts, secondsLeft };
+    });
+    return rows.sort((a, b) => {
+      if (a.secondsLeft != null && b.secondsLeft != null) return a.secondsLeft - b.secondsLeft;
+      if (a.secondsLeft != null) return -1;
+      if (b.secondsLeft != null) return 1;
+      return 0;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tier1, fromId, songs, nowSong, session.timeLeft]);
+  const laterRows = stagedId ? Array.from(laterIds).map(id => optionsFor(id)) : [];
 
   if (Object.keys(songs).length === 0) {
     return (
@@ -264,27 +280,28 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
           <span><i className="swatch swatch-dot" />playing</span>
           <span><i className="swatch swatch-next" />next</span>
           <span><i className="swatch swatch-later" />later</span>
-          <span><i className="swatch swatch-line" />planned</span>
         </div>
       </div>
 
       <div className="perform-layout">
         <div className="graph-pane">
           <GraphPane
-            songs={songs} positions={positions} transitionEdges={transitionEdges} planSegments={planSegments}
+            songs={songs} positions={positions} transitionEdges={transitionEdges}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
-            matchIds={matchIds} searchActive={searchActive} layoutMode={layoutMode}
+            matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition} hoverCardFor={hoverCardFor}
             onStageEnd={() => hasStarted && stage(END)} endQueued={queueIds.includes(END)}
           />
+          <QueueBar songs={songs} nowPlayingId={session.nowPlayingId} queue={session.queue} autoHistory={session.autoHistory} onRemoveQueueItem={removeQueueFrom} />
         </div>
 
         <SequencePane
-          songs={songs} session={session} venueName={venueName}
+          songs={songs} session={session} venueName={venueName} estimate={estimate}
           hasStarted={hasStarted} nowSong={nowSong} cueBarPct={cueBarPct} hasOutroForPlaying={hasOutroForPlaying}
           nextRows={nextRows} laterRows={laterRows} stagedId={stagedId} stagedMode={stagedMode}
           onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onStartSet={startSet} onSetEndingChoice={setEndingChoice}
           onStage={stage} onCommitStaged={commitStaged} onSetStagedMode={setStagedMode}
+          onSetAutoplay={setAutoplay} onSetTransitionOnly={setTransitionOnly}
         />
       </div>
     </div>

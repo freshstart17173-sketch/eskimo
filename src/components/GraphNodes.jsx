@@ -6,7 +6,7 @@ import { Icon, ICONS, AlbumArt } from './shared.jsx';
 // highlight treatments the graph uses now (no badge, no black-fill-means-
 // selected ambiguity).
 export function SongNode({ data }) {
-  const { song, state, dimmed, hovered, inCount, outCount, onEnter, onLeave, hoverCard } = data;
+  const { song, state, dimmed, hovered, inCount, outCount, onEnter, onLeave, hoverCard, playing } = data;
   const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
   return (
     <div className={cls} onMouseEnter={onEnter} onMouseLeave={onLeave}>
@@ -26,6 +26,9 @@ export function SongNode({ data }) {
         </div>
         <div className="node-io">↓{inCount} ↑{outCount}</div>
       </div>
+      {playing && (
+        <div className="node-waveform"><span /><span /><span /><span /><span /></div>
+      )}
 
       {hoverCard && (
         <div className="hover-card" onMouseEnter={onEnter} onMouseLeave={onLeave}>
@@ -36,7 +39,7 @@ export function SongNode({ data }) {
             <button className="hover-toggle" disabled={!hoverCard.isStaged} onClick={hoverCard.onConfirm}>Confirm</button>
           </div>
           {hoverCard.isStaged && (
-            <div className="hover-card-row">
+            <div className="hover-card-row segmented">
               <button className={'hover-toggle' + (hoverCard.mode === 'transition' ? ' active' : '')} disabled={!hoverCard.hasTransition} onClick={() => hoverCard.onSetMode('transition')}>Trans.</button>
               <button className={'hover-toggle' + (hoverCard.mode === 'cut' ? ' active' : '')} onClick={() => hoverCard.onSetMode('cut')}>Cut</button>
             </div>

@@ -39,6 +39,9 @@ export function emptySession() {
     nowPlayingId: null, startMethod: null,
     queue: [], timeLeft: 0, isPlaying: false, setEnded: false,
     endingChoice: 'cut', // how Now Playing will end if nothing more gets queued — 'cut' | 'outro'
+    autoplay: false, // when true and nothing's manually queued, pickAutoplayNext chooses
+    transitionOnly: false, // true = a dead end stops the set instead of cutting to a random song
+    autoHistory: [], // songs autoplay has actually played, most recent last — for the bottom queue bar
   };
 }
 
@@ -221,6 +224,25 @@ export function oneHopReachable(visibleEdges, fromId, excludeIds) {
     if (!excludeIds.has(e.r)) out.add(e.r);
   });
   return out;
+}
+
+// Autoplay's picking policy: prefer a random *built* transition out of the
+// current song. In transition-only mode, a dead end (no outgoing
+// transition) means true seamless play genuinely can't continue — return
+// null rather than fake it. Outside that mode, a dead end just means "the
+// song runs out" — cut cold to a random other song and keep the playlist
+// going (near-seamless, not seamless, since that hop has no built audio).
+export function pickAutoplayNext(songs, visibleEdges, currentId, transitionOnly) {
+  const transitionEdges = visibleEdges.filter(e => e.type === 'transition' && e.l === currentId);
+  if (transitionEdges.length > 0) {
+    const pick = transitionEdges[Math.floor(Math.random() * transitionEdges.length)];
+    return { id: pick.r, mode: 'transition' };
+  }
+  if (transitionOnly) return null;
+  const others = Object.keys(songs).filter(id => id !== currentId);
+  const pool = others.length > 0 ? others : Object.keys(songs);
+  if (pool.length === 0) return null;
+  return { id: pool[Math.floor(Math.random() * pool.length)], mode: 'cut' };
 }
 
 // Removing a song must not leave dangling edges pointing at it.

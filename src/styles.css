@@ -2,8 +2,8 @@
 
 /* ===================================================================
    Eskimo Studio — design tokens & styles
-   Monochrome light system (paper/ink/grays) with one accent — a dusty
-   pastel purple — spent only on interactive/active state. Data tags
+   Monochrome light system (paper/ink/grays) with one accent — a light
+   pastel blue — spent only on interactive/active state. Data tags
    (BPM, key, warnings) are plain bordered mono boxes, not colored
    pills: the content says what it is, color doesn't need to.
    =================================================================== */
@@ -23,10 +23,10 @@
   --muted: #454545;
   --faint: #6c6c6c;
 
-  --accent: #8b7bb8;
-  --accent-bg: #eeeaf7;
-  --accent-light: #c9bfe0;
-  --accent-ink: #2a2338;
+  --accent: #7fb3d9;
+  --accent-bg: #eaf3fa;
+  --accent-light: #bcdcef;
+  --accent-ink: #16324a;
 
   --danger: #8a2f28;
   --danger-bg: #f7ece9;
@@ -35,10 +35,10 @@
 
   /* the three graph states, in the order they matter: playing, next, later */
   --state-playing: #131313;
-  --state-next: #8b7bb8;
-  --state-next-bg: #f2effa;
-  --state-later: #c9bfe0;
-  --state-later-bg: #f8f6fc;
+  --state-next: #7fb3d9;
+  --state-next-bg: #eef6fb;
+  --state-later: #bcdcef;
+  --state-later-bg: #f6fafc;
 
   --radius: 2px;
   --font: 'Jost', 'Avenir Next', 'Segoe UI', Arial, sans-serif;
@@ -311,29 +311,47 @@ a { color: var(--accent); }
 .node-card {
   width: 190px; border-radius: var(--radius); padding: 9px;
   background: var(--paper); color: var(--ink); border: 1.5px solid var(--line);
-  user-select: none; transition: box-shadow .12s ease, border-color .12s ease, background .12s ease;
-  position: relative;
+  user-select: none; transition: box-shadow .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
+  position: relative; transform: scale(1); transform-origin: center;
 }
-.node-card.state-playing { background: var(--state-playing); color: var(--paper); border-color: var(--state-playing); animation: pulseRing 2.4s ease-in-out infinite; }
+.node-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); transform: scale(1.015); }
+.node-card.state-playing {
+  background: var(--state-playing); color: var(--paper); border-color: var(--state-playing);
+  animation: pulseRing 2.4s ease-in-out infinite; transform: scale(1.08); z-index: 5;
+}
+.node-card.state-playing:hover { transform: scale(1.095); }
 .node-card.state-next { background: var(--state-next-bg); border-color: var(--state-next); }
 .node-card.state-later { background: var(--state-later-bg); border-color: var(--state-later); }
 .node-card.node-hovered { box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }
 .node-card.node-dimmed { opacity: .28; }
 .node-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.node-title { font-weight: 600; font-size: 13px; line-height: 1.2; }
-.node-artist { font-size: 11px; margin-bottom: 6px; color: var(--muted); }
+.node-title { font-weight: 600; font-size: 13px; line-height: 1.3; }
+.node-artist { font-size: 11px; margin-bottom: 6px; color: var(--muted); line-height: 1.3; }
 .state-playing .node-artist { color: rgba(252, 252, 252, .7); }
 .node-art { width: 26px; height: 26px; flex: none; border-radius: 3px; }
-.node-tags-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; }
-.node-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.node-tags-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.node-tags { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .state-playing .tag { border-color: rgba(252, 252, 252, .55); color: var(--paper); }
-.node-io { font-family: var(--font-mono); font-size: 9.5px; color: #8a8a8a; letter-spacing: .01em; white-space: nowrap; }
+.node-io { font-family: var(--font-mono); font-size: 9.5px; color: #8a8a8a; letter-spacing: .01em; white-space: nowrap; line-height: 1; }
 .state-playing .node-io { color: rgba(252, 252, 252, .55); }
+
+/* tiny animated waveform — only the Playing node gets this, a quiet "this
+   one is actually live" signal instead of a static badge */
+.node-waveform { display: flex; align-items: flex-end; gap: 2px; height: 12px; margin-top: 6px; }
+.node-waveform span { width: 2.5px; background: var(--accent); border-radius: 1px; animation: waveBounce 1.1s ease-in-out infinite; }
+.node-waveform span:nth-child(1) { height: 40%; animation-delay: -0.9s; }
+.node-waveform span:nth-child(2) { height: 90%; animation-delay: -0.6s; }
+.node-waveform span:nth-child(3) { height: 60%; animation-delay: -1.1s; }
+.node-waveform span:nth-child(4) { height: 100%; animation-delay: -0.3s; }
+.node-waveform span:nth-child(5) { height: 50%; animation-delay: -0.15s; }
+@keyframes waveBounce { 0%, 100% { height: 25%; } 50% { height: 100%; } }
 
 .end-node {
   width: 132px; border-radius: var(--radius); padding: 9px;
   background: var(--paper); color: var(--ink); border: 1.5px solid var(--line); cursor: pointer;
+  transition: box-shadow .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
 }
+.end-node:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); transform: scale(1.02); }
 .end-node.state-next { background: var(--state-next-bg); border-color: var(--state-next); }
 .end-node-title { display: flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; }
 .end-node-hint { font-size: 10px; margin-top: 2px; color: #8a8a8a; }
@@ -349,9 +367,10 @@ a { color: var(--accent); }
 .hover-card-title { font-weight: 600; font-size: 14px; line-height: 1.2; }
 .hover-card-artist { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
 .hover-card-row { display: flex; gap: 5px; margin-top: 8px; }
-.hover-toggle { flex: 1; font-size: 10.5px; font-weight: 600; padding: 5px 4px; border-radius: var(--radius); background: var(--panel); color: var(--muted); text-align: center; }
+.hover-toggle { flex: 1; font-size: 10.5px; font-weight: 600; padding: 5px 4px; border-radius: var(--radius); background: var(--panel); color: var(--muted); text-align: center; transition: background .12s ease, color .12s ease; }
+.hover-toggle:not(:disabled):hover { background: var(--line-soft); }
 .hover-toggle.active { background: var(--ink); color: var(--paper); }
-.hover-toggle:disabled { opacity: .35; cursor: not-allowed; }
+.hover-toggle:disabled { opacity: .35; cursor: not-allowed; text-decoration: line-through; }
 
 /* ---------------------------------------------------------------
    Library — flat accordion list
@@ -365,7 +384,7 @@ a { color: var(--accent); }
 .lib-title-wrap { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .lib-title { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lib-artist { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lib-tags { display: flex; gap: 5px; flex: none; }
+.lib-tags { display: flex; align-items: center; gap: 5px; flex: none; }
 .lib-io { font-family: var(--font-mono); font-size: 11px; color: var(--faint); flex: none; width: 54px; text-align: right; }
 .lib-body { padding: 4px 6px 16px 34px; display: flex; flex-direction: column; gap: 14px; }
 .lib-edit-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
@@ -377,7 +396,19 @@ a { color: var(--accent); }
 .drawer-frag-label { font-size: 12px; font-weight: 600; }
 .drawer-frag-actions { display: flex; gap: 4px; flex: none; }
 .drawer-frag-dest { font-size: 11px; color: var(--muted); margin-top: 2px; }
-.dot-verified { width: 7px; height: 7px; border-radius: 50%; background: var(--ink); flex: none; }
+.audio-preview { display: flex; align-items: center; gap: 6px; }
+.audio-preview audio { height: 28px; max-width: 220px; }
+
+/* A segmented control communicates "pick one, they exclude each other" —
+   a joined pill — far more effortlessly than a row of separate buttons
+   that happen to toggle. Used everywhere a choice is exclusive: how a
+   song starts/ends, transition vs. cut. Disabled segments (no built
+   fragment for that option) stay in the group, struck through, rather
+   than disappearing — so it's visible that the option exists but this
+   pair of songs doesn't have it built yet. */
+.segmented { display: flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--paper); }
+.segmented > button { flex: 1; border-radius: 0; background: transparent; border: 0; border-right: 1px solid var(--line); }
+.segmented > button:last-child { border-right: 0; }
 
 /* ---------------------------------------------------------------
    Add Audio: detected summary / cue preview
@@ -389,3 +420,47 @@ a { color: var(--accent); }
 .waveform-bar { position: relative; height: 40px; background: repeating-linear-gradient(90deg, rgba(19, 19, 19, .14) 0 2px, transparent 2px 6px), var(--line-soft); border-radius: var(--radius); overflow: hidden; }
 .waveform-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
 .waveform-marker-label { position: absolute; top: 0; transform: translateX(-50%); font-size: 9px; font-family: var(--font-mono); background: var(--ink); color: var(--paper); padding: 2px 4px; border-radius: 0; white-space: nowrap; }
+
+/* ---------------------------------------------------------------
+   Queue bar — the live, scrollable strip along the bottom of the graph.
+   Shows Playing + the whole committed/autoplayed sequence so you can grab
+   a run of songs at a glance, or select a run of Library rows to queue as
+   a block in one go.
+   --------------------------------------------------------------- */
+.queue-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 10;
+  background: var(--paper); border-top: 1px solid var(--line-soft);
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, .06);
+}
+.queue-bar-label { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); flex: none; }
+.queue-bar-scroll { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 2px 0; scroll-behavior: smooth; }
+.queue-chip {
+  display: flex; align-items: center; gap: 7px; flex: none; padding: 5px 10px 5px 6px;
+  border-radius: var(--radius); background: var(--panel); border: 1px solid transparent; font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+}
+.queue-chip-playing { background: var(--ink); color: var(--paper); }
+.queue-chip-autoplay { border-style: dashed; border-color: var(--line); color: var(--muted); font-weight: 500; }
+.queue-chip-art { width: 18px; height: 18px; border-radius: 2px; flex: none; }
+.queue-chip-remove { opacity: .5; font-size: 11px; }
+.queue-arrow { color: var(--faint); font-size: 12px; flex: none; }
+.queue-bar-empty { font-size: 11.5px; color: var(--faint); font-style: italic; }
+
+.autoplay-card { border-radius: var(--radius); background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.autoplay-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.autoplay-row-title { font-size: 12.5px; font-weight: 600; }
+.autoplay-row-sub { font-size: 11px; color: var(--muted); }
+.switch { width: 34px; height: 19px; border-radius: 10px; background: var(--line); position: relative; flex: none; transition: background .15s ease; }
+.switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--paper); transition: transform .15s ease; }
+.switch.on { background: var(--accent); }
+.switch.on::after { transform: translateX(15px); }
+.estimate-note { font-size: 11px; color: var(--muted); border-top: 1px solid var(--line-soft); padding-top: 9px; }
+.estimate-note .mono-num { color: var(--ink); font-weight: 600; }
+
+.lib-select-bar {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; background: var(--ink); color: var(--paper); padding: 9px 12px; border-radius: var(--radius); margin-bottom: 10px;
+}
+.lib-select-bar-count { font-size: 12.5px; font-weight: 600; }
+.lib-checkbox { width: 16px; height: 16px; flex: none; accent-color: var(--accent); }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { uid, fmtTime, pseudoCuePoints, pickDetectedSongs, uploadAudioIfConfigured } from '../core.js';
 import { detectMatch } from '../audioDetect.js';
 import { Field, Dropzone, SongPicker } from './shared.jsx';
@@ -18,6 +18,9 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
 
   const songIds = Object.keys(songs);
   const referenceableSongs = Object.values(songs).filter(s => s.audioUrl);
+  // a local, playable URL for the dropped file — this is what lets you
+  // actually listen before it's added, instead of trusting the match blind
+  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
 
   function reset() {
     setFile(null); setAnalyzing(false); setDetected(false);
@@ -65,6 +68,9 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
       }
     : null;
 
+  // There's no separate "unverified" state to fix later — you listen to it
+  // right here before it ever becomes part of the graph, so anything saved
+  // is verified by definition (see core.js's edge.verified: always true).
   async function saveEdge() {
     if (!derivedType) { setError('This needs at least one song — pick a left and/or right side.'); return; }
     setUploading(true);
@@ -73,7 +79,8 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
     const edge = {
       id: uid('e'), type: derivedType,
       l: leftId || undefined, r: rightId || undefined,
-      verified: false, label: fragLabel.trim() || undefined, audioUrl: audio.audioUrl || null,
+      verified: true, label: fragLabel.trim() || undefined, audioUrl: audio.audioUrl || null,
+      outSeconds: cue ? cue.outSeconds : undefined, inSeconds: cue ? cue.inSeconds : undefined,
     };
     onAddEdge(edge);
     setSaved({ label: derivedType, songId: rightId || leftId });
@@ -97,7 +104,7 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
   return (
     <div className="page page-scroll page-narrow-wide">
       <div className="page-title">Add Audio</div>
-      <div className="page-sub">Drop a produced transition, intro, or outro — we detect the song(s), type, and cue points automatically. A remix is a new song (Upload Song), not audio to attach here.</div>
+      <div className="page-sub">Drop a produced transition, intro, or outro, listen to make sure it's right, then save — there's no separate verify step after the fact. A remix is a new song (Upload Song), not audio to attach here.</div>
       {referenceableSongs.length === 0 && (
         <div className="hint-text" style={{ marginBottom: 12 }}>
           No songs have a reference master uploaded yet, so detection below is placeholder matching, not real analysis —
@@ -109,6 +116,11 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
         <Field label="Produced audio">
           <Dropzone file={file} onFile={handleFile} hint="drop the finished transition, intro, or outro render" />
         </Field>
+        {previewUrl && (
+          <Field label="Listen before you save it">
+            <div className="audio-preview"><audio controls src={previewUrl} /></div>
+          </Field>
+        )}
 
         {analyzing && <div className="hint-text analyzing-hint">{referenceableSongs.length > 0 ? 'Analyzing audio against your reference tracks…' : 'Analyzing audio…'}</div>}
 
@@ -166,11 +178,11 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
         )}
 
         {error && <div className="error-note">{error}</div>}
-        {detected && <button className="btn btn-primary btn-self-start" onClick={saveEdge} disabled={uploading}>{uploading ? 'Uploading…' : 'Save ' + typeLabel}</button>}
+        {detected && <button className="btn btn-primary btn-self-start" onClick={saveEdge} disabled={uploading}>{uploading ? 'Uploading…' : 'Sounds right — save ' + typeLabel}</button>}
 
         {saved && (
           <div className="success-note">
-            <span>Saved — unverified. Preview it from Library to verify it.</span>
+            <span>Saved to the graph.</span>
             {saved.songId && <button className="btn btn-primary btn-sm" onClick={() => onViewSong(saved.songId)}>View in Library</button>}
           </div>
         )}

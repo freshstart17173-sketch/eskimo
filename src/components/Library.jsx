@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { libraryRows } from '../core.js';
 import { Icon, ICONS, Field, AlbumArt } from './shared.jsx';
 
-function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, onVerifyEdge }) {
+function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, selected, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(song.title);
   const [draftArtist, setDraftArtist] = useState(song.artist);
@@ -32,19 +32,20 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
 
   return (
     <div className={'lib-row' + (open ? ' lib-row-open' : '')}>
-      <div className="lib-row-head" onClick={onToggle}>
-        <span className="lib-chevron"><Icon path={ICONS.chevron} size={13} /></span>
+      <div className="lib-row-head">
+        <input className="lib-checkbox" type="checkbox" checked={selected} onClick={(e) => e.stopPropagation()} onChange={onToggleSelect} title="Select for playlist queueing" />
+        <span className="lib-chevron" onClick={onToggle}><Icon path={ICONS.chevron} size={13} /></span>
         <AlbumArt className="lib-art" />
-        <div className="lib-title-wrap">
+        <div className="lib-title-wrap" onClick={onToggle}>
           <span className="lib-title">{row.title}</span>
           <span className="lib-artist">{row.artist}</span>
         </div>
-        <div className="lib-tags">
+        <div className="lib-tags" onClick={onToggle}>
           <span className="tag tag-accent">{row.bpm}</span>
           <span className="tag tag-good">{row.key}</span>
           {row.isDeadEnd && <span className="tag tag-warn">dead end</span>}
         </div>
-        <div className="lib-io mono-num">↓{row.inCount} ↑{row.outCount}</div>
+        <div className="lib-io mono-num" onClick={onToggle}>↓{row.inCount} ↑{row.outCount}</div>
       </div>
       {open && (
         <div className="lib-body">
@@ -75,9 +76,8 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                 <div key={e.id} className="drawer-frag">
                   <div className="drawer-frag-row">
                     <span className="drawer-frag-label">{labelOf(e)}</span>
-                    {e.verified && <span className="dot-verified" />}
                     <div className="drawer-frag-actions">
-                      {!e.verified && <button className="btn btn-ghost btn-xs" onClick={() => onVerifyEdge(e.id)}>Preview &amp; verify</button>}
+                      {e.audioUrl && <audio controls src={e.audioUrl} style={{ height: 26 }} />}
                       <button className="btn btn-ghost btn-xs" onClick={() => { if (window.confirm('Remove this ' + labelOf(e).toLowerCase() + '?')) onDeleteEdge(e.id); }}>Remove</button>
                     </div>
                   </div>
@@ -93,12 +93,21 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   );
 }
 
-export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onVerifyEdge }) {
+export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onQueueSongs }) {
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]); // ordered — selection order is play order
 
   const totalSongs = Object.keys(songs).length;
   const rows = useMemo(() => libraryRows(songs, edges, search, 'title', 'asc'), [songs, edges, search]);
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  }
+  function queueSelected() {
+    onQueueSongs(selectedIds);
+    setSelectedIds([]);
+  }
 
   if (totalSongs === 0) {
     return (
@@ -119,14 +128,25 @@ export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDe
         <div className="page-title">Library</div>
         <button className="btn btn-primary" onClick={goUpload}>+ New song</button>
       </div>
-      <div className="page-sub">Every song in the crate. Click a row for its built transitions and to edit it.</div>
+      <div className="page-sub">Every song in the crate. Click a row for its built transitions and to edit it — check a run of rows, in the order you want them, to queue them all as a playlist.</div>
       <input className="input" style={{ maxWidth: 320, marginBottom: 16 }} placeholder="Find a song or artist…" value={search} onChange={(e) => setSearch(e.target.value)} />
+
+      {selectedIds.length > 0 && (
+        <div className="lib-select-bar">
+          <span className="lib-select-bar-count">{selectedIds.length} selected, in pick order</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setSelectedIds([])}>Clear</button>
+            <button className="btn btn-accent btn-sm" onClick={queueSelected}>Queue as playlist</button>
+          </div>
+        </div>
+      )}
 
       <div>
         {rows.map(r => (
           <LibraryRow key={r.id} row={r} song={songs[r.id]} edges={edges} songs={songs} open={openId === r.id}
             onToggle={() => setOpenId(id => (id === r.id ? null : r.id))}
-            onUpdateSong={onUpdateSong} onDeleteSong={onDeleteSong} onDeleteEdge={onDeleteEdge} onVerifyEdge={onVerifyEdge} />
+            selected={selectedIds.includes(r.id)} onToggleSelect={() => toggleSelect(r.id)}
+            onUpdateSong={onUpdateSong} onDeleteSong={onDeleteSong} onDeleteEdge={onDeleteEdge} />
         ))}
       </div>
       {rows.length === 0 && <div className="empty-note">no songs match "{search}"</div>}

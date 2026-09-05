@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { END, fmtTime } from '../core.js';
 import { Icon, ICONS, SongPicker, AlbumArt } from './shared.jsx';
 
-function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode, timeLeft }) {
+function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode }) {
+  const transitionExpired = row.secondsLeft === 0;
   return (
     <div className={'seq-row' + (isStaged ? ' seq-row-staged' : '')} onClick={onClick}>
       <div className="seq-row-main">
@@ -11,11 +12,11 @@ function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode
           <div className="seq-row-title">{row.title}</div>
           {!isEnd && <div className="seq-row-artist">{row.artist}</div>}
         </div>
-        {!isEnd && <span className="seq-row-countdown mono-num">{fmtTime(timeLeft)}</span>}
+        {!isEnd && row.secondsLeft != null && <span className="seq-row-countdown mono-num">{fmtTime(row.secondsLeft)}</span>}
       </div>
       {showToggles && !isEnd && (
-        <div className="seq-row-toggles">
-          <button className={'seq-toggle' + (stagedMode === 'transition' ? ' active' : '')} disabled={!row.transitionEdge}
+        <div className="seq-row-toggles segmented">
+          <button className={'seq-toggle' + (stagedMode === 'transition' ? ' active' : '')} disabled={!row.transitionEdge || transitionExpired}
             onClick={(e) => { e.stopPropagation(); onSetMode('transition'); }}>Transition</button>
           <button className={'seq-toggle' + (stagedMode === 'cut' ? ' active' : '')}
             onClick={(e) => { e.stopPropagation(); onSetMode('cut'); }}>Cut</button>
@@ -26,10 +27,10 @@ function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode
 }
 
 export default function SequencePane({
-  songs, session, venueName, hasStarted, nowSong, cueBarPct, hasOutroForPlaying,
+  songs, session, venueName, hasStarted, nowSong, cueBarPct, hasOutroForPlaying, estimate,
   nextRows, laterRows, stagedId, stagedMode,
   onTogglePlaying, onResumeSet, onStartSet, onSetEndingChoice,
-  onStage, onCommitStaged, onSetStagedMode,
+  onStage, onCommitStaged, onSetStagedMode, onSetAutoplay, onSetTransitionOnly,
 }) {
   const [startPickId, setStartPickId] = useState(null);
   const [startStarting, setStartStarting] = useState('cut');
@@ -45,7 +46,7 @@ export default function SequencePane({
             <SongPicker songs={songs} value={startPickId} onChange={setStartPickId} placeholder="Search songs…" />
             {startPickId && (
               <>
-                <div className="seq-row-toggles" style={{ marginTop: 9 }}>
+                <div className="seq-row-toggles segmented" style={{ marginTop: 9 }}>
                   <button className={'seq-toggle' + (startStarting === 'cut' ? ' active' : '')} onClick={() => setStartStarting('cut')}>Cut</button>
                   <button className={'seq-toggle' + (startStarting === 'intro' ? ' active' : '')} onClick={() => setStartStarting('intro')}>Intro</button>
                 </div>
@@ -75,7 +76,7 @@ export default function SequencePane({
 
             <div className="seq-ending-row">
               <span className="seq-ending-label">How it ends</span>
-              <div className="seq-ending-toggle">
+              <div className="seq-ending-toggle segmented">
                 <button className={'seq-ending-btn' + (session.endingChoice === 'cut' ? ' active' : '')} onClick={() => onSetEndingChoice('cut')}>Cut</button>
                 <button className={'seq-ending-btn' + (session.endingChoice === 'outro' ? ' active' : '')} disabled={!hasOutroForPlaying} onClick={() => onSetEndingChoice('outro')}>Outro</button>
               </div>
@@ -90,6 +91,30 @@ export default function SequencePane({
           </div>
         )}
 
+        <div className="autoplay-card">
+          <div className="autoplay-row">
+            <div>
+              <div className="autoplay-row-title">Autoplay</div>
+              <div className="autoplay-row-sub">picks randomly when nothing's queued</div>
+            </div>
+            <button className={'switch' + (session.autoplay ? ' on' : '')} onClick={() => onSetAutoplay(!session.autoplay)} />
+          </div>
+          <div className="autoplay-row">
+            <div>
+              <div className="autoplay-row-title">Transition-only</div>
+              <div className="autoplay-row-sub">a dead end stops the set instead of cutting</div>
+            </div>
+            <button className={'switch' + (session.transitionOnly ? ' on' : '')} onClick={() => onSetTransitionOnly(!session.transitionOnly)} />
+          </div>
+          {estimate.totalSongs > 0 && (
+            <div className="estimate-note">
+              {estimate.hasLoop
+                ? <>This graph has a closed loop — transition-only autoplay can run <b>forever</b> once it's in one. Up to <span className="mono-num">{estimate.upperBound}</span> of {estimate.totalSongs} songs reachable before it must repeat.</>
+                : <>No closed loop yet, so transition-only autoplay will eventually dead-end. Up to <span className="mono-num">{estimate.upperBound}</span> of {estimate.totalSongs} songs reachable in one run.</>}
+            </div>
+          )}
+        </div>
+
         {hasStarted && !session.setEnded && (
           <>
             <div>
@@ -98,7 +123,7 @@ export default function SequencePane({
                 {nextRows.map(row => (
                   <Row key={row.id} row={row} isEnd={row.id === END} isStaged={stagedId === row.id}
                     showToggles={stagedId === row.id} onClick={() => onStage(row.id)}
-                    stagedMode={stagedMode} onSetMode={onSetStagedMode} timeLeft={session.timeLeft} />
+                    stagedMode={stagedMode} onSetMode={onSetStagedMode} />
                 ))}
                 {nextRows.length === 0 && <div className="seq-empty">nothing built out of this song yet</div>}
               </div>
@@ -113,26 +138,12 @@ export default function SequencePane({
               <div className="seq-list-title">Later</div>
               <div className="seq-list">
                 {laterRows.map(row => (
-                  <Row key={row.id} row={row} isEnd={false} isStaged={false} showToggles={false} onClick={() => {}} timeLeft={session.timeLeft} />
+                  <Row key={row.id} row={row} isEnd={false} isStaged={false} showToggles={false} onClick={() => {}} />
                 ))}
                 {!stagedId && <div className="seq-empty">pick something in Next to preview what follows it</div>}
                 {stagedId && laterRows.length === 0 && <div className="seq-empty">nothing built past that pick yet</div>}
               </div>
             </div>
-
-            {session.queue.length > 0 && (
-              <div>
-                <div className="seq-list-title">Path</div>
-                <div className="seq-path">
-                  {session.queue.map((q, i) => (
-                    <React.Fragment key={q.id + i}>
-                      <span className="seq-path-arrow">→</span>
-                      <span className="seq-path-chip">{q.id === END ? 'End' : (songs[q.id] ? songs[q.id].title : '(deleted)')}</span>
-                    </React.Fragment>
-                  ))}
-                </div>
-              </div>
-            )}
           </>
         )}
       </div>

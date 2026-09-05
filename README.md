@@ -44,10 +44,42 @@ worker/
 
 ## Deploying
 
-Push to `main` with GitHub Pages set to "GitHub Actions" as its source
-(Settings → Pages) and the included workflow builds and deploys
-automatically — no backend required for that to produce a working, live
-copy.
+**To get a live URL at all (works standalone, no backend):**
+1. Push this repo to GitHub.
+2. Repo Settings → Pages → Source: "GitHub Actions".
+3. Push to `main` — the included workflow builds and deploys automatically.
+
+That's it for a working copy — local-storage only, same as running it on
+your own machine. Everything below is optional, and each piece turns on
+independently the moment its values are filled in.
+
+**To turn on cross-device sync (Supabase):**
+1. `src/config.js` already has a real Supabase project's URL + anon key
+   wired in — nothing to do here unless you want your own project.
+2. In that Supabase project: Authentication → Providers → enable
+   **Anonymous Sign-Ins**. Sync silently does nothing until this is on.
+3. Confirm `supabase/schema.sql` has been run against it (SQL Editor → run
+   the file) — this creates the one table sync writes to.
+
+**To turn on audio uploads + real detection (Cloudflare R2):**
+1. `npx wrangler login`
+2. `npx wrangler r2 bucket create eskimo-studio-audio`
+3. Cloudflare dashboard → that bucket → Settings → Public access → turn on
+   → copy the public URL into `worker/wrangler.toml`'s `PUBLIC_BUCKET_URL`.
+4. Same bucket → Settings → CORS Policy → add:
+   ```json
+   [{ "AllowedOrigins": ["*"], "AllowedMethods": ["GET"], "AllowedHeaders": ["*"], "MaxAgeSeconds": 3600 }]
+   ```
+   (this is what lets the browser fetch reference audio for detection and
+   downloads — separate from the worker's own CORS handling below)
+5. `cd worker && npx wrangler deploy` → copy the `*.workers.dev` URL it
+   prints out.
+6. Paste that URL into `src/config.js`'s `UPLOAD_WORKER_URL` (or add it as
+   a `UPLOAD_WORKER_URL` repository secret instead, alongside
+   `SUPABASE_URL`/`SUPABASE_ANON_KEY` if you're overriding those too — see
+   `.github/workflows/pages.yml`).
+7. Push. Upload a song's master on Upload Song, and Add Audio's detection
+   switches from placeholder matching to real analysis automatically.
 
 ## License
 

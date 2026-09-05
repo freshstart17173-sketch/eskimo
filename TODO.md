@@ -57,7 +57,55 @@ still React Flow's default smooth bezier, just following straight-line
 node placement, since dagre isn't computing bends for a layout you're
 controlling by hand.
 
-## Done this pass
+## Done this pass (round 2 — polish, autoplay, real cue timing)
+
+- **Verification is gone as a separate step.** You listen to the dropped
+  file (a real `<audio>` preview) on Add Audio before saving — there's no
+  more "unverified" edge sitting in Library waiting for a later verify
+  click, and no more unlabeled dot to be confused by. Library rows for a
+  built edge now offer an audio preview player too (when audio storage is
+  configured), not a verify button.
+- **Real per-edge cue timing.** Add Audio now persists the detected (or
+  placeholder) in/out points onto the edge itself (`outSeconds`/
+  `inSeconds`) instead of only displaying them. The Next list's countdown
+  is no longer one shared clock — each transition candidate counts down
+  its *own* cue point against Now Playing's actual elapsed time, floats to
+  the top while time remains (soonest-expiring first), and candidates
+  reachable only by a cut (which never expires) sink below them.
+- **Autoplay + transition-only mode + a real bottom queue bar.** Turning
+  on Autoplay picks randomly among built transitions when nothing's
+  queued, falling back to a random cut elsewhere in the library to keep an
+  "infinite playlist" going; Transition-only instead ends the set at a
+  dead end, guaranteeing every hop stays seamless. The queue bar (back
+  from an earlier pass, now genuinely useful) shows the whole run —
+  history, Playing, and what's committed — and auto-scrolls to keep up.
+  Library also gained multi-select: check a run of rows in the order you
+  want them and queue the whole thing in one action instead of staging
+  one at a time.
+- **"How long can this graph play seamlessly?"** — researched, not
+  guessed: the longest-simple-path problem is NP-hard and counting
+  distinct orderings is #P-complete (see `src/graphEstimate.js`'s header
+  comment for the sources), so there's no exact answer to compute. What's
+  implemented instead is exact and polynomial: Tarjan's SCC algorithm
+  finds closed loops (which make infinite transition-only play possible at
+  all), then a longest-path DP over the resulting condensation DAG gives
+  an honest upper-bound estimate of how many distinct songs one run could
+  reach. Shown live in the Sequence pane.
+- **Visual pass**: accent color swapped to a light pastel blue; node
+  card text alignment fixed (tags/io row was bottom-aligning mismatched
+  element heights, now centered); a dot-grid background on the canvas;
+  mutually-exclusive choices (Cut/Outro, Transition/Cut, Cut/Intro) now
+  render as a single joined segmented control instead of separate buttons,
+  so exclusivity reads as a property of the layout, not something you
+  infer; disabled options in a segmented control show struck-through
+  rather than just faded; the Playing node grows slightly and gets a small
+  animated waveform instead of only a pulsing border; every node is always
+  draggable now, in both layout modes; hover states got a subtle lift
+  (shadow + scale) across nodes and toggles; arrowheads shrunk across the
+  board and the old separate thick-black "committed path" overlay is gone
+  — the actual next-tier edge just animates (marching-ants dash) instead.
+
+## Done this pass (round 1 — stack + backend)
 
 **Stack**: moved off single-file/Babel-in-browser to Vite; adopted
 `@xyflow/react` for the graph canvas (real pan/zoom, wheel-zoom-to-cursor,
@@ -226,12 +274,12 @@ apps this one takes inspiration from.
       single JS chunk to ~685KB — lazy-loading the Perform tab's graph
       dependencies separately from Library/Upload/Settings would cut
       initial load meaningfully for a page most sessions won't start on.
-- [ ] **Autoplay / infinite set mode.** The reachability the graph already
-      computes is exactly the input an auto-picker needs — Next is already
-      "what's valid to go to," Later is already a hop ahead. Needs a
-      picking policy (random among built edges, weighted against
-      repeats) and closed-loop detection (strongly-connected components of
-      verified edges) surfaced on the graph.
+- [x] ~~Autoplay / infinite set mode~~ — done round 2: `pickAutoplayNext`
+      (random among built transitions, falls back to a random cut unless
+      Transition-only is on) plus `graphEstimate.js`'s SCC-based closed-loop
+      detection, both wired into the Sequence pane. Weighting the random
+      pick against recently-repeated songs is still open if the plain
+      random policy feels too repetitive in practice.
 - [ ] **"Flow" visual pass** — particles/light pulses along built edges for
       an idle ambient view and a shareable graph "signature" export.
 
