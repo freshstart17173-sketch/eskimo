@@ -249,6 +249,22 @@ export function pickAutoplayNext(songs, visibleEdges, currentId, transitionOnly)
 // the set-clock's automatic tick (timeLeft hits 0) and by a manual "Next
 // song" button, so a click and a natural countdown always do the same
 // thing rather than two hand-maintained copies of this branching.
+// How many seconds before the actual handoff the Playing card starts
+// showing "mixing into" the next song, Spotify-crossfade-style.
+export const CROSSFADE_LOOKAHEAD_SEC = 8;
+
+// Now Playing should hand off exactly at the committed transition's real
+// cue point (edge.outSeconds) when one was built and chosen — not after
+// the whole song plays out. Falls back to the full duration for a Cut, an
+// End Set, or a transition edge that doesn't carry a cue point yet.
+export function transitionTriggerElapsed(queueHead, edges, nowSongDurationSec) {
+  if (queueHead && queueHead.mode === 'transition' && queueHead.edgeId) {
+    const edge = edges.find(e => e.id === queueHead.edgeId);
+    if (edge && edge.outSeconds != null) return edge.outSeconds;
+  }
+  return nowSongDurationSec;
+}
+
 export function advanceSession(prev, songs, visibleEdges) {
   if (!prev.nowPlayingId) return prev;
   const head = prev.queue[0];

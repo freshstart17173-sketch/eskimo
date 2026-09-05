@@ -205,6 +205,66 @@ Everything below came out of actually looking at this with an eye toward
 seen it" — the standard you asked for, benchmarked against the kind of
 apps this one takes inspiration from.
 
+### In progress — finish this next (handoff notes)
+Mid-session work answering the user's questions about (1) multiple produced
+transitions between the same two songs, (2) what the Playing card shows
+during a transition, and (3) missing countdown bars in Next. Code changes
+already made and building clean (`npm run build` passes):
+- `core.js`: added `CROSSFADE_LOOKAHEAD_SEC` + `transitionTriggerElapsed()`
+  so the set-clock hands off at a transition's real `outSeconds` cue point
+  instead of always waiting for the full song to end.
+- `App.jsx`: set-clock interval now uses `transitionTriggerElapsed`.
+- `PerformPage.jsx`: `optionsFor`/`stage`/`commitStaged` now track
+  `stagedEdgeId` and expose the full `transitionEdges` array (via new
+  `findEdges`, plural) instead of only the first match between two songs —
+  this is what lets multiple produced transitions between the same pair
+  both be usable. `nextRows` now carries `basisSec` (the countdown's 100%
+  mark) so every Next row can render a drain bar. A `mixingIntoSong` /
+  `crossfadePct` pair is computed (true once within
+  `CROSSFADE_LOOKAHEAD_SEC` of a committed transition's cue point) and
+  passed to `SequencePane`.
+- `SequencePane.jsx`: rewritten — every Next/Later row now renders a
+  `.seq-row-drain` countdown bar; rows with more than one transition edge
+  show them indented under the song with labels (`edge.label` or
+  "Transition N") via a new `TransitionOption`, first one visible plus a
+  "See N more" expand button so a song with many transitions doesn't blow
+  out the list; the Playing card now shows a Spotify-style "Mixing into"
+  block (art + title + artist + crossfade %) once `mixingIntoSong` is set.
+- `styles.css`: added `.seq-row-drain`, `.seq-mixing-row` and friends.
+
+**Still needed before this is actually done:**
+1. `.seq-transition-item`, `.seq-transition-dot`, `.seq-transition-label`,
+   `.seq-transition-cue`, `.seq-row-more`, and `.seq-mixing-pct` are
+   referenced in `SequencePane.jsx` but have **no CSS yet** — right now
+   they'll render with browser-default/unstyled appearance. Add proper
+   styles (small indented rows, a muted dot, a "see more" link-style
+   button, contrast-checked against both the light Next-list card and the
+   dark Playing card).
+2. `GraphPane.jsx` still renders multiple transition edges between the
+   same two graph nodes as fully overlapping lines (looks like one edge).
+   Needs a per-edge curvature/offset (e.g. via React Flow's
+   `pathOptions.curvature`, offset by index among duplicate source/target
+   pairs) so they're visually distinguishable on the canvas too, not just
+   in the Sequence pane list.
+3. Rebuild and take fresh Playwright screenshots (the existing
+   `scratchpad/flow.js` script from the last verification pass is a good
+   base — extend it with a second transition between the same two demo
+   songs) confirming: every Next row shows a countdown bar, a song with
+   2+ transitions shows the indented/labeled picker with working
+   expand/collapse, and the Playing card's "Mixing into" block actually
+   appears near a transition's cue point during a real playthrough.
+4. Re-check contrast/visibility on every new piece of UI per the
+   standing rule from earlier feedback ("check to make sure every
+   button/label is visible") — this has bitten this project multiple
+   times via CSS specificity issues, so don't assume it's fine unstested.
+5. Once verified, report back to the user directly answering their three
+   original questions, tied to what's actually shipped:
+   - Multiple transitions between two songs: now handled — Next-list rows
+     expose all of them, not just the first found.
+   - What the Playing card does mid-transition: shows both songs (a
+     "Mixing into" block), Spotify-style.
+   - Countdown bars: now on every Next row via `.seq-row-drain`.
+
 ### Easy
 - [ ] Replace native `window.confirm(...)` dialogs (song delete, edge
       remove) with the app's own inline confirm pattern (already used for

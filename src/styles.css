@@ -232,6 +232,15 @@ a { color: var(--accent); }
 .seq-now-title { font-weight: 600; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-now-artist { font-size: 11.5px; color: rgba(252, 252, 252, .65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-now-tags { display: flex; gap: 5px; margin-top: 9px; }
+/* shown only while inside a built transition's crossfade window — both
+   songs at once, the way Spotify shows the up-next track during a
+   gapless/crossfade handoff */
+.seq-mixing-row { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(252, 252, 252, .22); }
+.seq-mixing-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: rgba(252, 252, 252, .5); flex: none; writing-mode: vertical-rl; }
+.seq-mixing-text { min-width: 0; }
+.seq-mixing-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seq-mixing-artist { font-size: 10.5px; color: rgba(252, 252, 252, .6); }
+.playhead-track.in-crossfade .playhead-fill { background: var(--state-later); }
 .seq-now .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper); }
 /* a regular playhead — elapsed/total, not a countdown — plus the missing
    manual "skip to next" action right where you'd look for it */
@@ -260,12 +269,16 @@ a { color: var(--accent); }
 .seq-row:hover { border-color: var(--line); }
 .seq-row-armed { background: var(--state-next-bg); border-color: var(--state-next); }
 .seq-row-staged { border-color: var(--ink); background: var(--paper); }
-.seq-row-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* the actual countdown bar — drains right-to-left as time runs out, behind
+   the row's own content (which needs z-index:1 to stay above it) */
+.seq-row-drain { position: absolute; top: 0; right: 0; bottom: 0; background: rgba(19, 19, 19, .07); transition: width 1s linear; }
+.seq-row-staged .seq-row-drain { background: rgba(19, 19, 19, .05); }
+.seq-row-main { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .seq-row-text { min-width: 0; }
 .seq-row-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-row-artist { font-size: 10.5px; color: var(--muted); }
 .seq-row-countdown { font-family: var(--font-mono); font-size: 10.5px; flex: none; }
-.seq-row-toggles { display: flex; gap: 4px; margin-top: 7px; }
+.seq-row-toggles { position: relative; z-index: 1; display: flex; gap: 4px; margin-top: 7px; }
 .seq-toggle { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 10.5px; font-weight: 600; padding: 4px 5px; border-radius: var(--radius); background: rgba(19, 19, 19, .06); color: var(--muted); }
 .seq-toggle.active { background: var(--ink); color: var(--paper); }
 .seq-toggle:disabled { opacity: .35; cursor: not-allowed; }

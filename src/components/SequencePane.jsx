@@ -1,11 +1,38 @@
 import React, { useState } from 'react';
-import { END, fmtTime } from '../core.js';
+import { END, fmtTime, clamp } from '../core.js';
 import { Icon, ICONS, SongPicker, AlbumArt } from './shared.jsx';
 
-function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode }) {
+// One produced transition, shown indented under its song once there's more
+// than one to choose between. Selectable only while its song is staged.
+function TransitionOption({ edge, index, active, selectable, onSelect }) {
+  const label = edge.label || ('Transition ' + (index + 1));
+  return (
+    <div
+      className={'seq-transition-item' + (active ? ' active' : '') + (selectable ? ' selectable' : '')}
+      onClick={selectable ? (e) => { e.stopPropagation(); onSelect(edge.id); } : undefined}
+    >
+      <span className="seq-transition-dot" />
+      <span className="seq-transition-label">{label}</span>
+      {edge.outSeconds != null && <span className="seq-transition-cue mono-num">cue {fmtTime(edge.outSeconds)}</span>}
+    </div>
+  );
+}
+
+function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode, stagedEdgeId, onSetStagedEdgeId }) {
+  const [expanded, setExpanded] = useState(false);
+  const transitionEdges = row.transitionEdges || [];
   const transitionExpired = row.secondsLeft === 0;
+  const drainPct = row.basisSec ? clamp(Math.round((row.secondsLeft / row.basisSec) * 100), 0, 100) : 0;
+
+  // Only worth indenting/labeling once there's an actual choice — a single
+  // transition already has its own countdown right on the row.
+  const hasChoice = transitionEdges.length > 1;
+  const shown = hasChoice ? (expanded ? transitionEdges : transitionEdges.slice(0, 1)) : [];
+  const hiddenCount = transitionEdges.length - shown.length;
+
   return (
     <div className={'seq-row' + (isStaged ? ' seq-row-staged' : '')} onClick={onClick}>
+      {!isEnd && <div className="seq-row-drain" style={{ width: drainPct + '%' }} />}
       <div className="seq-row-main">
         {!isEnd && <AlbumArt className="lib-art" style={{ width: 22, height: 22 }} />}
         <div className="seq-row-text">
@@ -14,9 +41,33 @@ function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode
         </div>
         {!isEnd && <span className="seq-row-countdown mono-num">{fmtTime(row.secondsLeft)}</span>}
       </div>
+
+      {hasChoice && (
+        <div className="seq-row-transitions">
+          {shown.map((edge, i) => (
+            <TransitionOption
+              key={edge.id} edge={edge} index={i}
+              active={showToggles && stagedMode === 'transition' && stagedEdgeId === edge.id}
+              selectable={showToggles}
+              onSelect={(id) => { onSetMode('transition'); onSetStagedEdgeId(id); }}
+            />
+          ))}
+          {hiddenCount > 0 && (
+            <button className="seq-row-more" onClick={(e) => { e.stopPropagation(); setExpanded(true); }}>
+              See {hiddenCount} more
+            </button>
+          )}
+          {expanded && transitionEdges.length > 1 && (
+            <button className="seq-row-more" onClick={(e) => { e.stopPropagation(); setExpanded(false); }}>
+              Show less
+            </button>
+          )}
+        </div>
+      )}
+
       {showToggles && !isEnd && (
         <div className="seq-row-toggles segmented">
-          <button className={'seq-toggle' + (stagedMode === 'transition' ? ' active' : '')} disabled={!row.transitionEdge || transitionExpired}
+          <button className={'seq-toggle' + (stagedMode === 'transition' ? ' active' : '')} disabled={transitionEdges.length === 0 || transitionExpired}
             onClick={(e) => { e.stopPropagation(); onSetMode('transition'); }}>Transition</button>
           <button className={'seq-toggle' + (stagedMode === 'cut' ? ' active' : '')}
             onClick={(e) => { e.stopPropagation(); onSetMode('cut'); }}>Cut</button>
@@ -28,9 +79,10 @@ function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode
 
 export default function SequencePane({
   songs, session, venueName, hasStarted, nowSong, cueBarPct, hasOutroForPlaying,
-  nextRows, laterRows, stagedId, stagedMode,
+  mixingIntoSong, crossfadePct,
+  nextRows, laterRows, stagedId, stagedMode, stagedEdgeId,
   onTogglePlaying, onResumeSet, onStartSet, onSetEndingChoice,
-  onStage, onCommitStaged, onSetStagedMode, onSkipNext,
+  onStage, onCommitStaged, onSetStagedMode, onSetStagedEdgeId, onSkipNext,
 }) {
   const [startPickId, setStartPickId] = useState(null);
   const [startStarting, setStartStarting] = useState('cut');
@@ -81,6 +133,18 @@ export default function SequencePane({
             </div>
             <button className="btn playhead-next-btn" onClick={onSkipNext}>Next song →</button>
 
+            {mixingIntoSong && (
+              <div className="seq-mixing-row">
+                <span className="seq-mixing-label">Mixing into</span>
+                <AlbumArt className="node-art" style={{ width: 30, height: 30 }} />
+                <div className="seq-mixing-text">
+                  <div className="seq-mixing-title">{mixingIntoSong.title}</div>
+                  <div className="seq-mixing-artist">{mixingIntoSong.artist}</div>
+                </div>
+                <span className="seq-mixing-pct mono-num">{crossfadePct}%</span>
+              </div>
+            )}
+
             <div className="seq-ending-row">
               <span className="seq-ending-label">How it ends</span>
               <div className="seq-ending-toggle segmented">
@@ -106,7 +170,8 @@ export default function SequencePane({
                 {nextRows.map(row => (
                   <Row key={row.id} row={row} isEnd={row.id === END} isStaged={stagedId === row.id}
                     showToggles={stagedId === row.id} onClick={() => onStage(row.id)}
-                    stagedMode={stagedMode} onSetMode={onSetStagedMode} />
+                    stagedMode={stagedMode} onSetMode={onSetStagedMode}
+                    stagedEdgeId={stagedEdgeId} onSetStagedEdgeId={onSetStagedEdgeId} />
                 ))}
                 {nextRows.length === 0 && <div className="seq-empty">nothing built out of this song yet</div>}
               </div>

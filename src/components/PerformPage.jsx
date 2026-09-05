@@ -20,6 +20,7 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
 
   const [stagedId, setStagedId] = useState(null);
   const [stagedMode, setStagedMode] = useState('cut'); // 'transition' | 'cut'
+  const [stagedEdgeId, setStagedEdgeId] = useState(null); // which produced transition, when there's more than one
   const [stagedStarting, setStagedStarting] = useState('cut');
 
   useEffect(() => { setStagedId(null); }, [session.nowPlayingId]);
@@ -43,6 +44,11 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
   );
 
   const findEdge = useCallback((pred) => visibleEdges.find(pred), [visibleEdges]);
+  // Two songs can have more than one produced transition between them —
+  // Add Audio never de-dupes, and Library already lists every one. Collect
+  // all of them here rather than just the first, so none are silently
+  // unreachable in Perform.
+  const findEdges = useCallback((pred) => visibleEdges.filter(pred), [visibleEdges]);
 
   const ioById = useMemo(() => {
     const m = {};
@@ -56,9 +62,9 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
       return { id, title: 'End Set', outroEdge };
     }
     const s = songs[id];
-    const transitionEdge = findEdge(e => e.type === 'transition' && e.l === fromId && e.r === id);
+    const transitionEdges = findEdges(e => e.type === 'transition' && e.l === fromId && e.r === id);
     const introEdge = findEdge(e => e.type === 'intro' && e.r === id);
-    return { id, title: s.title, artist: s.artist, transitionEdge, introEdge };
+    return { id, title: s.title, artist: s.artist, transitionEdges, transitionEdge: transitionEdges[0] || null, introEdge };
   }
 
   function stage(id) {
@@ -67,10 +73,11 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     if (qIdx >= 0) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, qIdx) })); setStagedId(null); return; }
     if (!fromId) return;
     if (id === END) { setStagedId(END); return; }
-    const transitionEdge = findEdge(e => e.type === 'transition' && e.l === fromId && e.r === id);
+    const transitionEdges = findEdges(e => e.type === 'transition' && e.l === fromId && e.r === id);
     const introEdge = findEdge(e => e.type === 'intro' && e.r === id);
     setStagedId(id);
-    setStagedMode(transitionEdge ? 'transition' : 'cut');
+    setStagedMode(transitionEdges.length > 0 ? 'transition' : 'cut');
+    setStagedEdgeId(transitionEdges[0] ? transitionEdges[0].id : null);
     setStagedStarting(introEdge ? 'intro' : 'cut');
   }
 
@@ -82,7 +89,7 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
       return;
     }
     const item = stagedMode === 'transition'
-      ? { id: stagedId, mode: 'transition' }
+      ? { id: stagedId, mode: 'transition', edgeId: stagedEdgeId }
       : { id: stagedId, mode: 'cut', ending: session.endingChoice, starting: stagedStarting };
     setSession(prev => ({ ...prev, queue: [...prev.queue, item] }));
     setStagedId(null);
@@ -195,6 +202,23 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
   const nowSong = hasStarted ? songs[session.nowPlayingId] : null;
   const cueBarPct = nowSong && nowSong.durationSec ? Math.round((1 - session.timeLeft / nowSong.durationSec) * 100) : 0;
 
+  // Spotify-style dual display: once we're within CROSSFADE_LOOKAHEAD_SEC of
+  // the committed transition's real cue point, show both songs instead of
+  // just Playing. Only applies to a committed (queued) transition — staging
+  // something in Next is a preview, not a commitment, so it doesn't trigger this.
+  const queueHead = session.queue[0];
+  const committedEdge = (queueHead && queueHead.mode === 'transition' && queueHead.edgeId)
+    ? edges.find(e => e.id === queueHead.edgeId) : null;
+  let mixingIntoSong = null, crossfadePct = 0;
+  if (nowSong && queueHead && queueHead.mode === 'transition') {
+    const triggerAt = committedEdge && committedEdge.outSeconds != null ? committedEdge.outSeconds : nowSong.durationSec;
+    const elapsed = nowSong.durationSec - session.timeLeft;
+    if (triggerAt - elapsed <= 8) {
+      mixingIntoSong = songs[queueHead.id] || null;
+      crossfadePct = clamp(Math.round((1 - Math.max(0, triggerAt - elapsed) / 8) * 100), 0, 100);
+    }
+  }
+
   // Each candidate's countdown is its own transition's cue point, not a
   // shared clock: a built transition edge carries a real outSeconds (when
   // should must-trigger by, in Now Playing's own timeline). Candidates with
@@ -208,9 +232,13 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
       const hasRealCue = !!(opts.transitionEdge && opts.transitionEdge.outSeconds != null);
       // every row shows a countdown — a real per-edge cue point when one's
       // been built, otherwise the shared "time left in Now Playing" clock
-      // as a sane default, never blank
+      // as a sane default, never blank. basisSec is the countdown's 100%
+      // mark (the cue point itself, or the full song when there's no cue)
+      // so the drain bar always starts full and empties to zero right as
+      // the trigger fires.
       const secondsLeft = hasRealCue ? Math.max(0, opts.transitionEdge.outSeconds - elapsed) : session.timeLeft;
-      return { ...opts, secondsLeft, hasRealCue };
+      const basisSec = hasRealCue ? opts.transitionEdge.outSeconds : (nowSong ? nowSong.durationSec : 210);
+      return { ...opts, secondsLeft, hasRealCue, basisSec };
     });
     return rows.sort((a, b) => {
       if (a.hasRealCue && b.hasRealCue) return a.secondsLeft - b.secondsLeft;
@@ -296,9 +324,11 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
         <SequencePane
           songs={songs} session={session} venueName={venueName}
           hasStarted={hasStarted} nowSong={nowSong} cueBarPct={cueBarPct} hasOutroForPlaying={hasOutroForPlaying}
-          nextRows={nextRows} laterRows={laterRows} stagedId={stagedId} stagedMode={stagedMode}
+          mixingIntoSong={mixingIntoSong} crossfadePct={crossfadePct}
+          nextRows={nextRows} laterRows={laterRows} stagedId={stagedId} stagedMode={stagedMode} stagedEdgeId={stagedEdgeId}
           onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onStartSet={startSet} onSetEndingChoice={setEndingChoice}
-          onStage={stage} onCommitStaged={commitStaged} onSetStagedMode={setStagedMode} onSkipNext={skipNow}
+          onStage={stage} onCommitStaged={commitStaged} onSetStagedMode={setStagedMode} onSetStagedEdgeId={setStagedEdgeId}
+          onSkipNext={skipNow}
         />
       </div>
     </div>

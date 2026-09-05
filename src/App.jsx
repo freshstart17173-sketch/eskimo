@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { Store, freshState, emptySession, removeSongCascade, END, getVisibleEdges, advanceSession } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, END, getVisibleEdges, advanceSession, transitionTriggerElapsed } from './core.js';
 import Sidebar from './components/Sidebar.jsx';
 import PerformPage from './components/PerformPage.jsx';
 import LibraryPage from './components/Library.jsx';
@@ -48,13 +48,20 @@ export default function App() {
 
   // ---- the set clock: ticks Now Playing's countdown, then hands off to
   // advanceSession (core.js) — the same function a manual "Next song" click
-  // uses — when it hits 0, so the timer and the button can never disagree
-  // about what happens next. ----
+  // uses — once transitionTriggerElapsed says it's time, so the timer and
+  // the button can never disagree about what happens next. Critically,
+  // that trigger point is the committed transition's real cue point when
+  // one exists — not the full song length — so the handoff actually
+  // happens where the produced transition was built to happen. ----
   useEffect(() => {
     const t = setInterval(() => {
       setSession(prev => {
         if (!prev.isPlaying || !prev.nowPlayingId) return prev;
-        if (prev.timeLeft <= 1) return advanceSession(prev, songs, getVisibleEdges(edges));
+        const nowSong = songs[prev.nowPlayingId];
+        const duration = nowSong ? nowSong.durationSec : 210;
+        const elapsed = duration - prev.timeLeft;
+        const triggerAt = transitionTriggerElapsed(prev.queue[0], edges, duration);
+        if (elapsed >= triggerAt || prev.timeLeft <= 1) return advanceSession(prev, songs, getVisibleEdges(edges));
         return { ...prev, timeLeft: prev.timeLeft - 1 };
       });
     }, 1000);
