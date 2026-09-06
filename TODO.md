@@ -238,23 +238,26 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
   now only renders the countdown span when `secondsLeft` is actually set.
 
 ### Easy
-- [ ] Replace native `window.confirm(...)` dialogs (song delete, edge
-      remove) with the app's own inline confirm pattern (already used for
-      "Clear all data" in Settings) — a browser-native dialog box breaks
-      the whole visual language the moment it appears.
-- [ ] Swap italic `.hint-text` styling for regular-weight muted text —
-      italics read as dated/Word-doc-like, not minimal.
-- [ ] Add a real favicon/tab title treatment (currently unset).
-- [ ] Basic keyboard shortcuts: `/` or `Cmd+K` focuses search, `Esc` clears
-      it, arrow keys step search results, `Space` toggles play/pause on
-      Playing. Small effort, outsized "this feels considered" payoff.
-- [ ] Toolbar buttons (`Focus active`, `Arrange for me`) have `title`
-      tooltips but no visible on-hover tooltip styling — add one
-      consistent tooltip treatment app-wide.
-- [ ] "Analyzing…" during Add Audio detection is plain italic text; a
-      small inline progress indicator would read as far more "real work is
-      happening" than static text, especially once detection is fetching
-      multiple reference tracks.
+- [x] ~~Replace native `window.confirm(...)` dialogs~~ — done: song delete
+      and edge remove in `Library.jsx` now use the same inline
+      confirm/cancel pattern as "Clear all data" in Settings.
+- [x] ~~Swap italic `.hint-text` styling~~ — done, and applied the same fix
+      to `.empty-note`, `.empty-note-sm`, and `.seq-empty` for consistency
+      (all four had the same italic-text issue).
+- [x] ~~Add a real favicon~~ — done: `src/assets/favicon.svg`, a small
+      monochrome mark echoing the app's own Playing (solid)/Next (outlined)
+      node treatment.
+- [x] ~~Basic keyboard shortcuts~~ — done in `PerformPage.jsx`: `/` or
+      `Cmd/Ctrl+K` focuses search, arrow keys step results while search is
+      active, `Space` toggles Playing — all skipped while typing in a text
+      field. Verified with a Playwright pass against the real dev server.
+- [x] ~~Toolbar button tooltips~~ — done: a `[data-tooltip]` CSS utility
+      (dark chip, small delay) now used app-wide, starting with `Focus
+      active`/`Arrange for me`. Placed below rather than above the trigger
+      since the toolbar sits at the very top of the page — above would
+      clip against the viewport edge (confirmed by screenshot, then fixed).
+- [x] ~~Inline progress indicator for Add Audio~~ — done: a small CSS
+      spinner (`.spinner`) next to the "Analyzing…" text.
 
 ### Medium
 - [ ] **Real cover art.** Album art is a decorative placeholder swatch

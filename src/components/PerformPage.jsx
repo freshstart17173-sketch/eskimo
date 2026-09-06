@@ -17,6 +17,7 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
   const [matchIndex, setMatchIndex] = useState(0);
   const [layoutMode, setLayoutMode] = useState('manual'); // 'manual' | 'auto'
   const [hoveredId, setHoveredId] = useState(null);
+  const searchInputRef = useRef(null);
 
   const [stagedId, setStagedId] = useState(null);
   const [stagedMode, setStagedMode] = useState('cut'); // 'transition' | 'cut'
@@ -187,6 +188,34 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     else rf.fitView({ duration: 450, padding: 0.2 });
   }
 
+  // ---------------- keyboard shortcuts: / or Cmd/Ctrl+K focuses search, arrow
+  // keys step results while search is active, Space toggles Playing ----------------
+  useEffect(() => {
+    function isTypingTarget(el) {
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    }
+    function onKeyDown(e) {
+      const typing = isTypingTarget(document.activeElement);
+      if ((e.key === '/' && !typing) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) {
+        e.preventDefault();
+        if (searchInputRef.current) searchInputRef.current.focus();
+        return;
+      }
+      if (searchActive && !typing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        stepMatch(e.key === 'ArrowLeft' ? -1 : 1);
+        return;
+      }
+      if (e.key === ' ' && !typing && hasStarted) {
+        e.preventDefault();
+        togglePlaying();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchActive, matches, matchIndex, hasStarted]);
+
   // ---------------- hover-card data (same commit functions as the Sequence pane) ----------------
   const hoverCardFor = useCallback((id) => {
     if (!hasStarted || hoveredId !== id || !tier1.has(id)) return null;
@@ -267,7 +296,8 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
       <div className="toolbar">
         <div className="search-wrap">
           <input
-            className="input" placeholder="Find a song or artist…" value={searchQuery}
+            ref={searchInputRef}
+            className="input" placeholder="Find a song or artist… (/)" value={searchQuery}
             onChange={(e) => { setSearchQuery(e.target.value); setShowSuggestions(true); }}
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 120)}
@@ -295,10 +325,10 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
           </div>
         )}
 
-        <button className="toolbar-btn" onClick={focusActive} title="Focus on the playing song">
+        <button className="toolbar-btn" onClick={focusActive} data-tooltip="Focus on the playing song">
           <Icon path={ICONS.target} size={13} /> Focus active
         </button>
-        <button className={'toolbar-btn' + (layoutMode === 'auto' ? ' active' : '')} onClick={() => setLayoutMode(m => (m === 'auto' ? 'manual' : 'auto'))} title="Toggle auto-arrange">
+        <button className={'toolbar-btn' + (layoutMode === 'auto' ? ' active' : '')} onClick={() => setLayoutMode(m => (m === 'auto' ? 'manual' : 'auto'))} data-tooltip="Toggle auto-arrange">
           <Icon path={ICONS.grid} size={13} /> {layoutMode === 'auto' ? 'Auto-arranged' : 'Arrange for me'}
         </button>
 

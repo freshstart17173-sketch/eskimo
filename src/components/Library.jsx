@@ -8,6 +8,8 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   const [draftArtist, setDraftArtist] = useState(song.artist);
   const [draftBpm, setDraftBpm] = useState(String(song.bpm));
   const [draftKey, setDraftKey] = useState(song.key);
+  const [confirmingDeleteSong, setConfirmingDeleteSong] = useState(false);
+  const [confirmingDeleteEdgeId, setConfirmingDeleteEdgeId] = useState(null);
 
   function saveEdits() {
     const bpmNum = Number(draftBpm);
@@ -25,10 +27,6 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   }
   function labelOf(e) { return e.type === 'outro' ? 'Outro' : e.type === 'intro' ? 'Intro' : 'Transition'; }
   const ownEdges = edges.filter(e => e.l === song.id || e.r === song.id);
-
-  function confirmDelete() {
-    if (window.confirm('Delete "' + song.title + '"? This also removes every transition/intro/outro that touches it.')) onDeleteSong(song.id);
-  }
 
   return (
     <div className={'lib-row' + (open ? ' lib-row-open' : '')}>
@@ -57,7 +55,15 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
               ) : (
                 <span className="hint-text" style={{ alignSelf: 'center' }}>no reference master uploaded</span>
               )}
-              <button className="btn btn-danger btn-sm" onClick={confirmDelete}>Delete song</button>
+              {!confirmingDeleteSong ? (
+                <button className="btn btn-danger btn-sm" onClick={() => setConfirmingDeleteSong(true)}>Delete song</button>
+              ) : (
+                <>
+                  <span className="hint-text" style={{ alignSelf: 'center' }}>removes every transition/intro/outro touching it</span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setConfirmingDeleteSong(false)}>Cancel</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => onDeleteSong(song.id)}>Confirm delete</button>
+                </>
+              )}
             </div>
           ) : (
             <div className="lib-edit-row">
@@ -78,7 +84,14 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                     <span className="drawer-frag-label">{labelOf(e)}</span>
                     <div className="drawer-frag-actions">
                       {e.audioUrl && <audio controls src={e.audioUrl} style={{ height: 26 }} />}
-                      <button className="btn btn-ghost btn-xs" onClick={() => { if (window.confirm('Remove this ' + labelOf(e).toLowerCase() + '?')) onDeleteEdge(e.id); }}>Remove</button>
+                      {confirmingDeleteEdgeId !== e.id ? (
+                        <button className="btn btn-ghost btn-xs" onClick={() => setConfirmingDeleteEdgeId(e.id)}>Remove</button>
+                      ) : (
+                        <>
+                          <button className="btn btn-ghost btn-xs" onClick={() => setConfirmingDeleteEdgeId(null)}>Cancel</button>
+                          <button className="btn btn-danger btn-xs" onClick={() => { onDeleteEdge(e.id); setConfirmingDeleteEdgeId(null); }}>Confirm</button>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="drawer-frag-dest">{destText(e)}</div>

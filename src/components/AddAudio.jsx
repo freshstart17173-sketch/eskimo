@@ -122,7 +122,12 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
           </Field>
         )}
 
-        {analyzing && <div className="hint-text analyzing-hint">{referenceableSongs.length > 0 ? 'Analyzing audio against your reference tracks…' : 'Analyzing audio…'}</div>}
+        {analyzing && (
+          <div className="hint-text analyzing-hint">
+            <span className="spinner" />
+            {referenceableSongs.length > 0 ? 'Analyzing audio against your reference tracks…' : 'Analyzing audio…'}
+          </div>
+        )}
 
         {detected && (
           <>
