@@ -212,12 +212,23 @@ export function bestCorrelation(a, b) {
   const maxLag = Math.min(na.length, nb.length) - 1;
   // A lag near the search's extremes only overlaps a handful of windows —
   // on z-scored (zero-mean, unit-variance) data, a handful of points can
-  // score deceptively high by pure chance, which the old flat `count < 4`
-  // floor let straight through as a "confident" match. Requiring most of
-  // the shorter envelope to actually be compared (not just 4 windows'
-  // worth) makes a spurious short-overlap coincidence far less likely to
-  // clear MATCH_THRESHOLD.
-  const minCount = Math.max(4, Math.floor(Math.min(na.length, nb.length) * 0.6));
+  // score deceptively high by pure chance, which a flat `count < 4` floor
+  // let straight through as a "confident" match. The fix isn't "require
+  // most of the shorter envelope" though — a real outro/transition upload
+  // is meant to carry only a bar or two of the original before its own new
+  // material starts (see TODO.md), so most of the dropped clip's own
+  // envelope is *supposed* to be non-overlapping content the correlation
+  // was never going to match against; requiring a fixed fraction of it
+  // rejected exactly the short-overlap case this exists to detect (a 2s
+  // overlap against a clip that's mostly new material after it scores well
+  // under any reasonable percentage of either full envelope). What
+  // actually guards against a coincidental fluke is an absolute floor on
+  // how much real overlap backs the score — a bar or two even at a slow
+  // tempo is comfortably more than a second, so requiring that much (not
+  // a percentage) filters the same tiny-window flukes without punishing a
+  // short, legitimate overlap.
+  const MIN_OVERLAP_SEC = 1;
+  const minCount = Math.min(Math.min(na.length, nb.length), Math.max(4, Math.round(MIN_OVERLAP_SEC / WINDOW_SEC)));
   let best = -Infinity, bestLag = 0;
   for (let lag = -maxLag; lag <= maxLag; lag++) {
     let sum = 0, count = 0;

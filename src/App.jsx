@@ -8,6 +8,7 @@ import Sidebar from './components/Sidebar.jsx';
 // of every page's code paying for Perform's graph-canvas dependencies on
 // first load regardless of which tab loads first.
 const PerformPage = lazy(() => import('./components/PerformPage.jsx'));
+const LivePerformPage = lazy(() => import('./components/LivePerformPage.jsx'));
 const LibraryPage = lazy(() => import('./components/Library.jsx'));
 const UploadSongPage = lazy(() => import('./components/UploadSong.jsx'));
 const AddAudioPage = lazy(() => import('./components/AddAudio.jsx'));
@@ -27,7 +28,7 @@ export default function App() {
   const [isDemo, setIsDemo] = useState(!!INITIAL.isDemo);
   const [playlists, setPlaylists] = useState(INITIAL.playlists || []);
 
-  const [tab, setTab] = useState('perform');
+  const [tab, setTab] = useState('live');
 
   // ---- pull anything saved on another device once, on boot (no-op until Supabase is configured) ----
   useEffect(() => {
@@ -246,6 +247,9 @@ export default function App() {
           </div>
         )}
         <Suspense fallback={<div className="page-loading" />}>
+          {tab === 'live' && (
+            <LivePerformPage songs={songs} edges={edges} session={session} setSession={setSession} />
+          )}
           {tab === 'perform' && (
             <PerformPage
               songs={songs} setSongs={setSongs} edges={edges} session={session} setSession={setSession}

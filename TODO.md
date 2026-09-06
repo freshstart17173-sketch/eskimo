@@ -772,6 +772,52 @@ Everything below came out of actually looking at this with an eye toward
 seen it" — the standard you asked for, benchmarked against the kind of
 apps this one takes inspiration from.
 
+### Done this pass (round 6 — a real non-graph Live screen, outro/short-overlap detection fixes)
+The graph is disabled (greyed out in the sidebar, `disabled`, tooltip
+explaining why — still fully intact in code, just unreachable) in favor of
+a brand-new **Live** screen (`LivePerformPage.jsx`), now the app's default
+tab: four columns, left to right — Playing, How it ends, Next song starts
+via, Next song — each a flat list of cards, nothing gated behind the old
+3-way mode toggle first (every produced Transition off the playing song is
+its own card in "How it ends", right alongside None/Outro). Playing's card
+gets a left-to-right elapsed progress bar; every other card gets a
+right-to-left countdown (a transition counts down to its own real cue
+point same as the graph's Next list always did; None/Outro/start-mode
+cards all share the playing song's own remaining time, since none of them
+have an earlier expiry of their own). The whole column set plays a brief
+slide-in whenever the playing song actually changes. Deliberately its own
+component rather than a second render path inside `PerformPage.jsx` — it
+only touches `session.queue` through the same core.js/audioEngine.js
+functions the graph already used (so the two can never disagree about what
+a hop does), but the interaction glue (commit/start/end/stop) is a fresh,
+independent copy — worth remembering if the graph ever comes back, since a
+fix to one won't automatically reach the other.
+
+Also this pass: **tested the outro fix directly** (dev server; the live
+Vercel deployment is behind Vercel's own SSO/deployment-protection wall,
+so it couldn't be reached directly from here — ask the user to confirm on
+their end, or open deployment protection to test it live). Wiring an early
+forced cue point and watching the real session clock confirmed the hop
+now fires well before the song's recorded duration, for both a wired
+ending and a manual "End set → Outro" — matches the fix described above.
+
+Found a real regression in `bestCorrelation`'s own overlap-fraction guard
+(added earlier this pass to fight coincidental short-window matches) while
+testing the "upload with just a bar or two of overlap" workflow: requiring
+a *percentage* of the whole envelope to overlap rejected a real, correct
+short overlap outright, since a produced outro is *mostly new material* by
+design — most of its own envelope was never going to match anything.
+Replaced with an absolute ~1-second floor instead (see `audioDetect.js`) —
+comfortably under any normal "bar or two," while still filtering the tiny-
+window flukes the guard existed for. Detection now clears the confidence
+threshold confidently on a short synthetic overlap; the exact computed
+cue-point timestamp was off by a few seconds in that same synthetic test,
+which looks like an artifact of the test signal being too perfectly
+periodic (giving the correlation search several similarly-good false
+alignments) rather than a real bug — but it's genuinely unverified against
+real recorded audio. **Confirm short-overlap cue-point precision against
+a real short clip before trusting it for a live set.**
+
 ### Next up — requested, not yet built
 - **A real preview player for Add Audio.** The current `<audio controls>`
   is too small to actually tell whether a detected transition is right —
@@ -785,17 +831,33 @@ apps this one takes inspiration from.
   it's specifically the type (intro/outro/transition) auto-detect that
   isn't reliable.** Don't touch the out-point math while working on this;
   focus on the player UI and the type classification.
-- Related correctness point the user flagged, already true today but worth
-  keeping in mind for that player: an outro/transition clip is uploaded
-  "with the original song still attached" *only* far enough to make the
-  splice detectable — ideally just a bar or two of overlap, not the whole
-  song — and detection needs to find and sync to that overlap correctly at
-  that short length. `bestCorrelation` (`audioDetect.js`) requires most of
-  the *shorter* envelope to actually overlap before accepting a lag (added
-  this pass, see below) specifically so a short, correct overlap isn't
-  mistaken for noise — but this hasn't been validated yet against a real
-  short (~1-2 bar) clip, only reasoned through. Worth testing directly
-  before trusting it.
+- Related correctness point the user flagged: an outro/transition clip is
+  uploaded "with the original song still attached" *only* far enough to
+  make the splice detectable — ideally just a bar or two of overlap, not
+  the whole song — and detection needs to find and sync to that overlap
+  correctly at that short length. Tested directly this pass with synthetic
+  audio (a rhythmic pulse pattern, since the RMS-envelope approach here can
+  only key off amplitude/energy shape, not pitch/timbre — two clips at the
+  same loudness but different pitch look identical to it, so any manual
+  test of this needs actual rhythmic/percussive variation, not a plain
+  tone). Found and fixed a real regression from earlier this pass:
+  `bestCorrelation`'s "require most of the *shorter* envelope to overlap"
+  guard rejected a real, correct 2-second overlap outright, since a
+  produced outro is *mostly new material* by design — most of its own
+  envelope was never going to overlap with anything, so requiring a
+  percentage of it punished exactly the short-overlap case this exists to
+  detect. Replaced with an absolute floor (~1 real second of overlap,
+  comfortably under "a bar or two" at any normal tempo) instead of a
+  percentage. With that fix, a short 2-second overlap now clears
+  MATCH_THRESHOLD confidently (~0.78 in the synthetic test). The *exact*
+  cue-point timestamp it computed was off by a few seconds in that same
+  test, which looks like an artifact of the synthetic signal being too
+  perfectly periodic (a steady, repeating pulse gives the correlation
+  search several similarly-good false alignments, not just the true one) —
+  real music has enough natural micro-variation that this shouldn't
+  reproduce, but it's genuinely untested against real recorded audio.
+  **Don't treat short-overlap cue-point precision as fully verified —
+  confirm it against a real short-overlap upload before relying on it.**
 
 ### Done this pass (round 5 — color match, right-click menus, a real live-playback bug, graph-only UI)
 Fixed a serious, real live-playback bug the user caught by ear: an
