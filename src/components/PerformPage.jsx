@@ -4,15 +4,14 @@ import Fuse from 'fuse.js';
 import {
   END, START, getVisibleEdges, inOutCounts, queueTailId, removeQueueItem,
   transitionCandidates, cutCandidates, clamp, leftSocketAvailability, rightSocketAvailability,
-  unwireOutput, wireConnection, wireStart, unwireStart, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
-  introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime,
+  unwireOutput, wireConnection, wireStart, unwireStart, disconnectAllWires, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
+  introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, uid, mockDuration, uploadAudioIfConfigured, uploadCoverIfPossible,
 } from '../core.js';
 import { engine, performAdvance } from '../audioEngine.js';
+import { analyzeAudio } from '../audioAnalyze.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
 import GraphPane from './GraphPane.jsx';
-import SequencePane from './SequencePane.jsx';
-import QueueBar from './QueueBar.jsx';
-import { Icon, ICONS, ConfirmModal } from './shared.jsx';
+import { Icon, ICONS, ConfirmModal, Field, Dropzone, CoverPicker } from './shared.jsx';
 
 // The Provider wrapper lives here (not App.jsx) so @xyflow/react — React
 // Flow, dagre's graph layout, Fuse.js search, this whole module — only
@@ -25,7 +24,7 @@ export default function PerformPage(props) {
   );
 }
 
-function PerformPageInner({ songs, setSongs, edges, session, setSession, venueName, goUpload, onLoadExample }) {
+function PerformPageInner({ songs, setSongs, edges, session, setSession, venueName, goUpload, goLibrary, onLoadExample, onDeleteSong }) {
   const rf = useReactFlow();
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -38,6 +37,26 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // SequencePane (rather than living as that component's own state) so a
   // click on the graph can select a song too, not just the search box.
   const [startPickId, setStartPickId] = useState(null);
+  // Right-click context menus (empty canvas vs. a specific node) — one
+  // piece of state, null when closed, `{ kind: 'pane'|'node', screenX,
+  // screenY, flowX, flowY, nodeId, nodeType }` when open. `screenX/Y`
+  // position the popover itself (fixed, viewport coordinates from the
+  // click); `flowX/Y` (pane menu only) are where "Add song here" should
+  // actually place the new song, in the canvas's own coordinate space.
+  const [contextMenu, setContextMenu] = useState(null);
+  const [addSongAt, setAddSongAt] = useState(null); // { x, y } in flow space, or null when the modal's closed
+
+  const onPaneContextMenu = useCallback((event) => {
+    event.preventDefault();
+    const flowPos = rf.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    setContextMenu({ kind: 'pane', screenX: event.clientX, screenY: event.clientY, flowX: flowPos.x, flowY: flowPos.y });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rf]);
+  const onNodeContextMenu = useCallback((event, node) => {
+    event.preventDefault();
+    setContextMenu({ kind: 'node', screenX: event.clientX, screenY: event.clientY, nodeId: node.id, nodeType: node.type });
+  }, []);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   const hasStarted = session.nowPlayingId !== null;
   const visibleEdges = useMemo(() => getVisibleEdges(edges), [edges]);
@@ -188,7 +207,12 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setEndSetModalOpen(true);
   }
   function confirmEndSet() {
-    setSession(prev => ({ ...prev, queue: [...prev.queue, { id: END, ending: endSetEnding }] }));
+    // The outro's own edgeId lets transitionTriggerElapsed (core.js) hand
+    // off at its real cue point instead of waiting out the full song
+    // duration — see that function's own comment for why that used to
+    // duplicate the outro clip's overlapping tail material.
+    const outroEdgeId = endSetEnding === 'outro' ? ((findEdge(e => e.type === 'outro' && e.l === session.nowPlayingId) || {}).id || null) : null;
+    setSession(prev => ({ ...prev, queue: [...prev.queue, { id: END, ending: endSetEnding, edgeId: outroEdgeId }] }));
     setEndSetModalOpen(false);
   }
 
@@ -313,6 +337,26 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setSongs(prev => (prev[id] ? { ...prev, [id]: { ...prev[id], x, y } } : prev));
   }
 
+  // Canvas context menu's "Add song here" — the same save logic Upload
+  // Song's own form uses (real decode for duration, local/worker audio and
+  // cover storage), just placed at the right-clicked point instead of an
+  // auto-computed spot and reached without leaving the graph.
+  async function saveAddedSong({ title, artist, file, coverFile }) {
+    const analyzed = await analyzeAudio(file).catch(() => null);
+    const audio = await uploadAudioIfConfigured(file);
+    const coverUrl = coverFile ? await uploadCoverIfPossible(coverFile) : null;
+    const id = uid('s');
+    const at = addSongAt || { x: 60, y: 60 };
+    const song = {
+      id, title: title.trim(), artist: artist.trim() || 'Unknown',
+      x: at.x, y: at.y, bpm: 120, key: '—',
+      durationSec: (analyzed && analyzed.durationSec) || mockDuration(title + artist),
+      audioUrl: audio.audioUrl || null, coverUrl,
+    };
+    setSongs(prev => ({ ...prev, [id]: song }));
+    setAddSongAt(null);
+  }
+
   // ---------------- the three graph highlight states: playing / next / later ----------------
   // Memoized so its identity is stable across renders that don't actually
   // change the queue (e.g. a hover or search keystroke) — `stateFor` below
@@ -434,6 +478,24 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   }, [setSession]);
   const disconnectStart = useCallback(() => {
     setSession(prev => ({ ...prev, activePlaylist: unwireStart(prev.activePlaylist) }));
+  }, [setSession]);
+
+  // Node context menu's "Set as Start" — the same auto-pick rule click-to-
+  // play already uses (Intro when one's produced, a cold cut otherwise),
+  // just wiring it as the persistent Start Set connection instead of
+  // triggering playback immediately.
+  const setAsStart = useCallback((songId) => {
+    const introEdge = introEdgeFor(visibleEdges, songId);
+    commitStartWire(songId, introEdge ? 'intro' : 'none', introEdge ? introEdge.id : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleEdges, commitStartWire]);
+
+  // Node context menu's "Disconnect all wires" — every wire touching this
+  // song in one action (its own outgoing wire, whichever song wires into
+  // it, and Start Set if that's what's wired here), rather than hunting
+  // down each hover-✕ individually.
+  const disconnectAll = useCallback((songId) => {
+    setSession(prev => ({ ...prev, activePlaylist: disconnectAllWires(prev.activePlaylist, songId) }));
   }, [setSession]);
 
   // Only a Transition output may ever meet a Transition input — everything
@@ -699,6 +761,14 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         )}
       </div>
 
+      {/* Side panel (SequencePane) and bottom queue bar deliberately not
+          rendered — the graph itself (click-to-play/commit, the Start/End/
+          Stop toolbar buttons, and the node/canvas right-click menus) now
+          covers everything they did, so live-set behavior can be exercised
+          and verified through the graph alone rather than two parallel,
+          easy-to-drift interfaces. Both components are still intact and
+          reachable if that trade turns out wrong — nothing about them was
+          deleted, only this render call. */}
       <div className="perform-layout">
         <div className="graph-pane">
           <GraphPane
@@ -711,20 +781,9 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
             endQueued={queueIds.includes(END)}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
+            onPaneContextMenu={onPaneContextMenu} onNodeContextMenu={onNodeContextMenu}
           />
-          <QueueBar songs={songs} nowPlayingId={session.nowPlayingId} queue={session.queue} autoHistory={session.autoHistory} onRemoveQueueItem={removeQueueFrom} onRemoveQueueItemOnly={removeQueueOne} />
         </div>
-
-        <SequencePane
-          songs={songs} session={session} venueName={venueName}
-          hasStarted={hasStarted} nowSong={nowSong} cueBarPct={cueBarPct} hasOutroForPlaying={hasOutroForPlaying}
-          mixingIntoSong={mixingIntoSong} crossfadePct={crossfadePct}
-          nextRows={nextRows} laterRows={laterRows} setHoveredId={setHoveredId}
-          startPickId={startPickId} onSetStartPick={setStartPickId}
-          onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onPlayAgain={playAgain} onStartSet={startSet} onSetNextMode={setNextMode}
-          onCommitRow={commitRow} onSkipNext={skipNow}
-          onSeek={seekPlayhead}
-        />
       </div>
 
       {endSetModalOpen && (
@@ -745,6 +804,107 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           )}
         </ConfirmModal>
       )}
+
+      {contextMenu && (
+        <ContextMenu
+          menu={contextMenu} songs={songs} activePlaylist={activePlaylist}
+          onClose={closeContextMenu}
+          onAddSongHere={() => { setAddSongAt({ x: contextMenu.flowX, y: contextMenu.flowY }); closeContextMenu(); }}
+          onArrangeForMe={() => { arrangeForMe(); closeContextMenu(); }}
+          onFocus={(id) => { focusOn(id); closeContextMenu(); }}
+          onSetAsStart={(id) => { setAsStart(id); closeContextMenu(); }}
+          onDisconnectAll={(id) => { disconnectAll(id); closeContextMenu(); }}
+          onEditInLibrary={() => { goLibrary(); closeContextMenu(); }}
+          onDeleteSong={(id) => { onDeleteSong(id); closeContextMenu(); }}
+          onDisconnectStart={() => { disconnectStart(); closeContextMenu(); }}
+          onDisconnectEnd={(id) => { disconnectSong(id); closeContextMenu(); }}
+        />
+      )}
+
+      {addSongAt && (
+        <AddSongModal onSave={saveAddedSong} onCancel={() => setAddSongAt(null)} />
+      )}
     </div>
+  );
+}
+
+// The two right-click menus (empty canvas vs. a specific node) — one
+// component branching on `menu.kind`/`menu.nodeType` rather than two,
+// since they share the same popover shell, outside-click/Escape handling,
+// and positioning logic. Closes itself the same way GraphPane's socket
+// dropdowns do: a mousedown outside the menu, or Escape.
+function ContextMenu({
+  menu, activePlaylist, onClose,
+  onAddSongHere, onArrangeForMe, onFocus, onSetAsStart, onDisconnectAll, onEditInLibrary, onDeleteSong,
+  onDisconnectStart, onDisconnectEnd,
+}) {
+  const ref = useRef(null);
+  useEffect(() => {
+    function onDocMouseDown(e) { if (ref.current && !ref.current.contains(e.target)) onClose(); }
+    function onKeyDown(e) { if (e.key === 'Escape') onClose(); }
+    document.addEventListener('mousedown', onDocMouseDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => { document.removeEventListener('mousedown', onDocMouseDown); window.removeEventListener('keydown', onKeyDown); };
+  }, [onClose]);
+
+  const style = { left: menu.screenX, top: menu.screenY };
+  let items;
+  if (menu.kind === 'pane') {
+    items = (
+      <>
+        <button className="context-menu-item" onClick={onAddSongHere}>Add song here</button>
+        <button className="context-menu-item" onClick={onArrangeForMe}>Arrange for me</button>
+      </>
+    );
+  } else if (menu.nodeType === 'song') {
+    items = (
+      <>
+        <button className="context-menu-item" onClick={() => onFocus(menu.nodeId)}>Focus here</button>
+        <button className="context-menu-item" onClick={() => onSetAsStart(menu.nodeId)}>Set as Start</button>
+        <button className="context-menu-item" onClick={() => onDisconnectAll(menu.nodeId)}>Disconnect all wires</button>
+        <button className="context-menu-item" onClick={onEditInLibrary}>Edit in Library</button>
+        <div className="context-menu-sep" />
+        <button className="context-menu-item context-menu-danger" onClick={() => onDeleteSong(menu.nodeId)}>Delete song</button>
+      </>
+    );
+  } else if (menu.nodeType === 'start') {
+    const wired = !!activePlaylist.startSongId;
+    items = <button className="context-menu-item" disabled={!wired} onClick={onDisconnectStart}>{wired ? 'Disconnect' : 'Not wired'}</button>;
+  } else {
+    const wiredFrom = Object.keys(activePlaylist.nodes).find(id => activePlaylist.nodes[id].nextSongId === END);
+    items = <button className="context-menu-item" disabled={!wiredFrom} onClick={() => onDisconnectEnd(wiredFrom)}>{wiredFrom ? 'Disconnect' : 'Not wired'}</button>;
+  }
+  return <div className="context-menu" style={style} ref={ref}>{items}</div>;
+}
+
+// The canvas context menu's "Add song here" — a condensed version of
+// Upload Song's own form (same underlying save logic, see saveAddedSong
+// above) inside the app's existing ConfirmModal shell, so adding a song
+// never needs leaving the graph.
+function AddSongModal({ onSave, onCancel }) {
+  const [title, setTitle] = useState('');
+  const [artist, setArtist] = useState('');
+  const [file, setFile] = useState(null);
+  const [coverFile, setCoverFile] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const coverPreviewUrl = useMemo(() => (coverFile ? URL.createObjectURL(coverFile) : null), [coverFile]);
+
+  async function confirm() {
+    if (!title.trim()) { setError('Give the song a title.'); return; }
+    setError('');
+    setSaving(true);
+    await onSave({ title, artist, file, coverFile });
+    setSaving(false);
+  }
+
+  return (
+    <ConfirmModal title="Add song" confirmLabel={saving ? 'Adding…' : 'Add song'} onCancel={onCancel} onConfirm={confirm}>
+      <Field label="Cover art (optional)"><CoverPicker url={coverPreviewUrl} onFile={setCoverFile} /></Field>
+      <Field label="Title"><input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Faultline Blue" /></Field>
+      <Field label="Artist"><input className="input" value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="e.g. Nomi Sato" /></Field>
+      <Field label="Master audio"><Dropzone file={file} onFile={setFile} hint="drop the song's audio" /></Field>
+      {error && <div className="error-note">{error}</div>}
+    </ConfirmModal>
   );
 }

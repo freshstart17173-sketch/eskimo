@@ -125,6 +125,21 @@ export function unwireOutput(playlist, songId) {
   return { ...playlist, nodes };
 }
 
+// The node context menu's "Disconnect all wires" — clears every wire that
+// touches songId in one action: its own outgoing wire, whichever other
+// song (if any) wires its own output into songId, and Start Set's wire if
+// that's what points here. Written as three plain calls to the existing
+// single-wire primitives above rather than a new bespoke traversal, so it
+// can never drift from what a hover-✕ on each of those wires would already
+// do individually.
+export function disconnectAllWires(playlist, songId) {
+  let next = unwireOutput(playlist, songId);
+  const incomingFrom = Object.keys(next.nodes).find(id => next.nodes[id].nextSongId === songId);
+  if (incomingFrom) next = unwireOutput(next, incomingFrom);
+  if (next.startSongId === songId) next = unwireStart(next);
+  return next;
+}
+
 // Switches which produced edge a socket that's already active is using,
 // without touching endMode/startMode/nextSongId — the "Transition" (or
 // Intro/Outro) row stays put, only the specific candidate underneath it
@@ -175,6 +190,15 @@ export function playlistNextHop(playlist, songId) {
   return {
     id: node.nextSongId, mode: 'cut',
     ending: node.endMode === 'outro' ? 'outro' : 'cut',
+    // The outro clip's own edgeId, so transitionTriggerElapsed (below) can
+    // hand off at *its* real cue point the same way a transition already
+    // does — without this, an outro-ending hop had no way to find its own
+    // outSeconds and fell all the way back to the full song duration,
+    // meaning the main song played out completely before the outro clip
+    // started from its own beginning, which (per the "render with the
+    // original still attached" upload convention) duplicates whatever tail
+    // portion the outro clip overlaps with.
+    edgeId: node.endMode === 'outro' ? node.endEdgeId : null,
     starting: (destNode && destNode.startMode === 'intro') ? 'intro' : 'cut',
   };
 }
@@ -529,10 +553,24 @@ export const CROSSFADE_LOOKAHEAD_SEC = 8;
 
 // Now Playing should hand off exactly at the committed transition's real
 // cue point (edge.outSeconds) when one was built and chosen — not after
-// the whole song plays out. Falls back to the full duration for a Cut, an
-// End Set, or a transition edge that doesn't carry a cue point yet.
+// the whole song plays out. Falls back to the full duration for a Cut or a
+// transition/outro edge that doesn't carry a cue point yet.
+//
+// An outro ending needs exactly the same early handoff a transition
+// already gets, for exactly the same reason: the outro clip is uploaded
+// with the song's own tail still attached (so detection can splice it),
+// which means the clip's own t=0 already corresponds to `outSeconds` in
+// the song's timeline. Letting the main song play its full recorded
+// duration first — the old behavior here, since only `mode === 'transition'`
+// was ever checked — meant the outro clip then started over from its own
+// beginning, replaying whatever tail material it overlaps with a second
+// time before ever reaching its actually-new content.
 export function transitionTriggerElapsed(queueHead, edges, nowSongDurationSec) {
   if (queueHead && queueHead.mode === 'transition' && queueHead.edgeId) {
+    const edge = edges.find(e => e.id === queueHead.edgeId);
+    if (edge && edge.outSeconds != null) return edge.outSeconds;
+  }
+  if (queueHead && queueHead.ending === 'outro' && queueHead.edgeId) {
     const edge = edges.find(e => e.id === queueHead.edgeId);
     if (edge && edge.outSeconds != null) return edge.outSeconds;
   }

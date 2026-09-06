@@ -772,6 +772,87 @@ Everything below came out of actually looking at this with an eye toward
 seen it" — the standard you asked for, benchmarked against the kind of
 apps this one takes inspiration from.
 
+### Next up — requested, not yet built
+- **A real preview player for Add Audio.** The current `<audio controls>`
+  is too small to actually tell whether a detected transition is right —
+  the user wants something purpose-built: show the detected in/out points
+  visually on the waveform (not just a numeric readout), and make it
+  possible to *see* the splice — the goal is a genuinely seamless
+  transition, so there should be nothing audible to distinguish "before"
+  from "after" the cue point, meaning a visual marker at the real detected
+  timecode is what actually proves it worked, not just trusting the number.
+  Explicit note from the user: **out-point detection already looks right —
+  it's specifically the type (intro/outro/transition) auto-detect that
+  isn't reliable.** Don't touch the out-point math while working on this;
+  focus on the player UI and the type classification.
+- Related correctness point the user flagged, already true today but worth
+  keeping in mind for that player: an outro/transition clip is uploaded
+  "with the original song still attached" *only* far enough to make the
+  splice detectable — ideally just a bar or two of overlap, not the whole
+  song — and detection needs to find and sync to that overlap correctly at
+  that short length. `bestCorrelation` (`audioDetect.js`) requires most of
+  the *shorter* envelope to actually overlap before accepting a lag (added
+  this pass, see below) specifically so a short, correct overlap isn't
+  mistaken for noise — but this hasn't been validated yet against a real
+  short (~1-2 bar) clip, only reasoned through. Worth testing directly
+  before trusting it.
+
+### Done this pass (round 5 — color match, right-click menus, a real live-playback bug, graph-only UI)
+Fixed a serious, real live-playback bug the user caught by ear: an
+outro-ending hop (either the graph's own wiring or "End set → Outro") used
+to let the main song play its *entire* recorded duration before the outro
+clip started — `transitionTriggerElapsed` (core.js) only special-cased
+`mode === 'transition'`, never an outro ending, so it fell back to the
+full song length instead of the outro edge's own `outSeconds`. Since an
+outro clip is uploaded with the song's own tail still attached (so
+detection can find the splice), starting it from its own beginning *after*
+the main song had already played that same material out loud meant the
+overlapping tail played twice before the outro's actually-new content ever
+arrived — exactly the "broken audio" the user reported. Fixed by giving
+outro-ending hops their own `edgeId` (`playlistNextHop`, `confirmEndSet`)
+so the trigger can look up the *specific selected* outro variant's real
+cue point the same way a transition already does; `performAdvance`
+(`audioEngine.js`) also now prefers that same edgeId over a blind
+"first outro on this song" scan, which had the added latent bug of
+possibly playing the wrong variant when a song has more than one outro.
+Verified directly: forcing an early `outSeconds` and watching the real
+session clock hand off well before the song's recorded duration, for both
+a wired graph ending and a manually-confirmed "End set → Outro".
+
+Also this pass: **color match** — a song with cover art now tints its
+playing/next/later states to that art's own dominant color (graph node,
+the — since removed, see below — playing card) instead of the fixed accent
+blue, muting toward that same color for one-jump-away nodes exactly like
+the fixed blue palette already did (`dominantColor.js`, `usePalette` in
+`shared.jsx`). **Right-click menus**: empty canvas → add a song at that
+exact point or auto-arrange; a song node → focus/set-as-Start/disconnect-
+all-wires/edit-in-library/delete; Start/End nodes → disconnect, disabled
+when unwired. Surfaced and fixed a real pre-existing crash along the way:
+deleting a song while its node was mounted threw reading `.x` off
+`undefined`, because GraphPane's per-render node-refresh effect and its
+separate structural-rebuild effect both fire on the same commit when
+`songs` changes, in declaration order — the refresh effect ran first and
+tried to rebuild a node whose song no longer existed. Also added
+`disconnectAllWires` (core.js), mashup tagging (`mashupOf` on a song,
+edited in Library), and `occludedTransitions` (core.js) — a long outro/
+intro variant's own cue point can make an existing transition off the same
+song unreachable if that variant is ever chosen, now surfaced as a warning
+in Add Audio and the Library drawer.
+
+**Removed from the Perform page (components kept, not deleted): the
+sequence side panel and the bottom queue bar.** Explicit user request, so
+live-set behavior — starting, ending, stopping, wiring, disconnecting —
+can be exercised and verified through the graph and its toolbar/context
+menus alone, rather than two parallel interfaces that could drift apart
+(exactly what happened with the outro bug above: the graph's own wiring
+and the panel's "End set" both routed through the same broken function, so
+having two surfaces didn't actually catch it any faster). `SequencePane.jsx`
+and `QueueBar.jsx` are untouched otherwise and still fully wired to accept
+their old props, in case this needs to come back — some of what they did
+(playhead scrubbing, the live crossfade %, the Transition/Cut/Outro next-
+mode toggle, the manual Next-candidate list) has no graph-native
+replacement yet.
+
 ### Done this pass (round 4 — Perform live-experience redesign)
 A direct user request to simplify the live mental model, implemented in
 full: (1) the Playing card's old 2-way "How it ends" (Cut/Outro) toggle is

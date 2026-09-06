@@ -155,6 +155,7 @@ export default function GraphPane({
   hoveredId, setHoveredId, matchIds, searchActive, laterCandidateIds,
   onDragSongPosition, endQueued, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
+  onPaneContextMenu, onNodeContextMenu,
 }) {
   const { isDark } = useTheme();
   const lineColor = isDark ? LINE_COLOR.dark : LINE_COLOR.light;
@@ -236,6 +237,16 @@ export default function GraphPane({
   // searchActive needed the same treatment.
   useEffect(() => {
     setNodes(prev => prev.map(n => {
+      // A just-deleted song's node still sits in this array for this one
+      // pass — `songs` (a dependency here) already changed, so this effect
+      // and the structural-rebuild effect below both fire on the same
+      // commit, in declaration order. Deferring to that one (which filters
+      // stale ids out properly) rather than calling nodeFor on an id
+      // `songs` no longer has avoids a crash reading the now-undefined
+      // song's own x/y — confirmed directly: deleting a song while its
+      // node was on screen threw "Cannot read properties of undefined
+      // (reading 'x')" from exactly this line.
+      if (n.id !== END && n.id !== START && !songs[n.id]) return n;
       const updated = n.id === END ? endNodeFor() : n.id === START ? startNodeFor() : nodeFor(n.id);
       return { ...updated, position: n.position };
     }));
@@ -371,6 +382,8 @@ export default function GraphPane({
           onNodeDragStop={onNodeDragStop}
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
+          onPaneContextMenu={onPaneContextMenu}
+          onNodeContextMenu={onNodeContextMenu}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onConnect={onConnect}

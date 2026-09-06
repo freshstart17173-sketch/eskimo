@@ -249,7 +249,8 @@ export default function App() {
           {tab === 'perform' && (
             <PerformPage
               songs={songs} setSongs={setSongs} edges={edges} session={session} setSession={setSession}
-              venueName={venueName} goUpload={() => setTab('upload')} onLoadExample={loadExample}
+              venueName={venueName} goUpload={() => setTab('upload')} goLibrary={() => setTab('library')} onLoadExample={loadExample}
+              onDeleteSong={deleteSong}
             />
           )}
           {tab === 'library' && (

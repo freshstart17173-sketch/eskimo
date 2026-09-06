@@ -838,6 +838,25 @@ a { color: var(--accent); }
 .end-node-title { display: flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; }
 .end-node-hint { font-size: 10px; margin-top: 2px; color: var(--faint); }
 
+/* Right-click menus — empty canvas ("add song", "arrange for me") and a
+   specific node (focus/wire/disconnect/delete). Fixed-position (screen
+   coordinates from the click event), so it sits exactly under the cursor
+   regardless of canvas pan/zoom. */
+.context-menu {
+  position: fixed; min-width: 170px; background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 4px; box-shadow: 0 10px 28px rgba(0, 0, 0, .22); z-index: 200;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.context-menu-item {
+  text-align: left; padding: 7px 10px; border-radius: calc(var(--radius) - 2px); font-size: 12.5px; font-weight: 500;
+  color: var(--ink);
+}
+.context-menu-item:hover:not(:disabled) { background: var(--panel); }
+.context-menu-item:disabled { color: var(--faint); cursor: default; }
+.context-menu-sep { height: 1px; background: var(--line); margin: 3px 2px; }
+.context-menu-danger { color: var(--danger); }
+.context-menu-danger:hover { background: var(--danger-bg); }
+
 /* node hover card — the graph's quick-action popover; mirrors the sequence
    panel's own commit functions so clicking through the graph or the list
    does the same thing */

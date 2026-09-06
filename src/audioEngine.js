@@ -270,13 +270,20 @@ export function performAdvance(prevSession, songs, edges) {
     ? advanceSession({ ...prevSession, queue: [wiredHop] }, songs, edges)
     : advanceSession(prevSession, songs, edges);
 
+  // Prefers the hop's own edgeId — the specific outro variant actually
+  // wired/selected (see playlistNextHop/confirmEndSet) — over a blind
+  // "first outro on this song" scan, which would play the wrong audio the
+  // moment a song has more than one outro variant to choose from.
+  function findOutroEdge(edgeId) {
+    return (edgeId && edges.find((e) => e.id === edgeId)) || edges.find((e) => e.type === 'outro' && e.l === nowPlayingId);
+  }
   if (hop) {
     if (hop.id === END) {
-      const outroEdge = hop.ending === 'outro' ? edges.find((e) => e.type === 'outro' && e.l === nowPlayingId) : null;
+      const outroEdge = hop.ending === 'outro' ? findOutroEdge(hop.edgeId) : null;
       engine.handleHandoff({ hop, destSong: null, edges, ending: hop.ending, outroEdge });
     } else {
       const destSong = songs[hop.id];
-      const outroEdge = hop.mode === 'cut' && hop.ending === 'outro' ? edges.find((e) => e.type === 'outro' && e.l === nowPlayingId) : null;
+      const outroEdge = hop.mode === 'cut' && hop.ending === 'outro' ? findOutroEdge(hop.edgeId) : null;
       const introEdge = hop.mode === 'cut' && hop.starting === 'intro' ? edges.find((e) => e.type === 'intro' && e.r === hop.id) : null;
       engine.handleHandoff({ hop, destSong, edges, ending: hop.ending, starting: hop.starting, outroEdge, introEdge });
     }
