@@ -9,9 +9,11 @@ export const END = '__end__';
 const STORAGE_KEY = 'djflow:v3';
 
 // ---------------------------------------------------------------------------
-// Real app state starts empty — no demo/sample data is ever loaded into the app.
-// These sample* functions exist purely so the pure-logic unit tests have some
-// realistic data to exercise; nothing in the app itself calls them.
+// Real app state starts empty — no demo/sample data is ever loaded into the
+// app on its own. This same fixture doubles as both realistic data for
+// pure-logic unit tests and the guided "load an example graph" first-run
+// feature (App.jsx's loadExample) — the app itself never calls these on its
+// own initiative, only in direct response to that explicit click.
 // ---------------------------------------------------------------------------
 export function sampleSongsForTests() {
   return {
@@ -28,7 +30,7 @@ export function sampleEdgesForTests() {
     { id: 'e2', type: 'transition', l: 'hd', r: 'cb', verified: true },
     { id: 'e4', type: 'transition', l: 'cb', r: 'gs', verified: true },
     { id: 'e5', type: 'outro', l: 'cb', verified: true },
-    { id: 'e6', type: 'transition', l: 'gs', r: 'lr', verified: false },
+    { id: 'e6', type: 'transition', l: 'gs', r: 'lr', verified: true },
     { id: 'e13', type: 'transition', l: 'gs', r: 'wr', verified: true },
     { id: 'e14', type: 'outro', l: 'gs', verified: true },
   ];
@@ -38,7 +40,12 @@ export function emptySession() {
   return {
     nowPlayingId: null, startMethod: null,
     queue: [], timeLeft: 0, isPlaying: false, setEnded: false,
-    endingChoice: 'cut', // how Now Playing will end if nothing more gets queued — 'cut' | 'outro'
+    // The one control for what the manual Next list offers and how Now
+    // Playing would end if nothing more gets queued: 'transition' shows
+    // only built transitions (an outgoing transition already carries its
+    // own ending); 'cut' or 'outro' show every other song, and decide
+    // whether Now Playing hard-cuts or plays its outro fragment first.
+    nextMode: 'transition', // 'transition' | 'cut' | 'outro'
     autoplay: false, // when true and nothing's manually queued, pickAutoplayNext chooses
     transitionOnly: false, // true = a dead end stops the set instead of cutting to a random song
     autoHistory: [], // songs autoplay has actually played, most recent last — for the bottom queue bar
@@ -148,6 +155,36 @@ export async function uploadAudioIfConfigured(file) {
   }
 }
 
+// Cover art upload: same worker endpoint as audio when one's configured
+// (it doesn't care about content type), but — unlike a full audio master —
+// a small cover thumbnail is cheap enough to fall back to storing directly
+// as a data URL when there's no worker, so real cover art works with zero
+// backend setup instead of staying a placeholder until R2 is wired up.
+export async function uploadCoverIfPossible(file) {
+  if (!file) return null;
+  const workerUrl = APP_CONFIG.UPLOAD_WORKER_URL;
+  if (workerUrl) {
+    try {
+      const res = await fetch(workerUrl + '/upload?filename=' + encodeURIComponent(file.name), {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      });
+      if (!res.ok) throw new Error('upload failed: ' + res.status);
+      const { url } = await res.json();
+      return url;
+    } catch (e) {
+      console.warn('Eskimo Studio: cover upload failed, falling back to local storage', e);
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 // The one and only "no saved state yet" starting point — a genuinely empty
 // library. Nothing is seeded; the person adds their own songs and audio.
 export function freshState() { return { songs: {}, edges: [], session: emptySession(), venueName: '' }; }
@@ -214,16 +251,18 @@ export function inOutCounts(edges, songId) {
 }
 export function getVisibleEdges(edges) { return edges.filter(e => e.verified); }
 
-// One hop of *built* transitions out of a specific song, excluding ids already
-// used elsewhere in the current plan. This is the one primitive both the
-// "Next" list (from Now Playing) and the "Later" list (from whatever's
-// staged in Next) are built from.
-export function oneHopReachable(visibleEdges, fromId, excludeIds) {
-  const out = new Set();
-  visibleEdges.filter(e => e.type === 'transition' && e.l === fromId).forEach(e => {
-    if (!excludeIds.has(e.r)) out.add(e.r);
-  });
-  return out;
+// The two candidate lists the manual Next picker can show, gated by the
+// Playing card's single ending-mode toggle — Transition mode offers each
+// *produced transition* as its own candidate (a song with two transitions
+// built to it shows as two candidates, not one grouped item); Cut/Outro
+// mode offers every other song in the library, since a hard cut or an
+// outro can reach anywhere, not just what's been produced. Shared between
+// building the real Next list and previewing what a hover would lead to.
+export function transitionCandidates(visibleEdges, fromId, excludeIds) {
+  return visibleEdges.filter(e => e.type === 'transition' && e.l === fromId && !excludeIds.has(e.r));
+}
+export function cutCandidates(songs, excludeIds) {
+  return Object.keys(songs).filter(id => !excludeIds.has(id));
 }
 
 // Autoplay's picking policy: prefer a random *built* transition out of the
@@ -271,19 +310,42 @@ export function advanceSession(prev, songs, visibleEdges) {
   if (head) {
     if (head.id === END) return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0 };
     const nextSong = songs[head.id];
-    return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut' };
+    return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210 };
   }
   if (prev.autoplay) {
     const pick = pickAutoplayNext(songs, visibleEdges, prev.nowPlayingId, prev.transitionOnly);
     if (pick) {
       const nextSong = songs[pick.id];
       return {
-        ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut',
+        ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210,
         autoHistory: [...prev.autoHistory, { id: pick.id, mode: pick.mode }].slice(-40),
       };
     }
   }
   return { ...prev, isPlaying: false, setEnded: true, timeLeft: 0 };
+}
+
+// Removing one specific hop from the middle of the queue, keeping whatever
+// was planned after it — the queue bar's "remove from here on" already
+// truncates the tail, but that's not the same as skipping a single planned
+// song without losing the rest of the plan. The hop right after the
+// removed one no longer starts from the same song, so it's recomputed
+// against the new predecessor: a built transition if one exists between
+// them, otherwise a cut (matching what choosing that pair manually would
+// produce). Whatever was queued for that hop's own destination edge choice
+// is not preserved — there's no UI yet to reconsider it, so it defaults
+// like a fresh pick would.
+export function removeQueueItem(queue, index, nowPlayingId, visibleEdges) {
+  if (index < 0 || index >= queue.length) return queue;
+  const prevId = index === 0 ? nowPlayingId : queue[index - 1].id;
+  const rest = [...queue.slice(0, index), ...queue.slice(index + 1)];
+  const nextItem = rest[index];
+  if (!nextItem || nextItem.id === END) return rest;
+  const transitionEdge = visibleEdges.find(e => e.type === 'transition' && e.l === prevId && e.r === nextItem.id);
+  rest[index] = transitionEdge
+    ? { id: nextItem.id, mode: 'transition', edgeId: transitionEdge.id }
+    : { id: nextItem.id, mode: 'cut', ending: 'cut', starting: 'cut' };
+  return rest;
 }
 
 // Removing a song must not leave dangling edges pointing at it.
@@ -294,27 +356,12 @@ export function removeSongCascade(songs, edges, songId) {
   return { songs: nextSongs, edges: nextEdges };
 }
 
-// ---------------------------------------------------------------------------
-// Reachability from the tail of the current queue (or Now Playing if the queue
-// is empty). "tier1" is the Next list; the Later list is computed separately,
-// live, from whichever song is staged (see oneHopReachable above).
-// ---------------------------------------------------------------------------
-export function computeReachability(songs, visibleEdges, nowPlayingId, queue) {
-  const queueHasId = (id) => queue.some(q => q.id === id);
+// What the Next list is reachable *from* — the tail of whatever's already
+// queued, or Now Playing itself when nothing's queued yet. null once an
+// End Set is queued (there's nothing to plan past it).
+export function queueTailId(nowPlayingId, queue) {
   const tail = queue.length ? queue[queue.length - 1] : null;
-  const fromId = tail ? (tail.id === END ? null : tail.id) : nowPlayingId;
-
-  const tier1 = new Set();
-  if (fromId) {
-    visibleEdges.filter(e => e.type === 'transition' && e.l === fromId).forEach(e => {
-      if (e.r !== nowPlayingId && !queueHasId(e.r)) tier1.add(e.r);
-    });
-    visibleEdges.filter(e => e.type === 'intro').forEach(e => {
-      if (e.r !== nowPlayingId && !queueHasId(e.r)) tier1.add(e.r);
-    });
-    if (!queueHasId(END)) tier1.add(END);
-  }
-  return { fromId, tier1 };
+  return tail ? (tail.id === END ? null : tail.id) : nowPlayingId;
 }
 
 export function hopEndingLabel(e) { return e === 'outro' ? 'outro' : 'cut'; }

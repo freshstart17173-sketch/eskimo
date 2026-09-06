@@ -8,7 +8,7 @@ import { AlbumArt } from './shared.jsx';
 // natural home for an autoplay/infinite-playlist run, since it's the one
 // place the whole sequence is visible at a glance instead of one hop at a
 // time.
-export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRemoveQueueItem }) {
+export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRemoveQueueItem, onRemoveQueueItemOnly }) {
   const nowRef = useRef(null);
 
   useEffect(() => {
@@ -29,7 +29,7 @@ export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRe
           return (
             <React.Fragment key={'h' + i}>
               <div className="queue-chip queue-chip-autoplay">
-                <AlbumArt className="queue-chip-art" />
+                <AlbumArt className="queue-chip-art" url={s.coverUrl} />
                 {s.title}
               </div>
               <span className="queue-arrow">→</span>
@@ -39,7 +39,7 @@ export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRe
 
         {nowPlayingId && songs[nowPlayingId] && (
           <div className="queue-chip queue-chip-playing" ref={nowRef}>
-            <AlbumArt className="queue-chip-art" />
+            <AlbumArt className="queue-chip-art" url={songs[nowPlayingId].coverUrl} />
             {songs[nowPlayingId].title}
           </div>
         )}
@@ -48,9 +48,14 @@ export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRe
           <React.Fragment key={q.id + i}>
             <span className="queue-arrow">→</span>
             <div className="queue-chip">
-              {q.id !== END && <AlbumArt className="queue-chip-art" />}
+              {q.id !== END && <AlbumArt className="queue-chip-art" url={songs[q.id] && songs[q.id].coverUrl} />}
               {q.id === END ? 'End Set' : (songs[q.id] ? songs[q.id].title : '(deleted)')}
-              <button className="queue-chip-remove" onClick={() => onRemoveQueueItem(i)}>✕</button>
+              <div className="queue-chip-actions">
+                {q.id !== END && i < queue.length - 1 && (
+                  <button className="queue-chip-remove" aria-label="Skip just this song" data-tooltip="Skip just this song" data-tooltip-above onClick={() => onRemoveQueueItemOnly(i)}>−</button>
+                )}
+                <button className="queue-chip-remove" aria-label="Remove from here on" data-tooltip="Remove from here on" data-tooltip-above onClick={() => onRemoveQueueItem(i)}>✕</button>
+              </div>
             </div>
           </React.Fragment>
         ))}

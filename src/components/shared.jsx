@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { fmtBytes } from '../core.js';
 
 export function Icon({ path, size = 15, strokeWidth = 1.6, filled = false }) {
@@ -25,11 +25,14 @@ export const ICONS = {
   grid: <><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></>,
   hand: <><path d="M8 13V5a1.5 1.5 0 0 1 3 0v6"></path><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"></path><path d="M14 11V6a1.5 1.5 0 0 1 3 0v8"></path><path d="M8 12l-1.5-1.5a1.5 1.5 0 0 0-2.3 1.9L7 17a6 6 0 0 0 5.5 3.3h1a6 6 0 0 0 6-6v-3"></path></>,
   search: <><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="20" y1="20" x2="15.5" y2="15.5"></line></>,
+  skip: <><polygon points="5,4 15,12 5,20" fill="currentColor"></polygon><rect x="17" y="4" width="2.5" height="16" fill="currentColor"></rect></>,
+  stop: <rect x="5" y="5" width="14" height="14" fill="currentColor"></rect>,
 };
 
-// A decorative art placeholder — a real cover thumbnail slots in here once
-// the library stores one; a small diagonal-stripe swatch until then.
-export function AlbumArt({ className, style }) {
+// A real cover thumbnail when a song has one (url), otherwise the same
+// decorative diagonal-stripe placeholder as before.
+export function AlbumArt({ className, style, url }) {
+  if (url) return <img className={'art-swatch art-photo ' + (className || '')} style={style} src={url} alt="" />;
   return <div className={'art-swatch ' + (className || '')} style={style} />;
 }
 
@@ -41,7 +44,7 @@ export function SongPicker({ songs, value, onChange, allowFree, freeLabel, place
   if (!editing && chosen) {
     return (
       <div className="picker-chip">
-        <AlbumArt className="picker-chip-art" />
+        <AlbumArt className="picker-chip-art" url={chosen.coverUrl} />
         <div className="picker-chip-text">
           <div className="picker-chip-title">{chosen.title}</div>
           <div className="picker-chip-artist">{chosen.artist}</div>
@@ -78,6 +81,53 @@ export function SongPicker({ songs, value, onChange, allowFree, freeLabel, place
           </button>
         ))}
         {results.length === 0 && <div className="picker-result-empty">no matches</div>}
+      </div>
+    </div>
+  );
+}
+
+// A click-to-pick cover thumbnail — shows the current art (real photo or
+// placeholder swatch via AlbumArt) plus a small "Add/Change cover" label.
+// Upload sequencing (local preview vs. the real uploaded/data URL) is the
+// caller's job via onFile; this is just the picker chrome.
+export function CoverPicker({ url, onFile, size = 48 }) {
+  const inputRef = useRef(null);
+  return (
+    <div className="cover-picker" onClick={() => inputRef.current && inputRef.current.click()}>
+      <input
+        ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; }}
+      />
+      <AlbumArt className="cover-picker-art" style={{ width: size, height: size }} url={url} />
+      <span className="cover-picker-label">{url ? 'Change cover' : 'Add cover'}</span>
+    </div>
+  );
+}
+
+// A real confirm dialog — centered, backdrop-blocking, deliberately harder
+// to trigger by accident than an inline row in a scrolling list. Used for
+// anything that should require an actual second step to happen (End Set).
+// Escape cancels and the Cancel button gets initial focus (the safer
+// default action) — a keyboard user landing here can always back out
+// without hunting for a mouse-only close target.
+export function ConfirmModal({ title, children, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger, onConfirm, onCancel }) {
+  const cancelRef = useRef(null);
+  const titleId = useId();
+  useEffect(() => {
+    cancelRef.current && cancelRef.current.focus();
+    function onKeyDown(e) { if (e.key === 'Escape') onCancel(); }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-title" id={titleId}>{title}</div>
+        {children}
+        <div className="modal-actions">
+          <button ref={cancelRef} className="btn btn-ghost btn-sm" onClick={onCancel}>{cancelLabel}</button>
+          <button className={'btn btn-sm ' + (danger ? 'btn-danger' : 'btn-primary')} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
       </div>
     </div>
   );
