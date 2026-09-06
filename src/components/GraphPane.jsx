@@ -1,11 +1,26 @@
 import React, { useMemo, useCallback, useEffect } from 'react';
-import { ReactFlow, Background, BackgroundVariant, MarkerType, BaseEdge, useNodesState } from '@xyflow/react';
+import { ReactFlow, Background, BackgroundVariant, MarkerType, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState } from '@xyflow/react';
 import { END } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
-import { SongNode, EndNode } from './GraphNodes.jsx';
+import { SongNode, EndNode, NowPlayingContext } from './GraphNodes.jsx';
 import { useTheme } from '../theme.js';
 
 const nodeTypes = { song: SongNode, end: EndNode };
+// Stable references — a fresh `{ width }` object every call is otherwise
+// one more thing that changes identity on the once-a-second position tick
+// for no reason, since the value itself never varies per node.
+const SONG_STYLE = { width: NODE_W };
+const END_STYLE = { width: END_W };
+// Same story for React Flow's own options props: an inline object literal
+// in JSX is a new reference every render, and GraphPane re-renders once a
+// second (nowElapsedSec ticks while a set plays) even when our own
+// `rfEdges`/`nodes` memoize away to no-ops — React Flow reacts to these
+// specific prop identities changing by resyncing internal state, which was
+// the actual source of edges (and the hover-✕ living in one) blinking out
+// once a second, not anything in this file's own memoization.
+const FIT_VIEW_OPTIONS = { padding: 0.25 };
+const DEFAULT_EDGE_OPTIONS = { type: 'default' };
+const PRO_OPTIONS = { hideAttribution: true };
 
 // React Flow's edge stroke and the canvas's dot grid are plain SVG/canvas
 // paint, not CSS — they can't pick up the page's CSS custom properties, so
@@ -44,10 +59,43 @@ function FannedEdge({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, 
   return <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />;
 }
 
-const edgeTypes = { fanned: FannedEdge };
+// Any *active* wire (a real transition or a plain wired sequence link) gets
+// a small always-there "✕" at its midpoint instead of the wire itself
+// being clickable — clicking the bare line was explicitly ruled out during
+// design as a real hazard (a stray click destroying part of a built
+// playlist), the same instinct behind every other deliberately-hard-to-
+// hit destructive control in this app. `EdgeLabelRenderer` is React Flow's
+// supported way to place ordinary HTML at a point on an edge, panning and
+// zooming with the canvas like the line itself.
+function ActiveEdge({ id, sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, style, markerEnd, animated, data }) {
+  const offset = data && data.offset;
+  let path, labelX, labelY;
+  if (offset) {
+    path = fannedBezierPath({ sourceX, sourceY, targetX, targetY, offset });
+    labelX = (sourceX + targetX) / 2 + offset * 0.4;
+    labelY = (sourceY + targetY) / 2 + offset * 0.4;
+  } else {
+    [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+  }
+  return (
+    <>
+      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} className={animated ? 'active-edge-animated' : undefined} />
+      <EdgeLabelRenderer>
+        <button
+          className="edge-disconnect-btn" data-tooltip="Disconnect" data-tooltip-above
+          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          onClick={(e) => { e.stopPropagation(); data.onDisconnect(); }}
+        >×</button>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const edgeTypes = { fanned: FannedEdge, active: ActiveEdge };
 
 export default function GraphPane({
-  songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, mixingEdgeId,
+  songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId,
+  onConnect, isValidConnection, onDisconnectSong,
   stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
   onDragSongPosition, endQueued,
@@ -70,17 +118,19 @@ export default function GraphPane({
     const pos = positions[id] || { x: s.x, y: s.y };
     const io = ioById[id] || { inCount: 0, outCount: 0 };
     const state = stateFor(id);
-    const socketData = socketDataById[id] || { leftTypes: [], rightTypes: [], leftActive: 'none', rightActive: 'none', leftLabel: null, rightLabel: null };
+    const socketData = socketDataById[id] || {
+      leftTypes: [], rightTypes: [], leftActive: 'none', rightActive: 'none',
+      leftEdgeId: null, rightEdgeId: null, leftOptions: [], rightOptions: [], rightCueSeconds: null,
+    };
     return {
       id, type: 'song', position: pos, draggable: true,
       data: {
         song: s, state, dimmed: searchActive && !matchIds.has(id),
         hovered: hoveredId === id, inCount: io.inCount, outCount: io.outCount,
         onEnter: () => setHoveredId(id), onLeave: () => setHoveredId(null),
-        onToggleSocket, ...socketData, playing: state === 'playing',
-        position: id === nowPlayingId ? { elapsed: nowElapsedSec, duration: nowDurationSec } : null,
+        onToggleSocket, onSelectVariant, ...socketData, playing: state === 'playing',
       },
-      style: { width: NODE_W },
+      style: SONG_STYLE,
     };
   }
   function endNodeFor() {
@@ -88,18 +138,29 @@ export default function GraphPane({
     return {
       id: END, type: 'end', position: pos, draggable: true,
       data: { state: stateFor(END), queued: endQueued },
-      style: { width: END_W },
+      style: END_STYLE,
     };
   }
 
   // Recompute node render-data (position/state/hover/etc.) whenever the
   // inputs that matter change — RF's own state (from useNodesState) still
-  // owns the live position during an in-progress drag. nowElapsedSec ticks
-  // every second so the Playing node's numeric position/length stays live.
+  // owns the live position during an in-progress drag. Deliberately NOT
+  // including nowElapsedSec here (or anywhere `setNodes` gets called): that
+  // ticks every second while a set plays, and calling React Flow's own
+  // `setNodes` re-syncs its *entire* internal node registry — which, for
+  // one tick, leaves every node's handle-bounds measurement stale until it
+  // recomputes. Every edge in the graph reads its endpoints from that same
+  // registry, so for that one tick *all* of them (not just ones touching
+  // the playing node) briefly render as if their endpoints don't exist —
+  // invisible for the line itself, but enough to unmount and remount the
+  // hover-✕ button living in each active edge's EdgeLabelRenderer portal,
+  // which is a visible flicker on every live set. The elapsed clock reaches
+  // SongNode through NowPlayingContext instead (below), entirely outside
+  // React Flow's node data, so ticking it never touches `setNodes` at all.
   useEffect(() => {
     setNodes(prev => prev.map(n => (n.id === END ? endNodeFor() : nodeFor(n.id))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs, positions, stateFor, ioById, hoveredId, matchIds, searchActive, socketDataById, endQueued, nowPlayingId, nowElapsedSec, nowDurationSec]);
+  }, [songs, positions, stateFor, ioById, hoveredId, matchIds, searchActive, socketDataById, endQueued, nowPlayingId]);
 
   // songs/edges structurally changing (added/removed) needs a full rebuild,
   // not just a patch, so newly added nodes actually appear.
@@ -136,52 +197,60 @@ export default function GraphPane({
       const color = isActive ? lineColor.ink : lineColor.grey;
       return {
         id: e.id, source: e.l, target: e.r,
-        type: offset === 0 ? 'default' : 'fanned',
-        data: offset === 0 ? undefined : { offset },
+        type: isActive ? 'active' : (offset === 0 ? 'default' : 'fanned'),
+        data: offset === 0 && !isActive ? undefined : { offset, onDisconnect: () => onDisconnectSong(e.l) },
         animated: isActive && mixingEdgeId === e.id,
         style: { stroke: color, strokeWidth: isActive ? 3 : 1.5, strokeDasharray: isActive ? undefined : '2 4' },
         markerEnd: { type: MarkerType.ArrowClosed, color, width: 10, height: 10 },
-        zIndex: isActive ? 2 : 0,
       };
     });
     Object.keys(activePlaylist.nodes).forEach(songId => {
       const node = activePlaylist.nodes[songId];
       if (node.nextSongId && node.endMode !== 'transition') {
         edgesOut.push({
-          id: 'link-' + songId, source: songId, target: node.nextSongId, type: 'default',
+          id: 'link-' + songId, source: songId, target: node.nextSongId, type: 'active',
+          data: { onDisconnect: () => onDisconnectSong(songId) },
           style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
           markerEnd: { type: MarkerType.ArrowClosed, color: lineColor.ink, width: 10, height: 10 },
-          zIndex: 1,
         });
       }
     });
     return edgesOut;
-  }, [transitionEdgesRaw, activePlaylist, lineColor, mixingEdgeId]);
+  }, [transitionEdgesRaw, activePlaylist, lineColor, mixingEdgeId, onDisconnectSong]);
 
   const onNodeDragStop = useCallback((_, node) => {
     if (node.id === END) return;
     onDragSongPosition(node.id, node.position.x, node.position.y);
   }, [onDragSongPosition]);
 
+  const nowPlayingValue = useMemo(
+    () => ({ nowPlayingId, elapsed: nowElapsedSec, duration: nowDurationSec }),
+    [nowPlayingId, nowElapsedSec, nowDurationSec]
+  );
+
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={rfEdges}
-      onNodesChange={onNodesChange}
-      onNodeDragStop={onNodeDragStop}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      nodesConnectable={false}
-      elementsSelectable={false}
-      minZoom={0.25}
-      maxZoom={2.5}
-      colorMode={isDark ? 'dark' : 'light'}
-      fitView
-      fitViewOptions={{ padding: 0.25 }}
-      defaultEdgeOptions={{ type: 'default' }}
-      proOptions={{ hideAttribution: true }}
-    >
-      <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color={dotColor} />
-    </ReactFlow>
+    <NowPlayingContext.Provider value={nowPlayingValue}>
+      <ReactFlow
+        nodes={nodes}
+        edges={rfEdges}
+        onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        onConnect={onConnect}
+        isValidConnection={isValidConnection}
+        nodesConnectable
+        elementsSelectable={false}
+        minZoom={0.25}
+        maxZoom={2.5}
+        colorMode={isDark ? 'dark' : 'light'}
+        fitView
+        fitViewOptions={FIT_VIEW_OPTIONS}
+        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
+        proOptions={PRO_OPTIONS}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color={dotColor} />
+      </ReactFlow>
+    </NowPlayingContext.Provider>
   );
 }

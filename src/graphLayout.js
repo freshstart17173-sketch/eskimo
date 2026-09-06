@@ -1,8 +1,8 @@
 import dagre from 'dagre';
 import { END } from './core.js';
 
-export const NODE_W = 190;
-export const NODE_H = 100;
+export const NODE_W = 208;
+export const NODE_H = 165;
 export const END_W = 132;
 export const END_H = 64;
 

@@ -4,7 +4,8 @@ import Fuse from 'fuse.js';
 import {
   END, getVisibleEdges, inOutCounts, queueTailId, removeQueueItem,
   transitionCandidates, cutCandidates, clamp, leftSocketTypes, rightSocketTypes,
-  unwireOutput, playlistNextHop,
+  unwireOutput, wireConnection, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
+  introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime,
 } from '../core.js';
 import { engine, performAdvance } from '../audioEngine.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
@@ -229,34 +230,45 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 
   // ---------------- playlist-editor sockets (see TODO.md) ----------------
   // One entry per song: which typed sockets it can even show (hidden
-  // entirely when a type has zero eligible options), which one is
-  // currently active per the live wiring, and the small label a wired
-  // side displays (a transition's name, or "Outro"/"Intro"). GraphPane
-  // renders this straight onto each node — the three-tier edge coloring
-  // this replaced lived here too, now driven by activePlaylist instead of
-  // the old hover/next-candidate state.
+  // entirely when a type has zero eligible options) and which one is
+  // currently active per the live wiring. The row label itself always
+  // stays the fixed type name ("Transition"/"Intro"/"Outro") — it never
+  // renames itself to whichever specific edge is wired, since that read as
+  // the socket *type* changing rather than just a choice underneath it.
+  // When more than one produced edge could fill an active slot, `*Options`
+  // carries the full candidate list (each `{ id, label }`) for a dropdown
+  // next to the row; a single candidate needs no picker at all.
   const activePlaylist = session.activePlaylist;
   const socketDataById = useMemo(() => {
     const map = {};
     Object.keys(songs).forEach(id => {
       const node = activePlaylist.nodes[id];
-      let leftLabel = null, rightLabel = null;
-      if (node) {
-        if (node.startMode === 'intro') leftLabel = 'Intro';
-        else if (node.startMode === 'transition' && node.startEdgeId) {
-          const edge = visibleEdges.find(e => e.id === node.startEdgeId);
-          leftLabel = edge ? (edge.label || 'Transition') : 'Transition';
-        }
-        if (node.endMode === 'outro') rightLabel = 'Outro';
-        else if (node.endMode === 'transition' && node.endEdgeId) {
-          const edge = visibleEdges.find(e => e.id === node.endEdgeId);
-          rightLabel = edge ? (edge.label || 'Transition') : 'Transition';
-        }
+      const leftActive = node ? node.startMode : 'none';
+      const rightActive = node ? node.endMode : 'none';
+      let leftOptions = [], rightOptions = [], rightCueSeconds = null;
+      if (leftActive === 'intro') {
+        const candidates = introEdgesFor(visibleEdges, id);
+        if (candidates.length > 1) leftOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Intro' }));
+      }
+      if (rightActive === 'outro') {
+        const candidates = outroEdgesFor(visibleEdges, id);
+        if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Outro' }));
+      } else if (rightActive === 'transition' && node.nextSongId) {
+        const candidates = transitionEdgesBetween(visibleEdges, id, node.nextSongId);
+        if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Transition' }));
+      }
+      // The countdown ring (GraphNodes.jsx) needs the cue point behind
+      // whichever edge is actually wired right now — Outro and Transition
+      // both keep it on endEdgeId, so one lookup covers both.
+      if ((rightActive === 'outro' || rightActive === 'transition') && node.endEdgeId) {
+        const edge = visibleEdges.find(e => e.id === node.endEdgeId);
+        if (edge && edge.outSeconds != null) rightCueSeconds = edge.outSeconds;
       }
       map[id] = {
         leftTypes: leftSocketTypes(visibleEdges, id), rightTypes: rightSocketTypes(visibleEdges, id),
-        leftActive: node ? node.startMode : 'none', rightActive: node ? node.endMode : 'none',
-        leftLabel, rightLabel,
+        leftActive, rightActive,
+        leftEdgeId: node ? node.startEdgeId : null, rightEdgeId: node ? node.endEdgeId : null,
+        leftOptions, rightOptions, rightCueSeconds,
       };
     });
     return map;
@@ -269,7 +281,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // ("this song always starts with its intro" / "ends with its outro,
   // even if nothing's wired after it yet") — dragging a connection later
   // can still attach a specific next song on top of either.
-  function toggleSocket(songId, side, type) {
+  const toggleSocket = useCallback((songId, side, type) => {
     setSession(prev => {
       const node = prev.activePlaylist.nodes[songId];
       const base = node || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null };
@@ -286,7 +298,77 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       const nodes = { ...prev.activePlaylist.nodes, [songId]: { ...base, endMode: type, endEdgeId } };
       return { ...prev, activePlaylist: { ...prev.activePlaylist, nodes } };
     });
-  }
+  }, [setSession, findEdge]);
+
+  const commitWire = useCallback((source, target, endMode, endEdgeId, startMode, startEdgeId) => {
+    setSession(prev => ({ ...prev, activePlaylist: wireConnection(prev.activePlaylist, source, target, endMode, endEdgeId, startMode, startEdgeId) }));
+  }, [setSession]);
+
+  // Only a Transition output may ever meet a Transition input — everything
+  // else (None/Outro on the left of the drag, None/Intro on the right)
+  // freely mixes, since those four don't correspond to a specific produced
+  // edge the way a transition does. React Flow calls this before a drag
+  // is even allowed to visually snap, so an invalid drop never gets this
+  // far in the first place.
+  //
+  // These handlers (and toggleSocket/commitWire/disconnectSong/
+  // selectVariant above and below) are wrapped in useCallback so their
+  // identity only changes when something they actually depend on does —
+  // GraphPane threads them into each edge's `data`, and an edge rendered
+  // through React Flow's EdgeLabelRenderer portal (the hover-✕ disconnect
+  // button) briefly drops out of the DOM on any render where its `data`
+  // reference changes, even though the edge itself never stopped being
+  // wired. Without this, every 1-second playback tick — which produces a
+  // brand new `session` object and so a brand new inline function here —
+  // would make the disconnect button flicker during an actual live set.
+  const isValidConnection = useCallback((conn) => {
+    if (conn.source === conn.target) return false;
+    const sourceType = conn.sourceHandle.slice('right-'.length);
+    const targetType = conn.targetHandle.slice('left-'.length);
+    if (sourceType === 'transition' || targetType === 'transition') return sourceType === 'transition' && targetType === 'transition';
+    return true;
+  }, []);
+
+  // A dropped connection always wires immediately, picking the first
+  // produced candidate when several exist between that pair (or several
+  // intro/outro fragments on one song) — the row itself then grows a
+  // dropdown next to it (see socketDataById's `*Options`) so switching to
+  // a different candidate is a plain select, not a second popup to drive
+  // through. Nothing here ever guesses at which *song* to connect: that
+  // part still only ever comes from the drag itself.
+  const handleConnect = useCallback((conn) => {
+    const sourceType = conn.sourceHandle.slice('right-'.length);
+    const targetType = conn.targetHandle.slice('left-'.length);
+    if (sourceType === 'transition') {
+      const candidates = transitionEdgesBetween(visibleEdges, conn.source, conn.target);
+      if (candidates.length === 0) return;
+      commitWire(conn.source, conn.target, 'transition', candidates[0].id, 'transition', candidates[0].id);
+      return;
+    }
+    const endEdgeId = sourceType === 'outro' ? ((outroEdgeFor(visibleEdges, conn.source)) || {}).id || null : null;
+    const startEdgeId = targetType === 'intro' ? ((introEdgeFor(visibleEdges, conn.target)) || {}).id || null : null;
+    commitWire(conn.source, conn.target, sourceType, endEdgeId, targetType, startEdgeId);
+  }, [visibleEdges, commitWire]);
+
+  // A socket's dropdown (only rendered when 2+ candidates exist — see
+  // socketDataById) swaps which produced edge fills an already-active
+  // slot, leaving the slot itself and any wired destination untouched.
+  const selectVariant = useCallback((songId, side, edgeId) => {
+    setSession(prev => ({
+      ...prev,
+      activePlaylist: side === 'left'
+        ? setStartVariant(prev.activePlaylist, songId, edgeId)
+        : setEndVariant(prev.activePlaylist, songId, edgeId),
+    }));
+  }, [setSession]);
+
+  // The hover-✕ on an active wire (see GraphPane's edge rendering) —
+  // deliberately not "click the wire itself", which would make a stray
+  // click destroy part of a built playlist the same way clicking to end
+  // a set used to risk before that got a confirm modal of its own.
+  const disconnectSong = useCallback((songId) => {
+    setSession(prev => ({ ...prev, activePlaylist: unwireOutput(prev.activePlaylist, songId) }));
+  }, [setSession]);
 
   // ---------------- search (Fuse.js) ----------------
   const fuse = useMemo(() => new Fuse(Object.values(songs), { keys: ['title', 'artist'], threshold: 0.35, ignoreLocation: true }), [songs]);
@@ -454,7 +536,8 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         <div className="graph-pane">
           <GraphPane
             songs={songs} positions={positions} transitionEdgesRaw={transitionEdgesRaw} activePlaylist={activePlaylist}
-            socketDataById={socketDataById} onToggleSocket={toggleSocket} mixingEdgeId={mixingEdgeId}
+            socketDataById={socketDataById} onToggleSocket={toggleSocket} onSelectVariant={selectVariant} mixingEdgeId={mixingEdgeId}
+            onConnect={handleConnect} isValidConnection={isValidConnection} onDisconnectSong={disconnectSong}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition}

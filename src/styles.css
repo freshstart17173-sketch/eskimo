@@ -155,6 +155,20 @@ a { color: var(--accent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 @keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* The hover-✕ on an active wire (a real transition or a plain wired
+   sequence link) — deliberately its own small dedicated target rather
+   than the wire itself being clickable, same reasoning as every other
+   hard-to-hit destructive control in this app. Always present, not
+   hover-revealed, since it already reads as a small secondary control
+   rather than a hazard. */
+.edge-disconnect-btn {
+  position: absolute; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--paper); border: 1.5px solid var(--ink); color: var(--ink);
+  font-size: 11px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  pointer-events: auto; z-index: 4;
+}
+.edge-disconnect-btn:hover { background: var(--ink); color: var(--paper); }
+
 .sidebar {
   width: 188px; flex: none; background: var(--panel);
   display: flex; flex-direction: column; padding: 18px 8px 16px;
@@ -517,36 +531,74 @@ a { color: var(--accent); }
 .graph-pane .react-flow__handle { opacity: 0; pointer-events: none; }
 .graph-pane .react-flow__node { cursor: pointer; }
 
-/* Typed left/right sockets (the playlist editor — see TODO.md). Higher
-   specificity than the blanket opacity:0 rule above (which still correctly
-   hides the End node's own plain handle) so these render as real, visible
-   dots rather than React Flow's default handle square. Monochrome and
-   type-coded by a letter, not a hue — a color-per-socket-type scheme was
-   considered and dropped for the same reason per-song cover coloring was:
-   it doesn't add real signal here, ink/paper contrast already does the
-   job at any zoom level. */
-.graph-pane .react-flow__handle.node-socket {
-  width: 15px; height: 15px; border-radius: 50%; background: var(--paper); border: 1.5px solid var(--ink);
-  display: flex; align-items: center; justify-content: center; z-index: 3; opacity: 1; pointer-events: auto;
+/* Typed left/right sockets (the playlist editor — see TODO.md), laid out
+   Blender-node-style: real labeled rows in normal document flow, inputs
+   on the left and outputs on the right so a connection's direction never
+   has to cross back over the node it came from. A fixed color per *type*
+   (not per song, not per node) — a Transition socket is always the same
+   hue everywhere, exactly like a Geometry socket is always the same
+   green in Blender — which is a different thing from the per-song cover-
+   color scheme tried earlier and dropped: that varied by song and
+   couldn't be trusted to read cleanly against arbitrary art; this is a
+   small fixed four-color legend, the same on every node, which is what
+   actually makes a node graph scannable at a glance. */
+.node-socket-section {
+  display: flex; justify-content: space-between; gap: 10px; margin-top: 9px; padding-top: 8px;
+  border-top: 1px dashed var(--line);
 }
-.node-socket-label { font-size: 8px; font-weight: 700; line-height: 1; color: var(--ink); font-family: var(--font-mono); pointer-events: none; }
-.node-socket-active { background: var(--ink); }
-.node-socket-active .node-socket-label { color: var(--paper); }
-.node-socket-clickable { cursor: pointer; }
-.node-socket-clickable:hover { box-shadow: 0 0 0 3px rgba(19, 19, 19, .15); }
-.state-playing .node-socket-clickable:hover { box-shadow: 0 0 0 3px rgba(252, 252, 252, .25); }
-.state-playing .node-socket { background: var(--paper-fixed); }
-.state-playing .node-socket-active { background: var(--ink); }
-.state-playing .node-socket-active .node-socket-label { color: var(--paper-fixed); }
+.state-playing .node-socket-section { border-top-color: rgba(252, 252, 252, .25); }
+.node-socket-side { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.node-socket-side-right { align-items: flex-end; }
+.node-socket-row {
+  position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+  min-height: 15px; min-width: 0; padding: 1px 0;
+}
+.node-socket-row-right { flex-direction: row-reverse; }
+.node-socket-label {
+  font-size: 9.5px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; pointer-events: none;
+}
+.node-socket-row-active .node-socket-label { color: var(--ink); font-weight: 700; }
+.state-playing .node-socket-label { color: rgba(252, 252, 252, .6); }
+.state-playing .node-socket-row-active .node-socket-label { color: var(--paper-fixed); }
 
-/* The small label that appears on a side once it's actually wired to
-   something — a transition's name, or "Outro"/"Intro" — sitting just
-   outside the card so it doesn't fight the tags/art for space inside it. */
-.node-connection-labels { position: absolute; left: 0; right: 0; bottom: -18px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 600; color: var(--muted); pointer-events: none; }
-.node-connection-label { background: var(--paper); padding: 1px 4px; border-radius: 3px; border: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 48%; }
+/* Appears next to an already-active socket only when 2+ produced
+   candidates exist for it (see socketDataById's `*Options`) — switching
+   which one is wired is then a plain select, not a second popup. `nodrag`
+   keeps a click/drag inside it from being read as a node-drag start. */
+.node-socket-select {
+  font-size: 8px; max-width: 70px; padding: 1px 2px; border-radius: 3px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer;
+}
+.state-playing .node-socket-select { background: rgba(252, 252, 252, .12); border-color: rgba(252, 252, 252, .35); color: var(--paper-fixed); }
+
+/* A ring, not a bar — cheaper on card width, just as readable, and its
+   color sweep (green -> red, computed in GraphNodes.jsx) does the same
+   job a discrete "warning" color step would, without a hard jump. */
+.socket-countdown-ring { flex: none; }
+.socket-countdown-track { stroke: var(--line); stroke-width: 2.4; }
+.state-playing .socket-countdown-track { stroke: rgba(252, 252, 252, .25); }
+
+.graph-pane .react-flow__handle.node-socket {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--socket-border);
+  background: var(--paper); z-index: 3; opacity: 1; pointer-events: auto; flex: none;
+}
+.node-socket-row .node-socket { left: -14px; }
+.node-socket-row-right .node-socket { right: -14px; }
+.graph-pane .react-flow__handle.node-socket.node-socket-active { background: var(--socket-border); }
+.node-socket-clickable { cursor: pointer; }
+.node-socket-clickable:hover { box-shadow: 0 0 0 4px var(--socket-ring); }
+.node-socket-draggable { cursor: crosshair; }
+.node-socket-draggable:hover { box-shadow: 0 0 0 4px var(--socket-ring); transform: translateY(-50%) scale(1.25); }
+
+.node-socket-none { --socket-border: var(--muted); --socket-ring: rgba(154, 154, 154, .3); }
+.node-socket-intro { --socket-border: #3f9e82; --socket-ring: rgba(63, 158, 130, .3); }
+.node-socket-outro { --socket-border: #c98a3e; --socket-ring: rgba(201, 138, 62, .3); }
+.node-socket-transition { --socket-border: #8b6fc9; --socket-ring: rgba(139, 111, 201, .3); }
 
 .node-card {
-  width: 190px; border-radius: var(--radius); padding: 9px;
+  width: 208px; border-radius: var(--radius); padding: 9px;
   background: var(--paper); color: var(--ink); border: 1.5px solid var(--line);
   user-select: none; transition: box-shadow .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
   position: relative; transform: scale(1); transform-origin: center;

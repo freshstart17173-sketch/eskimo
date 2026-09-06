@@ -1,49 +1,110 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { fmtTime } from '../core.js';
 import { Icon, ICONS, AlbumArt } from './shared.jsx';
 
-// Short, monochrome type glyphs for the socket dots — matching this app's
-// existing brutalist habit (the "↓1 ↑2" in/out counts, the plain-ink tags)
-// of coding meaning through typography rather than hue. A dominant-color-
-// per-song scheme was tried in design and explicitly rejected: it doesn't
-// read cleanly and a dark/busy cover breaks the whole mental model, so
-// sockets stay a small fixed, type-coded alphabet instead.
-const SOCKET_LABEL = { none: 'N', intro: 'I', outro: 'O', transition: 'T' };
+// The once-a-second elapsed clock reaches the playing node through context
+// instead of through React Flow's own node `data` — seeGraphPane.jsx's
+// comment above its node-rebuild effect for why: routing a per-second tick
+// through `setNodes` was flickering the disconnect button on every active
+// edge in the whole graph, not just ones touching the playing node.
+export const NowPlayingContext = createContext({ nowPlayingId: null, elapsed: 0, duration: 0 });
+
+// Fixed, per-type socket colors — Blender-node-style (a Geometry socket is
+// always teal, a Boolean always pink, regardless of which node it's on).
+// This is a different thing from the per-song cover-color scheme tried
+// earlier and dropped: that varied by *song* and couldn't be trusted to
+// read cleanly; this varies by *type* only, a small fixed four-color
+// legend that's the same on every node, which is exactly what makes a
+// real node editor scannable at a glance.
 const SOCKET_TITLE = { none: 'None', intro: 'Intro', outro: 'Outro', transition: 'Transition' };
 
-// Evenly spaced vertical offsets for however many sockets a side actually
-// has (1-3) — React Flow's Handle positions itself with inline top/left
-// math based on the `position` prop, which flexbox can't reach since an
-// absolutely-positioned element ignores its parent's flex layout, so the
-// spacing has to be computed explicitly instead.
-function socketTop(index, count) {
-  if (count === 1) return 50;
-  if (count === 2) return index === 0 ? 34 : 66;
-  return 22 + index * 28; // 3: 22/50/78
+// A compact ring instead of a linear bar — cheaper on card width, and just
+// as readable at a glance. Color sweeps a single HSL hue from green (120°)
+// to red (0°) as the cue approaches, which passes through yellow/orange on
+// its own without needing separate named thresholds. The ring only starts
+// draining inside a short warning window before the cue — full green (and,
+// past that window, not rendered at all) the rest of the time, so it reads
+// as "still plenty of time" until it actually needs attention.
+const RING_WARN_WINDOW_SEC = 20;
+function clamp01(n) { return Math.max(0, Math.min(1, n)); }
+function CountdownRing({ remainingSec }) {
+  const pct = clamp01(remainingSec / RING_WARN_WINDOW_SEC);
+  const hue = 120 * pct;
+  const radius = 7, circumference = 2 * Math.PI * radius;
+  const dash = circumference * pct;
+  return (
+    <svg
+      className="socket-countdown-ring" width={16} height={16} viewBox="0 0 18 18"
+      role="img" aria-label={'cue in ' + fmtTime(Math.max(0, Math.round(remainingSec)))}
+    >
+      <circle cx="9" cy="9" r={radius} className="socket-countdown-track" fill="none" />
+      <circle
+        cx="9" cy="9" r={radius} fill="none" strokeLinecap="round" strokeWidth="2.4"
+        stroke={`hsl(${hue}, 75%, 45%)`} strokeDasharray={`${dash} ${circumference}`}
+        transform="rotate(-90 9 9)"
+      />
+    </svg>
+  );
 }
 
-// Up to three typed sockets along a node's left or right edge, each a real
-// React Flow `Handle` (not a plain div) so Phase 3's drag-to-connect has
-// something to attach to — inert for now since nodesConnectable is still
-// off at the ReactFlow level. `active` is the type currently in effect for
-// that side (from activePlaylist); everything else renders hollow.
-// None/Intro/Outro toggle directly on click; a Transition socket only
-// ever gets set by a real drag, so it gets no click handler at all.
-function SocketColumn({ side, types, active, onToggle }) {
+// One row: a colored socket dot (a real React Flow `Handle`) plus its
+// fixed type label — "Transition"/"Intro"/"Outro" never renames itself to
+// whichever specific edge is wired underneath it, since that read as the
+// socket changing kind rather than just a choice under a stable one. When
+// more than one produced candidate exists for an active slot, a small
+// inline dropdown appears next to the label so switching is a plain
+// select, not a second popup to drive through. Every socket is drag-
+// connectable, since None/Outro on one song can link to None/Intro on a
+// *different* song (a plain click can't express which other song to link
+// to); None/Intro/Outro additionally toggle on a plain click, for marking
+// a song's own ending/starting style with no particular partner in mind
+// (e.g. "this is the last song, it just has an outro"). Transition is
+// drag-only — two songs only ever have a specific produced transition
+// between them, never a generic one to click into existence. Nesting the
+// Handle inside a `position: relative` row lets it center on *this row*
+// (CSS resolves an absolutely-positioned element against its nearest
+// positioned ancestor, not the whole node), so rows can stack via
+// ordinary flexbox regardless of how many there are.
+function SocketRow({ side, type, active, options, selectedEdgeId, remainingSec, onToggle, onSelectVariant }) {
+  const isInput = side === 'left';
+  return (
+    <div className={'node-socket-row' + (isInput ? '' : ' node-socket-row-right') + (active ? ' node-socket-row-active' : '')}>
+      <Handle
+        type={isInput ? 'target' : 'source'} position={isInput ? Position.Left : Position.Right}
+        id={side + '-' + type} isConnectable
+        className={'node-socket node-socket-' + type + (active ? ' node-socket-active' : '') + (type === 'transition' ? ' node-socket-draggable' : ' node-socket-clickable')}
+        onClick={type === 'transition' ? undefined : (e) => { e.stopPropagation(); onToggle(side, type); }}
+      />
+      <span className="node-socket-label">{SOCKET_TITLE[type]}</span>
+      {active && options && options.length > 1 && (
+        <select
+          className="node-socket-select nodrag" value={selectedEdgeId || ''}
+          onMouseDown={(e) => e.stopPropagation()}
+          onChange={(e) => onSelectVariant(side, e.target.value)}
+        >
+          {options.map((opt) => <option key={opt.id} value={opt.id}>{opt.label}</option>)}
+        </select>
+      )}
+      {active && remainingSec != null && <CountdownRing remainingSec={remainingSec} />}
+    </div>
+  );
+}
+
+function SocketList({ side, types, active, edgeId, options, remainingSec, onToggle, onSelectVariant }) {
   if (!types || types.length === 0) return null;
-  return types.map((type, i) => (
-    <Handle
-      key={type} type={side === 'left' ? 'target' : 'source'} position={side === 'left' ? Position.Left : Position.Right}
-      id={side + '-' + type} isConnectable={false}
-      style={{ top: socketTop(i, types.length) + '%' }}
-      className={'node-socket' + (active === type ? ' node-socket-active' : '') + (type === 'transition' ? '' : ' node-socket-clickable')}
-      data-tooltip={SOCKET_TITLE[type]} data-tooltip-above={side === 'left' ? undefined : true}
-      onClick={type === 'transition' ? undefined : (e) => { e.stopPropagation(); onToggle(side, type); }}
-    >
-      <span className="node-socket-label">{SOCKET_LABEL[type]}</span>
-    </Handle>
-  ));
+  return (
+    <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
+      {types.map((type) => (
+        <SocketRow
+          key={type} side={side} type={type} active={active === type}
+          options={active === type ? options : null} selectedEdgeId={edgeId}
+          remainingSec={active === type ? remainingSec : null}
+          onToggle={onToggle} onSelectVariant={onSelectVariant}
+        />
+      ))}
+    </div>
+  );
 }
 
 // state is one of null | 'playing' | 'next' | 'later' — the only three
@@ -51,14 +112,21 @@ function SocketColumn({ side, types, active, onToggle }) {
 // selected ambiguity).
 export function SongNode({ data }) {
   const {
-    song, state, dimmed, hovered, inCount, outCount, onEnter, onLeave, playing, position,
-    leftTypes, rightTypes, leftActive, rightActive, leftLabel, rightLabel, onToggleSocket,
+    song, state, dimmed, hovered, inCount, outCount, onEnter, onLeave, playing,
+    leftTypes, rightTypes, leftActive, rightActive, leftEdgeId, rightEdgeId,
+    leftOptions, rightOptions, rightCueSeconds, onToggleSocket, onSelectVariant,
   } = data;
+  const nowPlaying = useContext(NowPlayingContext);
+  const position = (playing && nowPlaying.nowPlayingId === song.id) ? nowPlaying : null;
   const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
+  const onToggle = (side, type) => onToggleSocket(song.id, side, type);
+  const onSelect = (side, edgeId) => onSelectVariant(song.id, side, edgeId);
+  // Only the song actually playing has a live elapsed clock to count down
+  // against — a wired-but-not-yet-playing outro/transition just shows its
+  // dropdown with no ring, since "time left" means nothing until it starts.
+  const rightRemainingSec = (position && rightCueSeconds != null) ? (rightCueSeconds - position.elapsed) : null;
   return (
     <div className={cls} onMouseEnter={onEnter} onMouseLeave={onLeave}>
-      <SocketColumn side="left" types={leftTypes} active={leftActive} onToggle={(side, type) => onToggleSocket(song.id, side, type)} />
-      <SocketColumn side="right" types={rightTypes} active={rightActive} onToggle={(side, type) => onToggleSocket(song.id, side, type)} />
       <div className="node-title-row">
         <div>
           <div className="node-title">{song.title}</div>
@@ -79,12 +147,10 @@ export function SongNode({ data }) {
           {position && <div className="node-position mono-num">{fmtTime(position.elapsed)} / {fmtTime(position.duration)}</div>}
         </div>
       )}
-      {(leftLabel || rightLabel) && (
-        <div className="node-connection-labels">
-          {leftLabel && <div className="node-connection-label node-connection-label-left">← {leftLabel}</div>}
-          {rightLabel && <div className="node-connection-label node-connection-label-right">{rightLabel} →</div>}
-        </div>
-      )}
+      <div className="node-socket-section">
+        <SocketList side="left" types={leftTypes} active={leftActive} edgeId={leftEdgeId} options={leftOptions} onToggle={onToggle} onSelectVariant={onSelect} />
+        <SocketList side="right" types={rightTypes} active={rightActive} edgeId={rightEdgeId} options={rightOptions} remainingSec={rightRemainingSec} onToggle={onToggle} onSelectVariant={onSelect} />
+      </div>
     </div>
   );
 }

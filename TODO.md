@@ -299,14 +299,46 @@ pan/zoom the graph there — it's a navigation aid, not an editor.
    `Handle`s per node — None/Intro/Transition on the left, None/Outro/
    Transition on the right, each hidden entirely when `leftSocketTypes`/
    `rightSocketTypes` (`core.js`) say that type has zero eligible options
-   for that song. Socket type is coded by a small monochrome letter (N/I/
-   O/T), not a hue — a fixed color-per-type scheme was considered and
-   dropped for the same reason per-song cover coloring was: this app's
-   established brutalist/typographic style (the tags, the io counts)
-   already reads cleanly through ink/paper contrast and shape, and a new
-   color system here would just be another thing to keep consistent with
-   nothing gained. A wired side shows a small label (the transition's
-   name, or "Outro"/"Intro") just outside the card.
+   for that song.
+   Superseded within this same pass: the first cut coded socket type via a
+   monochrome letter (N/I/O/T) on the theory that a new color system would
+   fight the app's ink/paper brutalist style. Feedback after seeing it next
+   to a real Blender screenshot was that it "doesn't look that great" and
+   asked directly for the Blender pattern instead — real text labels in
+   normal document flow (not floating dots) and a small **fixed color per
+   socket *type*** (None=grey, Intro=teal `#3f9e82`, Outro=amber `#c98a3e`,
+   Transition=violet `#8b6fc9`, via `--socket-border`/`--socket-ring` CSS
+   custom properties on `.node-socket-<type>`). This is a different thing
+   from the per-*song* cover-art coloring rejected earlier in this same
+   spec (that varied by song and couldn't be trusted to read cleanly
+   against arbitrary art) — a small four-color legend that's identical on
+   every node is exactly what makes a real node editor scannable at a
+   glance. `GraphNodes.jsx`'s `SocketRow`/`SocketList` do the layout; a row
+   nests its `Handle` inside its own `position: relative` div so CSS
+   resolves the handle's absolute position against *that row*, not the
+   whole card — ordinary flexbox column stacking then just works for
+   however many rows a song has.
+   A second round of feedback, after drag-to-connect (item 3 below) landed
+   and multi-candidate transitions/outros started actually appearing:
+   *"seems like the transitions are getting their own named sockets. Don't
+   want that, i want a dedicated transition socket and a dropdown... this
+   pattern can then repeat for intros and outros."* The label had been
+   renaming itself to whichever specific edge was wired ("Fast cut" instead
+   of "Transition") — reverted so the row label is always just the fixed
+   type name, and a small inline `<select>` (`.node-socket-select`, class
+   `nodrag` so it doesn't start a node-drag) appears next to it whenever
+   2+ candidates exist for that active slot — `introEdgesFor`/
+   `outroEdgesFor` (`core.js`, plural — a song can have more than one
+   intro/outro fragment now, not just one) plus the existing
+   `transitionEdgesBetween` feed `socketDataById`'s `leftOptions`/
+   `rightOptions` in `PerformPage.jsx`; picking a different option calls
+   `setStartVariant`/`setEndVariant` (`core.js`) via `selectVariant`, which
+   swaps only the specific `edgeId` — endMode/startMode/nextSongId (i.e.
+   which song it's wired to) never change from a dropdown pick. This also
+   deleted the old drag → multi-candidate-modal picker entirely: dropping a
+   Transition connection with several candidates now just auto-wires the
+   first one and leaves the dropdown to switch it, matching the same "no
+   second popup to drive through" instinct.
 2b. [x] ~~**Socket interaction (None/Intro/Outro)**~~ — done ahead of
    drag-to-connect: clicking a None/Intro/Outro socket toggles it
    directly (clicking the already-active one turns it back to None) via
@@ -324,14 +356,65 @@ pan/zoom the graph there — it's a navigation aid, not an editor.
    future tests against source-side sockets should dispatch via
    `element.click()` in `page.evaluate` rather than Playwright's own
    `.click()`.
-3. [ ] **Drag-to-connect Transition sockets** — the one piece of Phase 3
-   not yet built: dragging from a Transition output to a Transition input
-   (with the multi-candidate popup when more than one produced transition
-   exists for that pair), and the hover-✕ disconnect for any active wire.
-   `nodesConnectable` is still `false` at the `<ReactFlow>` level — this
-   is the next concrete step. `wireConnection`/`unwireOutput` (`core.js`)
-   already exist and are ready to be called from React Flow's `onConnect`.
-4. [ ] **Countdown bars everywhere** transitions/outros show up.
+3. [x] ~~**Drag-to-connect**~~ — `nodesConnectable` is `true`; every socket
+   (not just Transition) is a real drag-connectable `Handle` now, since
+   None/Outro on one song linking to None/Intro on a *different* song is
+   itself only expressible by a drag (a plain click on one song's socket
+   has no way to say which other song it should point at) — None/Intro/
+   Outro additionally still toggle on a plain click for the no-particular-
+   partner case ("this song just ends with an outro"). `isValidConnection`
+   (`PerformPage.jsx`) enforces Transition-only-meets-Transition and
+   otherwise allows any None/Outro → None/Intro combination.
+   `handleConnect` resolves a Transition drop to the first produced
+   candidate between that pair (or the outro/intro edge for a non-
+   transition drop) via `commitWire`/`wireConnection` — see item 2 above
+   for the dropdown that switches away from that first pick. Disconnecting
+   is the hover-✕ (`ActiveEdge` in `GraphPane.jsx`, via `EdgeLabelRenderer`)
+   on the wire's midpoint, never the wire itself — calls `onDisconnectSong`
+   → `unwireOutput`. Verified end to end in a real browser: a two-
+   candidate Transition drag auto-wires the first and the row's dropdown
+   switches to the second; a two-candidate Outro drag likewise; an invalid
+   Transition→None drag is rejected and leaves state untouched; the
+   hover-✕ disconnects without needing a click on the line itself.
+   Two real bugs found and fixed along the way, both worth remembering:
+   (a) sockets other than Transition had `isConnectable={type ===
+   'transition'}`, which silently made the None/Outro/Intro drag path
+   above unreachable — fixed by making every socket connectable and
+   leaving the type-pairing rule to `isValidConnection` instead of to
+   which sockets can even start a drag. (b) React Flow's own
+   `fitViewOptions`/`defaultEdgeOptions`/`proOptions` were inline object
+   literals in JSX, so every render created new ones; since `GraphPane`
+   re-renders once a second while a set plays (the elapsed clock), React
+   Flow was reacting to those identities changing by re-syncing internal
+   state, which very briefly dropped every edge's rendered position to
+   null — invisible for the line itself, but enough to unmount and remount
+   the hover-✕ button living in each active edge's `EdgeLabelRenderer`
+   portal, a real flicker on every live set. Hoisted to module-level
+   constants (same fix applied to node `style` objects, and the ticking
+   elapsed clock was moved off React Flow's node `data` entirely onto a
+   `NowPlayingContext` in `GraphNodes.jsx` so the once-a-second tick never
+   calls `setNodes` at all) fixed the sustained version of this outright;
+   what's left is a rare single-frame blip that only shows up at a
+   non-default zoom level shortly after a manual wheel-zoom, not on a
+   freshly-loaded or already-settled view — investigated at length (traced
+   through React Flow's `EdgeWrapper`/`getEdgePosition` internals) without
+   finding a further first-party cause, so it's logged here rather than
+   chased further; if it turns out to matter in practice, the next place
+   to look is whatever `ResizeObserver`-driven remeasurement React Flow
+   itself runs on zoom.
+4. [x] ~~**Countdown ring on Transition/Outro sockets**~~ — not a linear
+   bar: `CountdownRing` (`GraphNodes.jsx`) is a small fixed-size SVG ring
+   next to the active row, stroke color sweeping a single HSL hue from
+   green (120°) to red (0°) — passing through yellow/orange on its own,
+   no separate named thresholds — as the cue approaches inside a fixed
+   20s warning window (`RING_WARN_WINDOW_SEC`); full green (and simply not
+   rendered before that) the rest of the time, so it reads as "plenty of
+   time" until it actually needs attention. Only ever shown for the song
+   actually playing (`rightCueSeconds` from `socketDataById`, matched
+   against the live elapsed clock via `NowPlayingContext` — see item 3's
+   bug (b) for why that's a context and not node `data`). Outro and
+   Transition both read it off `endEdgeId`'s `outSeconds`, so both get a
+   real "is there still time" signal, not just a number.
 5. [ ] **Save/Load playlist** — toolbar button, persisted `playlists`
    array, confirm-before-replace on load.
 6. [ ] **Readonly filmstrip** replacing `QueueBar`.
@@ -465,6 +548,26 @@ skip whichever you don't need. Current status of each, as of this pass:
 RLS-scoped `library` table) is applied, and `src/config.js` already has
 that project's real URL and anon publishable key — nothing to create or
 copy here.
+
+Checked again this pass via the Supabase MCP connection (project
+`knkboafsybgifsulxknz`, the one `src/config.js` actually points at — there's
+a second, older, unused project named "Eski" on the same account, not this
+one): schema and RLS are correct (`library` keyed by `user_id`, scoped to
+`auth.uid()` on select/insert/update), and both advisor findings that
+existed were fixed directly — a `rls_auto_enable()` housekeeping event-
+trigger function was publicly callable via PostgREST RPC (revoked
+`EXECUTE` from `anon`/`authenticated`; the trigger itself doesn't need it
+to fire) and the three `library` RLS policies were re-evaluating
+`auth.uid()` per row (rewritten as `(select auth.uid())`, the initplan
+pattern Postgres/Supabase's own linter recommends). `get_advisors` reports
+clean on both security and performance now. I could *not* verify the
+actual toggle below end-to-end: this sandbox's headless browser can't
+reach any external host at all (confirmed directly — a plain `fetch()` to
+Supabase's own `/auth/v1/settings` from inside the page returns
+`ERR_CONNECTION_RESET`, same as a request to Google Fonts), and the
+Supabase MCP tools available here don't expose Auth provider settings
+(only schema/SQL/advisors/edge-functions/branches) — so this one step
+still needs a human with dashboard access.
 1. Open the **eskimo** project at supabase.com/dashboard.
 2. Go to **Authentication → Providers**.
 3. Enable **Anonymous Sign-Ins** (there's no login screen in this app —

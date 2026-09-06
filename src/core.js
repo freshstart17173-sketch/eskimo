@@ -90,6 +90,26 @@ export function unwireOutput(playlist, songId) {
   return { ...playlist, nodes };
 }
 
+// Switches which produced edge a socket that's already active is using,
+// without touching endMode/startMode/nextSongId — the "Transition" (or
+// Intro/Outro) row stays put, only the specific candidate underneath it
+// changes. A Transition's edge is picked on the output side only (the
+// same "one direction of truth" as wireConnection), so switching it also
+// updates the destination's mirrored startEdgeId; Intro/Outro are each a
+// single song's own fragment choice with no other side to keep in sync.
+export function setEndVariant(playlist, songId, edgeId) {
+  const node = playlistNode(playlist, songId);
+  const nodes = { ...playlist.nodes, [songId]: { ...node, endEdgeId: edgeId } };
+  if (node.endMode === 'transition' && node.nextSongId) {
+    nodes[node.nextSongId] = { ...playlistNode(playlist, node.nextSongId), startEdgeId: edgeId };
+  }
+  return { ...playlist, nodes };
+}
+export function setStartVariant(playlist, songId, edgeId) {
+  const node = playlistNode(playlist, songId);
+  return { ...playlist, nodes: { ...playlist.nodes, [songId]: { ...node, startEdgeId: edgeId } } };
+}
+
 // Drops every reference to songId — both its own entry and any other
 // node's connection pointing at it — so deleting a song can never leave a
 // playlist quietly wired to something that no longer exists.
@@ -342,21 +362,28 @@ export function cutCandidates(songs, excludeIds) {
 // song with no produced outro just doesn't exist, rather than sitting there
 // permanently disabled.
 // ---------------------------------------------------------------------------
-export function introEdgeFor(visibleEdges, songId) { return visibleEdges.find(e => e.type === 'intro' && e.r === songId) || null; }
-export function outroEdgeFor(visibleEdges, songId) { return visibleEdges.find(e => e.type === 'outro' && e.l === songId) || null; }
+// Plural — every produced intro/outro fragment for this song, not just
+// one. A song can have several (e.g. a short vs. long intro edit); the
+// socket itself stays a single fixed "Intro"/"Outro" row regardless of
+// how many exist, with a dropdown next to it when there's more than one
+// to pick from (see setStartVariant/setEndVariant above).
+export function introEdgesFor(visibleEdges, songId) { return visibleEdges.filter(e => e.type === 'intro' && e.r === songId); }
+export function outroEdgesFor(visibleEdges, songId) { return visibleEdges.filter(e => e.type === 'outro' && e.l === songId); }
+export function introEdgeFor(visibleEdges, songId) { return introEdgesFor(visibleEdges, songId)[0] || null; }
+export function outroEdgeFor(visibleEdges, songId) { return outroEdgesFor(visibleEdges, songId)[0] || null; }
 export function transitionEdgesTo(visibleEdges, songId) { return visibleEdges.filter(e => e.type === 'transition' && e.r === songId); }
 export function transitionEdgesBetween(visibleEdges, fromId, toId) {
   return visibleEdges.filter(e => e.type === 'transition' && e.l === fromId && e.r === toId);
 }
 export function leftSocketTypes(visibleEdges, songId) {
   const types = ['none'];
-  if (introEdgeFor(visibleEdges, songId)) types.push('intro');
+  if (introEdgesFor(visibleEdges, songId).length) types.push('intro');
   if (transitionEdgesTo(visibleEdges, songId).length) types.push('transition');
   return types;
 }
 export function rightSocketTypes(visibleEdges, songId) {
   const types = ['none'];
-  if (outroEdgeFor(visibleEdges, songId)) types.push('outro');
+  if (outroEdgesFor(visibleEdges, songId).length) types.push('outro');
   if (transitionCandidates(visibleEdges, songId, new Set()).length) types.push('transition');
   return types;
 }
