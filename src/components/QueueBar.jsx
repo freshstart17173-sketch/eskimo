@@ -29,7 +29,7 @@ export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRe
           return (
             <React.Fragment key={'h' + i}>
               <div className="queue-chip queue-chip-autoplay">
-                <AlbumArt className="queue-chip-art" />
+                <AlbumArt className="queue-chip-art" url={s.coverUrl} />
                 {s.title}
               </div>
               <span className="queue-arrow">→</span>
@@ -39,7 +39,7 @@ export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRe
 
         {nowPlayingId && songs[nowPlayingId] && (
           <div className="queue-chip queue-chip-playing" ref={nowRef}>
-            <AlbumArt className="queue-chip-art" />
+            <AlbumArt className="queue-chip-art" url={songs[nowPlayingId].coverUrl} />
             {songs[nowPlayingId].title}
           </div>
         )}
@@ -48,7 +48,7 @@ export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRe
           <React.Fragment key={q.id + i}>
             <span className="queue-arrow">→</span>
             <div className="queue-chip">
-              {q.id !== END && <AlbumArt className="queue-chip-art" />}
+              {q.id !== END && <AlbumArt className="queue-chip-art" url={songs[q.id] && songs[q.id].coverUrl} />}
               {q.id === END ? 'End Set' : (songs[q.id] ? songs[q.id].title : '(deleted)')}
               <button className="queue-chip-remove" onClick={() => onRemoveQueueItem(i)}>✕</button>
             </div>

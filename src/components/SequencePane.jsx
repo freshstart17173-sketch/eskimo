@@ -34,7 +34,7 @@ function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode
     <div className={'seq-row' + (isStaged ? ' seq-row-staged' : '')} onClick={onClick}>
       {!isEnd && <div className="seq-row-drain" style={{ width: drainPct + '%' }} />}
       <div className="seq-row-main">
-        {!isEnd && <AlbumArt className="lib-art" style={{ width: 22, height: 22 }} />}
+        {!isEnd && <AlbumArt className="lib-art" style={{ width: 22, height: 22 }} url={row.coverUrl} />}
         <div className="seq-row-text">
           <div className="seq-row-title">{row.title}</div>
           {!isEnd && <div className="seq-row-artist">{row.artist}</div>}
@@ -113,7 +113,7 @@ export default function SequencePane({
               <button className="seq-play-btn" onClick={onTogglePlaying}>
                 <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={14} />
               </button>
-              <AlbumArt className="node-art" style={{ width: 34, height: 34 }} />
+              <AlbumArt className="node-art" style={{ width: 34, height: 34 }} url={nowSong.coverUrl} />
               <div className="seq-now-text">
                 <div className="seq-now-title">{nowSong.title}</div>
                 <div className="seq-now-artist">{nowSong.artist}</div>
@@ -136,7 +136,7 @@ export default function SequencePane({
             {mixingIntoSong && (
               <div className="seq-mixing-row">
                 <span className="seq-mixing-label">Mixing into</span>
-                <AlbumArt className="node-art" style={{ width: 30, height: 30 }} />
+                <AlbumArt className="node-art" style={{ width: 30, height: 30 }} url={mixingIntoSong.coverUrl} />
                 <div className="seq-mixing-text">
                   <div className="seq-mixing-title">{mixingIntoSong.title}</div>
                   <div className="seq-mixing-artist">{mixingIntoSong.artist}</div>

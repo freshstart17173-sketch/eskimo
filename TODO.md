@@ -260,11 +260,18 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       spinner (`.spinner`) next to the "Analyzing…" text.
 
 ### Medium
-- [ ] **Real cover art.** Album art is a decorative placeholder swatch
-      everywhere right now — letting a song store an actual uploaded
-      thumbnail (via the same R2 worker path) would be the single biggest
-      visual-polish lever left; this app's closest inspirations are all
-      very art-forward.
+- [x] ~~Real cover art.~~ — done: `AlbumArt` (`shared.jsx`) renders a real
+      `<img>` when a song has `coverUrl`, falling back to the same
+      placeholder swatch otherwise; wired through all 9 call sites (graph
+      nodes, Library rows, Sequence pane, queue bar, song picker). A new
+      `CoverPicker` component + `core.js`'s `uploadCoverIfPossible` let you
+      set one from Upload Song or Library's edit drawer — same worker path
+      as audio when R2 is configured, but unlike a full master a small
+      cover is cheap enough to fall back to a local data URL otherwise, so
+      this works with zero backend setup instead of staying a placeholder
+      until R2 is wired up. Verified end-to-end with Playwright: pick a
+      cover on Upload Song → shows in the preview → shows as a real image
+      in both Library and the graph node after saving.
 - [x] ~~One-level undo~~ — done: `App.jsx` now snapshots songs/edges/
       session right before a delete, deletes immediately (no confirm), and
       shows a `.toast` with an "Undo" action for 6s that restores the

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { uid, mockDuration, uploadAudioIfConfigured } from '../core.js';
-import { Field, Dropzone } from './shared.jsx';
+import React, { useMemo, useState } from 'react';
+import { uid, mockDuration, uploadAudioIfConfigured, uploadCoverIfPossible } from '../core.js';
+import { Field, Dropzone, CoverPicker } from './shared.jsx';
 
 export default function UploadSongPage({ onAddSong, onViewSong, existingCount }) {
   const [title, setTitle] = useState('');
@@ -8,9 +8,11 @@ export default function UploadSongPage({ onAddSong, onViewSong, existingCount })
   const [bpm, setBpm] = useState('');
   const [key, setKey] = useState('');
   const [file, setFile] = useState(null);
+  const [coverFile, setCoverFile] = useState(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const coverPreviewUrl = useMemo(() => (coverFile ? URL.createObjectURL(coverFile) : null), [coverFile]);
 
   async function save() {
     if (!title.trim()) { setError('Give the song a title.'); return; }
@@ -19,17 +21,18 @@ export default function UploadSongPage({ onAddSong, onViewSong, existingCount })
     setError('');
     setUploading(true);
     const audio = await uploadAudioIfConfigured(file);
+    const coverUrl = coverFile ? await uploadCoverIfPossible(coverFile) : null;
     setUploading(false);
     const id = uid('s');
     const song = {
       id, title: title.trim(), artist: artist.trim() || 'Unknown',
       x: 60 + (existingCount * 47) % 1180, y: 60 + (existingCount * 83) % 700,
       bpm: bpmNum || 120, key: key.trim() || '—',
-      durationSec: mockDuration(title + artist), audioUrl: audio.audioUrl || null,
+      durationSec: mockDuration(title + artist), audioUrl: audio.audioUrl || null, coverUrl,
     };
     onAddSong(song);
     setSaved({ id, title: song.title });
-    setTitle(''); setArtist(''); setBpm(''); setKey(''); setFile(null);
+    setTitle(''); setArtist(''); setBpm(''); setKey(''); setFile(null); setCoverFile(null);
   }
 
   return (
@@ -38,6 +41,7 @@ export default function UploadSongPage({ onAddSong, onViewSong, existingCount })
       <div className="page-sub">Add a new master to the library. A remix is just its own song here — give it its own title/BPM/key and connect it with Add Audio like anything else.</div>
 
       <div className="form-card">
+        <Field label="Cover art (optional)"><CoverPicker url={coverPreviewUrl} onFile={setCoverFile} /></Field>
         <Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Faultline Blue" /></Field>
         <Field label="Artist"><input className="input" value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="e.g. Nomi Sato" /></Field>
         <div className="form-grid-2">

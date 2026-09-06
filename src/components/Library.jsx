@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { libraryRows } from '../core.js';
-import { Icon, ICONS, Field, AlbumArt } from './shared.jsx';
+import { libraryRows, uploadCoverIfPossible } from '../core.js';
+import { Icon, ICONS, Field, AlbumArt, CoverPicker } from './shared.jsx';
 
 function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, selected, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
@@ -17,6 +17,10 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
     });
     setEditing(false);
   }
+  async function changeCover(file) {
+    const coverUrl = await uploadCoverIfPossible(file);
+    onUpdateSong(song.id, { coverUrl });
+  }
   function destText(e) {
     if (e.type === 'outro') return 'ends set';
     if (e.type === 'intro') return 'cold-open';
@@ -31,7 +35,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
       <div className="lib-row-head">
         <input className="lib-checkbox" type="checkbox" checked={selected} onClick={(e) => e.stopPropagation()} onChange={onToggleSelect} title="Select for playlist queueing" />
         <span className="lib-chevron" onClick={onToggle}><Icon path={ICONS.chevron} size={13} /></span>
-        <AlbumArt className="lib-art" />
+        <AlbumArt className="lib-art" url={song.coverUrl} />
         <div className="lib-title-wrap" onClick={onToggle}>
           <span className="lib-title">{row.title}</span>
           <span className="lib-artist">{row.artist}</span>
@@ -45,6 +49,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
       </div>
       {open && (
         <div className="lib-body">
+          <CoverPicker url={song.coverUrl} onFile={changeCover} />
           {!editing ? (
             <div className="drawer-actions-row">
               <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>Edit details</button>

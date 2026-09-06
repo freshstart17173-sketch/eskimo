@@ -27,9 +27,10 @@ export const ICONS = {
   search: <><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="20" y1="20" x2="15.5" y2="15.5"></line></>,
 };
 
-// A decorative art placeholder — a real cover thumbnail slots in here once
-// the library stores one; a small diagonal-stripe swatch until then.
-export function AlbumArt({ className, style }) {
+// A real cover thumbnail when a song has one (url), otherwise the same
+// decorative diagonal-stripe placeholder as before.
+export function AlbumArt({ className, style, url }) {
+  if (url) return <img className={'art-swatch art-photo ' + (className || '')} style={style} src={url} alt="" />;
   return <div className={'art-swatch ' + (className || '')} style={style} />;
 }
 
@@ -41,7 +42,7 @@ export function SongPicker({ songs, value, onChange, allowFree, freeLabel, place
   if (!editing && chosen) {
     return (
       <div className="picker-chip">
-        <AlbumArt className="picker-chip-art" />
+        <AlbumArt className="picker-chip-art" url={chosen.coverUrl} />
         <div className="picker-chip-text">
           <div className="picker-chip-title">{chosen.title}</div>
           <div className="picker-chip-artist">{chosen.artist}</div>
@@ -79,6 +80,24 @@ export function SongPicker({ songs, value, onChange, allowFree, freeLabel, place
         ))}
         {results.length === 0 && <div className="picker-result-empty">no matches</div>}
       </div>
+    </div>
+  );
+}
+
+// A click-to-pick cover thumbnail — shows the current art (real photo or
+// placeholder swatch via AlbumArt) plus a small "Add/Change cover" label.
+// Upload sequencing (local preview vs. the real uploaded/data URL) is the
+// caller's job via onFile; this is just the picker chrome.
+export function CoverPicker({ url, onFile, size = 48 }) {
+  const inputRef = useRef(null);
+  return (
+    <div className="cover-picker" onClick={() => inputRef.current && inputRef.current.click()}>
+      <input
+        ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onFile(f); e.target.value = ''; }}
+      />
+      <AlbumArt className="cover-picker-art" style={{ width: size, height: size }} url={url} />
+      <span className="cover-picker-label">{url ? 'Change cover' : 'Add cover'}</span>
     </div>
   );
 }

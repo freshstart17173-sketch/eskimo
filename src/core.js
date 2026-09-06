@@ -150,6 +150,36 @@ export async function uploadAudioIfConfigured(file) {
   }
 }
 
+// Cover art upload: same worker endpoint as audio when one's configured
+// (it doesn't care about content type), but — unlike a full audio master —
+// a small cover thumbnail is cheap enough to fall back to storing directly
+// as a data URL when there's no worker, so real cover art works with zero
+// backend setup instead of staying a placeholder until R2 is wired up.
+export async function uploadCoverIfPossible(file) {
+  if (!file) return null;
+  const workerUrl = APP_CONFIG.UPLOAD_WORKER_URL;
+  if (workerUrl) {
+    try {
+      const res = await fetch(workerUrl + '/upload?filename=' + encodeURIComponent(file.name), {
+        method: 'POST',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      });
+      if (!res.ok) throw new Error('upload failed: ' + res.status);
+      const { url } = await res.json();
+      return url;
+    } catch (e) {
+      console.warn('Eskimo Studio: cover upload failed, falling back to local storage', e);
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 // The one and only "no saved state yet" starting point — a genuinely empty
 // library. Nothing is seeded; the person adds their own songs and audio.
 export function freshState() { return { songs: {}, edges: [], session: emptySession(), venueName: '' }; }

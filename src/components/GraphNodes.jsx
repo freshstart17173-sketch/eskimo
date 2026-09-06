@@ -17,7 +17,7 @@ export function SongNode({ data }) {
           <div className="node-title">{song.title}</div>
           <div className="node-artist">{song.artist}</div>
         </div>
-        <AlbumArt className="node-art" />
+        <AlbumArt className="node-art" url={song.coverUrl} />
       </div>
       <div className="node-tags-row">
         <div className="node-tags">

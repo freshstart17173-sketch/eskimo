@@ -65,7 +65,7 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     const s = songs[id];
     const transitionEdges = findEdges(e => e.type === 'transition' && e.l === fromId && e.r === id);
     const introEdge = findEdge(e => e.type === 'intro' && e.r === id);
-    return { id, title: s.title, artist: s.artist, transitionEdges, transitionEdge: transitionEdges[0] || null, introEdge };
+    return { id, title: s.title, artist: s.artist, coverUrl: s.coverUrl, transitionEdges, transitionEdge: transitionEdges[0] || null, introEdge };
   }
 
   function stage(id) {
