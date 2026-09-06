@@ -240,6 +240,7 @@ a { color: var(--accent); }
 .seq-mixing-text { min-width: 0; }
 .seq-mixing-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-mixing-artist { font-size: 10.5px; color: rgba(252, 252, 252, .6); }
+.seq-mixing-pct { font-family: var(--font-mono); font-size: 11px; color: rgba(252, 252, 252, .7); flex: none; }
 .playhead-track.in-crossfade .playhead-fill { background: var(--state-later); }
 .seq-now .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper); }
 /* a regular playhead — elapsed/total, not a countdown — plus the missing
@@ -283,6 +284,31 @@ a { color: var(--accent); }
 .seq-toggle.active { background: var(--ink); color: var(--paper); }
 .seq-toggle:disabled { opacity: .35; cursor: not-allowed; }
 .seq-empty { font-size: 11.5px; color: var(--faint); font-style: italic; padding: 4px 2px; }
+
+/* indented, labeled list of every produced transition between this row's
+   song and the one before it — only rendered once there's more than one,
+   so a single transition still just shows its countdown on the row itself */
+.seq-row-transitions {
+  position: relative; z-index: 1; margin: 7px 0 0 9px; padding-left: 9px;
+  border-left: 1px solid var(--line-soft);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.seq-transition-item {
+  display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 5px;
+  font-size: 10.5px; color: var(--faint);
+}
+.seq-transition-item.selectable { cursor: pointer; }
+.seq-transition-item.selectable:hover { background: rgba(19, 19, 19, .05); color: var(--muted); }
+.seq-transition-item.active { background: var(--accent-bg); color: var(--accent-ink); }
+.seq-transition-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--line); flex: none; }
+.seq-transition-item.active .seq-transition-dot { background: var(--accent); }
+.seq-transition-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seq-transition-cue { font-family: var(--font-mono); font-size: 9.5px; flex: none; opacity: .8; }
+.seq-row-more {
+  align-self: flex-start; font-size: 10px; font-weight: 600; color: var(--faint);
+  padding: 2px 6px; text-decoration: underline; text-underline-offset: 2px;
+}
+.seq-row-more:hover { color: var(--muted); }
 
 .seq-path { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .seq-path-chip { display: flex; align-items: center; gap: 6px; padding: 3px 7px; border-radius: var(--radius); background: var(--panel); font-size: 11px; font-weight: 600; }

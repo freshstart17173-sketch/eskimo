@@ -75,7 +75,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
               {ownEdges.map(e => (
                 <div key={e.id} className="drawer-frag">
                   <div className="drawer-frag-row">
-                    <span className="drawer-frag-label">{labelOf(e)}</span>
+                    <span className="drawer-frag-label">{labelOf(e)}{e.label ? ' — ' + e.label : ''}</span>
                     <div className="drawer-frag-actions">
                       {e.audioUrl && <audio controls src={e.audioUrl} style={{ height: 26 }} />}
                       <button className="btn btn-ghost btn-xs" onClick={() => { if (window.confirm('Remove this ' + labelOf(e).toLowerCase() + '?')) onDeleteEdge(e.id); }}>Remove</button>

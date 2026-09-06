@@ -66,13 +66,32 @@ export default function GraphPane({
   // by animating the actual edge (marching-ants dash) between whatever's
   // Playing and its Next candidates, on top of the tier coloring that
   // already marks what's connected to what. One line, animated, simple.
-  const rfEdges = useMemo(() => transitionEdges.map(e => ({
-    id: e.id, source: e.l, target: e.r, type: 'default',
-    animated: e._tier === 'next',
-    style: { stroke: EDGE_COLOR[e._tier], strokeWidth: EDGE_WIDTH[e._tier] },
-    markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLOR[e._tier], width: 10, height: 10 },
-    zIndex: e._tier === 'base' ? 0 : e._tier === 'later' ? 1 : 2,
-  })), [transitionEdges]);
+  //
+  // Two songs can have more than one produced transition between them
+  // (see PerformPage's findEdges) — left as-is, duplicates would render as
+  // one fully-overlapping line. Fan them out by bezier curvature instead,
+  // spread evenly around the default 0.25 so a single edge between a pair
+  // still renders exactly as it always has.
+  const rfEdges = useMemo(() => {
+    const groups = new Map();
+    transitionEdges.forEach(e => {
+      const key = e.l + '->' + e.r;
+      (groups.get(key) || groups.set(key, []).get(key)).push(e);
+    });
+    return transitionEdges.map(e => {
+      const group = groups.get(e.l + '->' + e.r);
+      const idx = group.indexOf(e);
+      const curvature = group.length > 1 ? 0.25 + (idx - (group.length - 1) / 2) * 0.5 : 0.25;
+      return {
+        id: e.id, source: e.l, target: e.r, type: 'default',
+        animated: e._tier === 'next',
+        style: { stroke: EDGE_COLOR[e._tier], strokeWidth: EDGE_WIDTH[e._tier] },
+        markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLOR[e._tier], width: 10, height: 10 },
+        zIndex: e._tier === 'base' ? 0 : e._tier === 'later' ? 1 : 2,
+        pathOptions: { curvature },
+      };
+    });
+  }, [transitionEdges]);
 
   const onNodeDragStop = useCallback((_, node) => {
     if (node.id === END) return;

@@ -10,8 +10,8 @@ const STORAGE_KEY = 'djflow:v3';
 
 // ---------------------------------------------------------------------------
 // Real app state starts empty — no demo/sample data is ever loaded into the app.
-// These sample* functions exist purely so the pure-logic unit tests have some
-// realistic data to exercise; nothing in the app itself calls them.
+// These sample* functions exist purely so core.test.js (run via `npm test`)
+// has some realistic data to exercise; nothing in the app itself calls them.
 // ---------------------------------------------------------------------------
 export function sampleSongsForTests() {
   return {
