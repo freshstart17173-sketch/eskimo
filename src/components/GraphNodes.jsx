@@ -1,7 +1,38 @@
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { fmtTime, LEFT_SOCKET_TYPES, RIGHT_SOCKET_TYPES } from '../core.js';
+import { engine } from '../audioEngine.js';
 import { Icon, ICONS, AlbumArt } from './shared.jsx';
+
+// A real spectrum reading off the master bus (engine.getLevels), not a
+// canned CSS bounce — reads as a DAW-style live meter instead of always
+// doing the same dance whether or not anything's actually sounding. Bars
+// are updated by directly setting each span's inline `style.height` every
+// animation frame (a ref per bar, no React state) — going through
+// `setState`/re-render at ~60fps would be needless work for a value that
+// only ever affects five small inline styles.
+function LiveWaveform() {
+  const barRefs = useRef([]);
+  useEffect(() => {
+    let raf;
+    function tick() {
+      const levels = engine.getLevels(5);
+      barRefs.current.forEach((el, i) => {
+        if (!el) return;
+        const pct = levels ? Math.round(15 + levels[i] * 85) : 15;
+        el.style.height = pct + '%';
+      });
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div className="node-waveform">
+      {[0, 1, 2, 3, 4].map((i) => <span key={i} ref={(el) => { barRefs.current[i] = el; }} />)}
+    </div>
+  );
+}
 
 // The once-a-second elapsed clock reaches the playing node through context
 // instead of through React Flow's own node `data` — seeGraphPane.jsx's
@@ -22,7 +53,7 @@ export const NowPlayingContext = createContext({ nowPlayingId: null, elapsed: 0,
 // context instead means a hover or a keystroke only re-renders the specific
 // SongNode components that care, as an ordinary React re-render of their own
 // DOM — it never touches React Flow's node graph at all.
-export const HoveredNodeContext = createContext({ hoveredId: null });
+export const HoveredNodeContext = createContext({ hoveredId: null, laterCandidateIds: null });
 export const SearchDimContext = createContext({ searchActive: false, matchIds: null });
 
 // Fixed, per-type socket colors — Blender-node-style (a Geometry socket is
@@ -188,15 +219,20 @@ function SocketDropdown({ typeLabel, options, selectedEdgeId, elapsed, onSelectV
 // selected ambiguity).
 export function SongNode({ data }) {
   const {
-    song, state, inCount, outCount, onEnter, onLeave, playing, onSelect,
+    song, state: baseState, inCount, outCount, onEnter, onLeave, playing, onSelect,
     leftAvailable, rightAvailable, leftActive, rightActive, leftEdgeId, rightEdgeId,
     leftOptions, rightOptions, rightCueSeconds, onToggleSocket, onSelectVariant,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
-  const { hoveredId } = useContext(HoveredNodeContext);
+  const { hoveredId, laterCandidateIds } = useContext(HoveredNodeContext);
   const { searchActive, matchIds } = useContext(SearchDimContext);
   const hovered = hoveredId === song.id;
   const dimmed = searchActive && matchIds && !matchIds.has(song.id);
+  // The "later" hover-preview highlight is layered on here, off context,
+  // rather than folded into `baseState` upstream — see the comment on
+  // `stateFor` in PerformPage.jsx for why that dependency has to stay out
+  // of the node-rebuild effect entirely.
+  const state = baseState || (laterCandidateIds && laterCandidateIds.has(song.id) ? 'later' : null);
   const position = (playing && nowPlaying.nowPlayingId === song.id) ? nowPlaying : null;
   const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
   const onToggle = (side, type) => onToggleSocket(song.id, side, type);
@@ -222,7 +258,7 @@ export function SongNode({ data }) {
       </div>
       {playing && (
         <div className="node-playing-row">
-          <div className="node-waveform"><span /><span /><span /><span /><span /></div>
+          <LiveWaveform />
           {position && <div className="node-position mono-num">{fmtTime(position.elapsed)} / {fmtTime(position.duration)}</div>}
         </div>
       )}
@@ -283,10 +319,14 @@ export function StartNode({ data }) {
   return (
     <div className="end-node start-node">
       <div className="node-socket-row node-socket-row-right">
-        <Handle type="source" position={Position.Right} className="node-socket node-socket-none node-socket-available" isConnectable={false} />
+        <Handle
+          type="source" position={Position.Right} id="start-out"
+          className="node-socket node-socket-none node-socket-available node-socket-draggable"
+          isConnectable
+        />
       </div>
       <div className="end-node-title"><Icon path={<polygon points="6,4 20,12 6,20" />} filled size={11} /> Start Set</div>
-      <div className="end-node-hint">{hasStarted ? 'already playing' : 'pick any song to begin'}</div>
+      <div className="end-node-hint">{hasStarted ? 'already playing — drag to a song to (re)start there' : 'drag to a song’s Intro/None to begin, or click any song'}</div>
     </div>
   );
 }

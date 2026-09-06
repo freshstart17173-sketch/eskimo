@@ -74,14 +74,12 @@ export default function UploadSongPage({ onAddSong, onViewSong, existingCount })
           {analyzing && (
             <div className="hint-text analyzing-hint">
               <span className="spinner" />
-              Analyzing duration, BPM, key…
+              Reading duration…
             </div>
           )}
           {!analyzing && analyzed && (
             <div className="detected-summary">
-              Detected {Math.round(analyzed.durationSec)}s
-              {analyzed.bpm != null ? `, ${Math.round(analyzed.bpm)} BPM` : ''}
-              {analyzed.key ? `, ${analyzed.key}` : ''} — edit BPM/Key above if it's off.
+              Detected {Math.round(analyzed.durationSec)}s — BPM/Key aren't auto-detected, type them in above.
             </div>
           )}
         </Field>

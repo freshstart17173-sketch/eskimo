@@ -144,14 +144,16 @@ export function estimateKey(chroma) {
   return best;
 }
 
-// Decodes the file once and derives everything from that single buffer —
-// durationSec comes straight from the decoded buffer (exact, not guessed),
-// bpm/key are null when the signal is too short or too quiet to trust.
+// Decodes the file once and derives what's actually reliable from that
+// single buffer — durationSec comes straight off the decoded buffer (exact,
+// not guessed). BPM/key detection (estimateBpm/estimateKey above) is
+// disabled for now: it was confidently returning wrong answers often enough
+// (reported directly — a plain sine-wave test tone came back "140 BPM, A
+// maj") to be worse than no guess at all, since a wrong prefilled value
+// reads as confident and is easy to miss editing over. Left in place rather
+// than deleted in case it's worth revisiting (a real onset/chroma approach
+// isn't a bad idea, just not trustworthy yet as shipped) — just not called.
 export async function analyzeAudio(file) {
   const buffer = await decodeFile(file);
-  const mono = toMono(buffer);
-  const bpm = estimateBpm(mono, buffer.sampleRate);
-  const chroma = computeChroma(mono, buffer.sampleRate);
-  const key = estimateKey(chroma);
-  return { durationSec: buffer.duration, bpm, key };
+  return { durationSec: buffer.duration, bpm: null, key: null };
 }

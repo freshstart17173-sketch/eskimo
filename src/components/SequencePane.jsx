@@ -144,7 +144,7 @@ export default function SequencePane({
   mixingIntoSong, crossfadePct,
   nextRows, laterRows, setHoveredId,
   startPickId, onSetStartPick,
-  onTogglePlaying, onResumeSet, onStartSet, onSetNextMode,
+  onTogglePlaying, onResumeSet, onPlayAgain, onStartSet, onSetNextMode,
   onCommitRow, onSkipNext, onRequestEndSet, onSeek,
 }) {
   const [startStarting, setStartStarting] = useState('cut');
@@ -247,8 +247,11 @@ export default function SequencePane({
 
         {session.setEnded && (
           <div className="success-note">
-            <span>Set ended.</span>
-            <button className="btn btn-primary btn-sm" onClick={onResumeSet}>Start a new set</button>
+            <span>Set ended{nowSong ? ` — ${nowSong.title} had nowhere built to go next` : ''}.</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="btn btn-primary btn-sm" onClick={onPlayAgain}>Play again</button>
+              <button className="btn btn-ghost btn-sm" onClick={onResumeSet}>Pick another</button>
+            </div>
           </div>
         )}
 

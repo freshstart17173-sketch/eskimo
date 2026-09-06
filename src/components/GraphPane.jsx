@@ -138,7 +138,7 @@ export default function GraphPane({
   songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId,
   onConnect, isValidConnection, onDisconnectSong,
   stateFor, ioById,
-  hoveredId, setHoveredId, matchIds, searchActive,
+  hoveredId, setHoveredId, matchIds, searchActive, laterCandidateIds,
   onDragSongPosition, endQueued, hasStarted, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
 }) {
@@ -313,7 +313,11 @@ export default function GraphPane({
     () => ({ nowPlayingId, elapsed: nowElapsedSec, duration: nowDurationSec }),
     [nowPlayingId, nowElapsedSec, nowDurationSec]
   );
-  const hoveredNodeValue = useMemo(() => ({ hoveredId }), [hoveredId]);
+  // laterCandidateIds rides along in the same context as hoveredId (it's
+  // itself hover-derived — see the long comment on `stateFor` in
+  // PerformPage.jsx for why this must reach SongNode this way and never
+  // through the node-rebuild effect/`data`).
+  const hoveredNodeValue = useMemo(() => ({ hoveredId, laterCandidateIds }), [hoveredId, laterCandidateIds]);
   const searchDimValue = useMemo(() => ({ searchActive, matchIds }), [searchActive, matchIds]);
 
   const [hoveredEdgeId, setHoveredEdgeId] = useState(null);

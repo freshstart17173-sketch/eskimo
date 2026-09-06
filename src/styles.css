@@ -548,7 +548,20 @@ a { color: var(--accent); }
 .graph-pane .react-flow__attribution { display: none; }
 .graph-pane .react-flow__edge-path { stroke-linecap: round; }
 .graph-pane .react-flow__handle { opacity: 0; pointer-events: none; }
-.graph-pane .react-flow__node { cursor: pointer; }
+/* `!important`, not just this selector, is load-bearing here: React Flow's
+   own base.css sets `.react-flow__node.draggable { cursor: grab; }`, which
+   has the exact same specificity as a plain `.graph-pane .react-flow__node`
+   override (two class selectors each) — a tie the cascade breaks by
+   whichever stylesheet happens to be inserted into <head> later, which
+   isn't guaranteed to stay the same relative order across a reload/HMR
+   update. That's what made the cursor visibly flip between the pointer and
+   the grab hand while just sitting still over a node — not a real state
+   change, a specificity coin-flip. `!important` makes this rule win
+   outright regardless of source order. */
+.graph-pane .react-flow__node { cursor: pointer !important; }
+/* Actually mid-drag still gets the grabbing hand — same `!important`
+   trick, just for the one state that should look different. */
+.graph-pane .react-flow__node.dragging { cursor: grabbing !important; }
 
 /* Typed left/right sockets (the playlist editor — see TODO.md), laid out
    Blender-node-style: real labeled rows in normal document flow, inputs
@@ -751,14 +764,16 @@ a { color: var(--accent); }
    one is actually live" signal instead of a static badge */
 .node-playing-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
 .node-position { font-size: 9.5px; color: rgba(252, 252, 252, .7); flex: none; }
+/* Heights are set directly (inline, per-frame) off the real Web Audio
+   analyser — see engine.getLevels in audioEngine.js and LiveWaveform in
+   GraphNodes.jsx — not a CSS keyframe loop, so this genuinely tracks
+   whatever's sounding rather than just bouncing on its own rhythm. A
+   `transition` (not an `animation`) smooths between the ~60fps updates
+   without fighting inline-style writes the way an active CSS animation
+   would (an animation targeting the same property always wins over an
+   inline style, which would make JS-driven heights silently do nothing). */
 .node-waveform { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
-.node-waveform span { width: 2.5px; background: var(--accent); border-radius: 1px; animation: waveBounce 1.1s ease-in-out infinite; }
-.node-waveform span:nth-child(1) { height: 40%; animation-delay: -0.9s; }
-.node-waveform span:nth-child(2) { height: 90%; animation-delay: -0.6s; }
-.node-waveform span:nth-child(3) { height: 60%; animation-delay: -1.1s; }
-.node-waveform span:nth-child(4) { height: 100%; animation-delay: -0.3s; }
-.node-waveform span:nth-child(5) { height: 50%; animation-delay: -0.15s; }
-@keyframes waveBounce { 0%, 100% { height: 25%; } 50% { height: 100%; } }
+.node-waveform span { width: 2.5px; background: var(--accent); border-radius: 1px; height: 15%; transition: height .08s linear; }
 
 .end-node {
   width: 132px; border-radius: var(--radius); padding: 9px;

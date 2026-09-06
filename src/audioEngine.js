@@ -29,6 +29,8 @@ class AudioEngine {
   constructor() {
     this.ctx = null;
     this.master = null;
+    this.analyser = null;
+    this._freqData = null;
     this._current = null; // { source, gain, buffer, kind: 'main'|'clip', songId?, startCtxTime, offsetSec, resolve? }
     this._playToken = 0;
   }
@@ -37,9 +39,37 @@ class AudioEngine {
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this.master = this.ctx.createGain();
-      this.master.connect(this.ctx.destination);
+      // A tap on the master bus for the Playing node's live waveform — an
+      // AnalyserNode just observes whatever passes through it, so wiring it
+      // inline between master and the destination doesn't change what's
+      // actually heard.
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 128;
+      this.analyser.smoothingTimeConstant = 0.75;
+      this._freqData = new Uint8Array(this.analyser.frequencyBinCount);
+      this.master.connect(this.analyser);
+      this.analyser.connect(this.ctx.destination);
     }
     return this.ctx;
+  }
+
+  // Real-time level per band, 0..1 — `bandCount` small bars reading off the
+  // low/mid frequency range (music's energy lives there; the top end of an
+  // FFT is mostly silence and would just read as bars that never move).
+  // Returns null before any audio has ever played (no AudioContext yet).
+  getLevels(bandCount) {
+    if (!this.analyser) return null;
+    this.analyser.getByteFrequencyData(this._freqData);
+    const usableBins = Math.floor(this._freqData.length * 0.5);
+    const perBand = Math.max(1, Math.floor(usableBins / bandCount));
+    const levels = [];
+    for (let i = 0; i < bandCount; i++) {
+      let sum = 0, count = 0;
+      const start = i * perBand, end = Math.min(usableBins, start + perBand);
+      for (let j = start; j < end; j++) { sum += this._freqData[j]; count++; }
+      levels.push(count ? sum / count / 255 : 0);
+    }
+    return levels;
   }
 
   // `url` may be a real http(s) URL (the Cloudflare-worker-configured path)

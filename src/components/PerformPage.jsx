@@ -171,12 +171,27 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setEndSetModalOpen(false);
   }
 
-  // A click on a graph node (not a socket, not a drag) selects that song in
-  // the "Start the set" card so it shows the Cut/Intro choice and a "Start
-  // playing" button — before this, the only way to start with a specific
-  // song was to find it again through the search box, even though it was
-  // already right there on the canvas you just clicked.
-  const selectSong = useCallback((id) => { if (!hasStarted) setStartPickId(id); }, [hasStarted]);
+  // A click on a graph node (not a socket, not a drag): before a set has
+  // started, this just plays that song immediately — no extra step through
+  // the search box or a Cut/Intro picker first, matching direct request
+  // ("click on a node and then just play from there"); it auto-picks Intro
+  // when the song has one produced, Cut otherwise, same as any other cold
+  // start would default to. Once a set IS running, a click instead commits
+  // that song as the very next hop right now (a real transition when one's
+  // built between Now Playing and it, otherwise a cut/outro) — explicit and
+  // immediate, not "hover it and hope it shows up as a Next candidate."
+  const selectSong = useCallback((id) => {
+    if (!hasStarted) {
+      const introEdge = introEdgeFor(visibleEdges, id);
+      startSet(id, introEdge ? 'intro' : 'cut');
+      return;
+    }
+    if (id === session.nowPlayingId || usedIds.has(id)) return;
+    const transitionEdge = fromId ? visibleEdges.find(e => e.type === 'transition' && e.l === fromId && e.r === id) : null;
+    if (transitionEdge) commitTransition(transitionEdge.id, id);
+    else commitCutOrOutro(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasStarted, visibleEdges, session.nowPlayingId, usedIds, fromId]);
 
   function startSet(songId, starting) {
     const song = songs[songId];
@@ -204,6 +219,18 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       if (isPlaying) engine.resume(); else engine.pause();
       return { ...prev, isPlaying };
     });
+  }
+  // The "Set ended" screen's primary action — a dead end (nothing queued,
+  // nothing wired, autoplay off) ends the set the same way an explicit End
+  // Set does, but unlike an explicit end there's usually nothing wrong with
+  // the song itself, so replaying it shouldn't need re-picking it from
+  // scratch through the search box. `session.nowPlayingId`/`startMethod`
+  // are both still exactly what they were the moment it ended (nothing
+  // clears them until resumeSet does), so this just restarts the same song
+  // the same way it started.
+  function playAgain() {
+    if (!session.nowPlayingId) return;
+    startSet(session.nowPlayingId, session.startMethod || 'cut');
   }
   function resumeSet() {
     engine.stopAll();
@@ -262,14 +289,32 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // so an unmemoized array here would re-trigger that effect on every
   // render for no reason.
   const queueIds = useMemo(() => session.queue.map(q => q.id), [session.queue]);
+  // Deliberately does NOT depend on laterCandidateIds/hoveredId — this feeds
+  // GraphPane's node-rebuild effect (via the `stateFor` prop), and a real
+  // bug was traced here directly: laterCandidateIds is itself derived from
+  // `laterRows`, which depends on `hoveredId`, so `stateFor`'s own identity
+  // was silently changing on every hover despite looking like a stable
+  // useCallback — refiring that effect on every hover the exact same way
+  // the original hoveredId-jitter bug did, just one level indirected. That
+  // in turn triggers React Flow's internal registry resync often enough,
+  // and fast enough, to make the browser's own hit-testing genuinely
+  // unstable at the hovered pixel: confirmed directly — with this
+  // dependency in place, the same node's onMouseEnter/onMouseLeave fired
+  // over 20 times *each* in a single second while the pointer sat
+  // perfectly still, an actual feedback loop (enter → state change →
+  // resync → momentary hit-test miss → native mouseleave → state change →
+  // resync → hit lands again → native mouseenter → repeat), not merely a
+  // cosmetic flicker. The "later" hover-preview highlight this used to fold
+  // in here now reaches SongNode through context instead (see
+  // laterCandidateIds passed to GraphPane below) — same fix as the
+  // hoveredId/matchIds treatment before it.
   const stateFor = useCallback((id) => {
     if (id === session.nowPlayingId) return 'playing';
     if (queueIds[0] === id) return 'next';
     if (queueIds.slice(1).includes(id)) return 'later';
     if (nextCandidateIds.has(id)) return 'next';
-    if (laterCandidateIds.has(id)) return 'later';
     return null;
-  }, [session.nowPlayingId, queueIds, nextCandidateIds, laterCandidateIds]);
+  }, [session.nowPlayingId, queueIds, nextCandidateIds]);
 
   // ---------------- playlist-editor sockets (see TODO.md) ----------------
   // One entry per song. Every song shows the same fixed three rows per
@@ -367,8 +412,13 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // wired. Without this, every 1-second playback tick — which produces a
   // brand new `session` object and so a brand new inline function here —
   // would make the disconnect button flicker during an actual live set.
+  // A drag from the Start Set node is a request to begin the set at
+  // whichever song's socket it's dropped on — Intro or None only (there's
+  // no "Start Transition", the same way there's no such thing as Outro on
+  // the left side of a song).
   const isValidConnection = useCallback((conn) => {
     if (conn.source === conn.target) return false;
+    if (conn.source === START) return conn.targetHandle === 'left-none' || conn.targetHandle === 'left-intro';
     const sourceType = conn.sourceHandle.slice('right-'.length);
     const targetType = conn.targetHandle.slice('left-'.length);
     if (sourceType === 'transition' || targetType === 'transition') return sourceType === 'transition' && targetType === 'transition';
@@ -383,6 +433,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // through. Nothing here ever guesses at which *song* to connect: that
   // part still only ever comes from the drag itself.
   const handleConnect = useCallback((conn) => {
+    if (conn.source === START) { startSet(conn.target, conn.targetHandle === 'left-intro' ? 'intro' : 'cut'); return; }
     const sourceType = conn.sourceHandle.slice('right-'.length);
     const targetType = conn.targetHandle.slice('left-'.length);
     if (sourceType === 'transition') {
@@ -394,7 +445,8 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     const endEdgeId = sourceType === 'outro' ? ((outroEdgeFor(visibleEdges, conn.source)) || {}).id || null : null;
     const startEdgeId = targetType === 'intro' ? ((introEdgeFor(visibleEdges, conn.target)) || {}).id || null : null;
     commitWire(conn.source, conn.target, sourceType, endEdgeId, targetType, startEdgeId);
-  }, [visibleEdges, commitWire]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleEdges, commitWire, startSet]);
 
   // A socket's dropdown (only rendered when 2+ candidates exist — see
   // socketDataById) swaps which produced edge fills an already-active
@@ -586,7 +638,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             socketDataById={socketDataById} onToggleSocket={toggleSocket} onSelectVariant={selectVariant} mixingEdgeId={mixingEdgeId}
             onConnect={handleConnect} isValidConnection={isValidConnection} onDisconnectSong={disconnectSong}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
-            matchIds={matchIds} searchActive={searchActive}
+            matchIds={matchIds} searchActive={searchActive} laterCandidateIds={laterCandidateIds}
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
             endQueued={queueIds.includes(END)} hasStarted={hasStarted}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
@@ -600,7 +652,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           mixingIntoSong={mixingIntoSong} crossfadePct={crossfadePct}
           nextRows={nextRows} laterRows={laterRows} setHoveredId={setHoveredId}
           startPickId={startPickId} onSetStartPick={setStartPickId}
-          onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onStartSet={startSet} onSetNextMode={setNextMode}
+          onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onPlayAgain={playAgain} onStartSet={startSet} onSetNextMode={setNextMode}
           onCommitRow={commitRow} onSkipNext={skipNow} onRequestEndSet={requestEndSet}
           onSeek={seekPlayhead}
         />
