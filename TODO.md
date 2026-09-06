@@ -150,55 +150,112 @@ converts directly into the actual detected in/out timecodes (no longer
 the old deterministic placeholder matcher only when there's no reference
 audio anywhere yet to correlate against (and says so in the UI).
 
-## Your tasks (only you can do these — accounts, keys, hosting)
+## Your tasks — step by step, to get this fully working (only you can do these)
 
-1. **GitHub Pages**: Settings → Pages → Source: "GitHub Actions". The
-   updated workflow builds with `npm ci && npm run build` and deploys
-   `dist/` — next push to `main` gets you a live URL, no backend required.
-2. **Supabase — already live.** I found a Supabase project named "eskimo"
-   already on your account and used it: applied `supabase/schema.sql`
-   (one RLS-scoped `library` table) via the Supabase MCP connection, and
-   `src/config.js` already has that project's real URL + anon publishable
-   key. The one thing I *can't* do through that connection is flip the
-   Auth provider toggle — **Authentication → Providers → enable Anonymous
-   Sign-Ins** on that project (there's no login screen yet, so anonymous
-   auth is what gives each browser a stable identity to sync under). Sync
-   silently no-ops until that's on.
-3. **Cloudflare R2** (for audio storage — this is what unlocks real
-   detection + reference downloads for everyone, not just locally):
-   - Create a bucket: `npx wrangler r2 bucket create eskimo-studio-audio`
-     (name matches `worker/wrangler.toml`).
-   - Bucket → Settings → **Public access** → turn on (the free `r2.dev`
-     subdomain is fine to start) → put that URL into `wrangler.toml`'s
-     `PUBLIC_BUCKET_URL`.
-   - **CORS** — you asked about this, and yes, it's needed twice, for two
-     different things:
-     - *The bucket itself* needs a CORS policy so the browser can `fetch()`
-       reference audio directly (for detection, and for the download
-       button) from a different origin (your Pages site) than the bucket's
-       own. In the R2 bucket's Settings → CORS Policy, add:
-       ```json
-       [
-         {
-           "AllowedOrigins": ["*"],
-           "AllowedMethods": ["GET"],
-           "AllowedHeaders": ["*"],
-           "MaxAgeSeconds": 3600
-         }
-       ]
-       ```
-       (Tighten `AllowedOrigins` to your actual `https://<you>.github.io`
-       once you have that URL.)
-     - *The worker* (`worker/upload-worker.js`) already sets its own CORS
-       response headers for the `/upload` endpoint — that's a separate
-       concern from the bucket's CORS above (one governs uploads through
-       the worker, the other governs direct reads from the bucket).
-   - Deploy: `cd worker && npx wrangler login && npx wrangler deploy` →
-     copy the `*.workers.dev` URL into `src/config.js`'s
-     `UPLOAD_WORKER_URL` (or a repo secret, see the workflow file).
-4. Tell me once the above is done (or hand me anything you'd rather I
-   didn't do myself) and I'll verify sync + upload + detection end-to-end
-   against the real thing instead of just the local build.
+The app already **works right now with zero setup**: everything runs
+locally in `localStorage`, no account or config needed, and every feature
+in this file (including real audio analysis and real playback) works the
+moment you upload real audio files — none of the steps below are required
+just to use the app on one browser/one device. What they unlock:
+
+- **Step 1 (GitHub Pages)** — a public URL, so it's not just `localhost`.
+- **Step 2 (Supabase)** — your library syncs across your own devices/browsers.
+- **Step 3 (Cloudflare R2 + the worker)** — uploaded audio is actually
+  stored somewhere real (not just on the one browser you dropped it in),
+  which is also what turns on real audio detection in Add Audio and real
+  BPM/key/duration analysis and real playback in Upload Song / Perform for
+  everyone who opens your synced library, not just you, locally.
+
+None of the three steps depend on each other — do them in any order, or
+skip whichever you don't need. Current status of each, as of this pass:
+
+### 1. GitHub Pages — get a public URL
+**Status: not yet confirmed done.**
+1. In the repo on GitHub: **Settings → Pages → Source → "GitHub Actions"**.
+2. Push to `main` (or re-run the "Deploy to GitHub Pages" workflow from the
+   Actions tab). `.github/workflows/pages.yml` already exists and does
+   `npm ci && npm run build`, deploying `dist/` — nothing else to write.
+3. The workflow's Actions run will show the live URL once it finishes
+   (also visible under Settings → Pages afterward).
+
+### 2. Supabase — sync your library across devices
+**Status: mostly done — one toggle left.** A Supabase project named
+"eskimo" is already live and wired up: `supabase/schema.sql` (one
+RLS-scoped `library` table) is applied, and `src/config.js` already has
+that project's real URL and anon publishable key — nothing to create or
+copy here.
+1. Open the **eskimo** project at supabase.com/dashboard.
+2. Go to **Authentication → Providers**.
+3. Enable **Anonymous Sign-Ins** (there's no login screen in this app —
+   anonymous auth is what gives each browser a stable identity to sync
+   under).
+4. That's it — no further config. Sync silently does nothing (fails quiet,
+   logs a console warning) until this one toggle is on; every session run
+   in this pass still shows that same warning, so this is very likely
+   still off.
+
+### 3. Cloudflare R2 + the upload worker — real audio storage
+**Status: not started.** `UPLOAD_WORKER_URL` in `src/config.js` is still
+blank and `worker/wrangler.toml`'s `PUBLIC_BUCKET_URL` is still the
+placeholder — until this step is done, uploaded audio only ever becomes a
+local-to-your-browser file (metadata is saved, but there's no real
+`audioUrl`, so Add Audio detection, BPM/key/duration analysis, and real
+playback all silently fall back to their no-audio behavior for anyone else
+who opens the synced library).
+1. **Create the bucket** (needs a free Cloudflare account + `wrangler`,
+   installed automatically by `npx`):
+   ```
+   npx wrangler login
+   npx wrangler r2 bucket create eskimo-studio-audio
+   ```
+   (the name already matches `worker/wrangler.toml` — no edit needed for
+   the bucket name itself).
+2. **Turn on public access**: Cloudflare dashboard → R2 → your bucket →
+   Settings → **Public access** → enable it (the free `r2.dev` subdomain
+   is fine to start; a custom domain works too). Copy that public URL.
+3. **Paste that URL into `worker/wrangler.toml`**, replacing the
+   `PUBLIC_BUCKET_URL` placeholder under `[vars]`.
+4. **Add CORS to the bucket itself** (a separate concern from the worker's
+   own CORS below — this is what lets the browser `fetch()` reference
+   audio directly from R2 for detection/analysis/playback and the download
+   button). Bucket → Settings → **CORS Policy** → add:
+   ```json
+   [
+     {
+       "AllowedOrigins": ["*"],
+       "AllowedMethods": ["GET"],
+       "AllowedHeaders": ["*"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+   (Tighten `AllowedOrigins` to your actual `https://<you>.github.io` once
+   step 1 gives you that URL — `"*"` is fine to get started.)
+5. **Deploy the worker** (this is what the app's Upload Song / Add Audio
+   pages actually POST files to — it already sets its own CORS headers for
+   its `/upload` endpoint, so there's nothing to add there beyond step 4):
+   ```
+   cd worker
+   npx wrangler deploy
+   ```
+   This prints a `*.workers.dev` URL — copy it.
+6. **Paste that worker URL into `src/config.js`'s `UPLOAD_WORKER_URL`**
+   (or set it as a `UPLOAD_WORKER_URL` repo secret instead — the Pages
+   workflow already knows to read `SUPABASE_URL` / `SUPABASE_ANON_KEY` /
+   `UPLOAD_WORKER_URL` secrets and patch them into the build at deploy
+   time, so you don't have to commit the worker URL directly if you'd
+   rather not).
+7. Commit/push (if you edited `src/config.js` directly rather than using a
+   secret) — the next Pages deploy will pick it up.
+
+### 4. When you're done
+Tell me which of the three you completed (or which you'd rather I do
+myself where I can — I can apply Supabase schema changes and read config
+through the MCP connection, but I can't click the Pages/Auth toggles or
+hold your Cloudflare login for you). Once any of these are live I'll
+verify that piece end-to-end against the real thing — sync, upload,
+detection, analysis, playback — rather than only against the local build
+the way everything's been verified so far.
 
 ## My tasks — Easy / Medium / Hard
 
