@@ -385,18 +385,25 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       spatial, mouse-driven graph canvas is a real design problem, not a
       quick fix — needs its own thought-through interaction model (e.g. a
       list-based fallback view), not just tab-index patches.
-- [ ] **Code-split the bundle.** React Flow + dagre + Supabase pushed the
-      single JS chunk to ~685KB — lazy-loading the Perform tab's graph
-      dependencies separately from Library/Upload/Settings would cut
-      initial load meaningfully for a page most sessions won't start on.
+- [x] ~~Code-split the bundle.~~ — done: all five pages are `React.lazy`
+      in `App.jsx` now, each downloading only once its tab opens.
+      `ReactFlowProvider` moved from `App.jsx` into `PerformPage.jsx`
+      itself (wrapping a new inner component) so `@xyflow/react` doesn't
+      leak into the main chunk via App's own imports. Main chunk: 703KB →
+      374KB (210KB → 107KB gzip); Perform's own chunk (React Flow + dagre
+      + Fuse.js) is 307KB (98KB gzip), Library/Upload/Settings/Add Audio
+      are 2-8KB each. Supabase (~part of the main chunk) is left as-is —
+      it's read synchronously at boot (`isSyncConfigured`) for the
+      always-attempted sync, so deferring it would need a larger, riskier
+      restructure for a smaller win than Perform's split. Verified by
+      building (chunk sizes above) and navigating all five tabs with
+      Playwright — no runtime errors, every page still renders.
 - [x] ~~Autoplay / infinite set mode~~ — done round 2: `pickAutoplayNext`
       (random among built transitions, falls back to a random cut unless
       Transition-only is on) plus `graphEstimate.js`'s SCC-based closed-loop
       detection, both wired into the Sequence pane. Weighting the random
       pick against recently-repeated songs is still open if the plain
       random policy feels too repetitive in practice.
-- [ ] **"Flow" visual pass** — particles/light pulses along built edges for
-      an idle ambient view and a shareable graph "signature" export.
 
 ## Desktop packaging
 

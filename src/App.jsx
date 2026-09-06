@@ -1,12 +1,16 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ReactFlowProvider } from '@xyflow/react';
+import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Store, freshState, emptySession, removeSongCascade, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, advanceSession, transitionTriggerElapsed } from './core.js';
 import Sidebar from './components/Sidebar.jsx';
-import PerformPage from './components/PerformPage.jsx';
-import LibraryPage from './components/Library.jsx';
-import UploadSongPage from './components/UploadSong.jsx';
-import AddAudioPage from './components/AddAudio.jsx';
-import SettingsPage from './components/Settings.jsx';
+
+// Lazy — each page's own module (and, for Perform, @xyflow/react + dagre +
+// Fuse.js on top) only downloads once its tab is actually opened, instead
+// of every page's code paying for Perform's graph-canvas dependencies on
+// first load regardless of which tab loads first.
+const PerformPage = lazy(() => import('./components/PerformPage.jsx'));
+const LibraryPage = lazy(() => import('./components/Library.jsx'));
+const UploadSongPage = lazy(() => import('./components/UploadSong.jsx'));
+const AddAudioPage = lazy(() => import('./components/AddAudio.jsx'));
+const SettingsPage = lazy(() => import('./components/Settings.jsx'));
 
 // Merge onto a fresh default rather than trusting the saved shape wholesale —
 // older saved sessions predate fields like autoplay/autoHistory, and a
@@ -199,43 +203,43 @@ export default function App() {
             <button className="btn btn-ghost btn-sm" onClick={clearExample}>Start your own</button>
           </div>
         )}
-        {tab === 'perform' && (
-          <ReactFlowProvider>
+        <Suspense fallback={<div className="page-loading" />}>
+          {tab === 'perform' && (
             <PerformPage
               songs={songs} setSongs={setSongs} edges={edges} session={session} setSession={setSession}
               venueName={venueName} goUpload={() => setTab('upload')} onLoadExample={loadExample}
             />
-          </ReactFlowProvider>
-        )}
-        {tab === 'library' && (
-          <LibraryPage songs={songs} edges={edges} goUpload={() => setTab('upload')}
-            onUpdateSong={updateSong} onDeleteSong={deleteSong} onDeleteEdge={deleteEdge}
-            onQueueSongs={queueSongsAsPlaylist} onLoadExample={loadExample}
-          />
-        )}
-        {tab === 'upload' && (
-          <UploadSongPage
-            onAddSong={addSong}
-            onViewSong={() => setTab('library')}
-            existingCount={songCount}
-          />
-        )}
-        {tab === 'addAudio' && (
-          <AddAudioPage
-            songs={songs}
-            onAddEdge={(edge) => setEdges(prev => [...prev, edge])}
-            onViewSong={() => setTab('library')}
-          />
-        )}
-        {tab === 'settings' && (
-          <SettingsPage
-            venueName={venueName} setVenueName={setVenueName}
-            songs={songs} edges={edges} session={session}
-            onClearAll={clearAllData}
-            onRestore={(data) => { setSongs(data.songs); setEdges(data.edges); setSession(data.session); setVenueName(data.venueName); }}
-            onSetAutoplay={setAutoplay} onSetTransitionOnly={setTransitionOnly}
-          />
-        )}
+          )}
+          {tab === 'library' && (
+            <LibraryPage songs={songs} edges={edges} goUpload={() => setTab('upload')}
+              onUpdateSong={updateSong} onDeleteSong={deleteSong} onDeleteEdge={deleteEdge}
+              onQueueSongs={queueSongsAsPlaylist} onLoadExample={loadExample}
+            />
+          )}
+          {tab === 'upload' && (
+            <UploadSongPage
+              onAddSong={addSong}
+              onViewSong={() => setTab('library')}
+              existingCount={songCount}
+            />
+          )}
+          {tab === 'addAudio' && (
+            <AddAudioPage
+              songs={songs}
+              onAddEdge={(edge) => setEdges(prev => [...prev, edge])}
+              onViewSong={() => setTab('library')}
+            />
+          )}
+          {tab === 'settings' && (
+            <SettingsPage
+              venueName={venueName} setVenueName={setVenueName}
+              songs={songs} edges={edges} session={session}
+              onClearAll={clearAllData}
+              onRestore={(data) => { setSongs(data.songs); setEdges(data.edges); setSession(data.session); setVenueName(data.venueName); }}
+              onSetAutoplay={setAutoplay} onSetTransitionOnly={setTransitionOnly}
+            />
+          )}
+        </Suspense>
       </div>
 
       {undoToast && (

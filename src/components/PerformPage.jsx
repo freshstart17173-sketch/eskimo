@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { useReactFlow } from '@xyflow/react';
+import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
   END, getVisibleEdges, inOutCounts, queueTailId, advanceSession, removeQueueItem,
@@ -11,7 +11,18 @@ import SequencePane from './SequencePane.jsx';
 import QueueBar from './QueueBar.jsx';
 import { Icon, ICONS, ConfirmModal } from './shared.jsx';
 
-export default function PerformPage({ songs, setSongs, edges, session, setSession, venueName, goUpload, onLoadExample }) {
+// The Provider wrapper lives here (not App.jsx) so @xyflow/react — React
+// Flow, dagre's graph layout, Fuse.js search, this whole module — only
+// downloads once this page is actually opened (see App.jsx's React.lazy).
+export default function PerformPage(props) {
+  return (
+    <ReactFlowProvider>
+      <PerformPageInner {...props} />
+    </ReactFlowProvider>
+  );
+}
+
+function PerformPageInner({ songs, setSongs, edges, session, setSession, venueName, goUpload, onLoadExample }) {
   const rf = useReactFlow();
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
