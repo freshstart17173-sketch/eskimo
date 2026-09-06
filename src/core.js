@@ -65,7 +65,35 @@ export function emptySession() {
 // One direction of truth: a connection is always written from its source's
 // `nextSongId`/`endMode`/`endEdgeId`, and the destination's `startMode`/
 // `startEdgeId` are kept in sync by the same write, never set independently.
-export function emptyActivePlaylist() { return { id: null, name: '', nodes: {} }; }
+// `startSongId` is the one place Start Set differs from every other node:
+// it has no `endMode`/`nextSongId` of its own (it isn't a song, nothing
+// ever plays "from" it in the queue sense), so "which song is Start
+// currently wired to" needs its own pointer rather than reusing the
+// per-song wiring fields. The destination song's own `startMode`/
+// `startEdgeId` (already how Outro→Intro wiring works) still say *how* it
+// begins — this only says *which* song that is.
+export function emptyActivePlaylist() { return { id: null, name: '', nodes: {}, startSongId: null }; }
+
+// Wires Start Set to `songId` — v1 single-slot, same as every other socket:
+// dragging a new connection from Start silently replaces whichever song
+// was wired before. Writes the destination's startMode/startEdgeId exactly
+// like a normal Outro→Intro/None wire would, so the song's own left-side
+// socket shows the same "active" state regardless of which end (another
+// song's Outro, or Start itself) put it there.
+export function wireStart(playlist, songId, startMode, startEdgeId) {
+  const nodes = { ...playlist.nodes, [songId]: { ...playlistNode(playlist, songId), startMode, startEdgeId: startEdgeId || null } };
+  return { ...playlist, nodes, startSongId: songId };
+}
+// Disconnects Start Set, clearing the previously-wired song's left socket
+// back to None rather than leaving it claiming a start method that Start
+// no longer actually points at.
+export function unwireStart(playlist) {
+  if (!playlist.startSongId) return playlist;
+  const songId = playlist.startSongId;
+  const nodes = { ...playlist.nodes };
+  if (nodes[songId]) nodes[songId] = { ...nodes[songId], startMode: 'none', startEdgeId: null };
+  return { ...playlist, nodes, startSongId: null };
+}
 
 function playlistNode(playlist, songId) {
   return playlist.nodes[songId] || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null };
@@ -127,7 +155,8 @@ export function removeSongFromPlaylist(playlist, songId) {
     const node = playlist.nodes[id];
     nodes[id] = node.nextSongId === songId ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null } : node;
   }
-  return { ...playlist, nodes };
+  const startSongId = playlist.startSongId === songId ? null : playlist.startSongId;
+  return { ...playlist, nodes, startSongId };
 }
 
 // The tick loop's deterministic auto-continue: what activePlaylist says

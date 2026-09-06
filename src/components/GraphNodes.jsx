@@ -306,7 +306,11 @@ export function EndNode({ data }) {
   return (
     <div className={cls}>
       <div className="node-socket-row">
-        <Handle type="target" position={Position.Left} className="node-socket node-socket-none node-socket-available" isConnectable={false} />
+        <Handle
+          type="target" position={Position.Left} id="left-none"
+          className="node-socket node-socket-none node-socket-available node-socket-draggable"
+          isConnectable
+        />
       </div>
       <div className="end-node-title"><Icon path={<rect x="5" y="5" width="14" height="14" />} filled size={11} /> End Set</div>
       <div className="end-node-hint">{queued ? 'part of your plan' : 'not queued'}</div>
@@ -321,7 +325,7 @@ export function EndNode({ data }) {
 // meaning to invent here), so its hint just reflects whether one already
 // has.
 export function StartNode({ data }) {
-  const { hasStarted } = data;
+  const { wiredSongTitle } = data;
   return (
     <div className="end-node start-node">
       <div className="node-socket-row node-socket-row-right">
@@ -332,7 +336,7 @@ export function StartNode({ data }) {
         />
       </div>
       <div className="end-node-title"><Icon path={<polygon points="6,4 20,12 6,20" />} filled size={11} /> Start Set</div>
-      <div className="end-node-hint">{hasStarted ? 'already playing — drag to a song to (re)start there' : 'drag to a song’s Intro/None to begin, or click any song'}</div>
+      <div className="end-node-hint">{wiredSongTitle ? `wired to ${wiredSongTitle} — use the toolbar's Start set button` : 'drag to a song’s Intro/None to set the entry point'}</div>
     </div>
   );
 }

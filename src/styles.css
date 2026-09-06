@@ -551,6 +551,11 @@ a { color: var(--accent); }
   padding: 6px 12px; border-radius: var(--radius); background: #d32f2f; color: #fff;
 }
 .toolbar-end-set-btn:hover { filter: brightness(1.1); }
+.toolbar-start-set-btn {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+  padding: 6px 12px; border-radius: var(--radius); background: var(--good); color: #fff;
+}
+.toolbar-start-set-btn:hover { filter: brightness(1.1); }
 
 /* ---------------------------------------------------------------
    Graph canvas (React Flow) — themed to match the flat/paper design

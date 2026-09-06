@@ -4,7 +4,7 @@ import Fuse from 'fuse.js';
 import {
   END, START, getVisibleEdges, inOutCounts, queueTailId, removeQueueItem,
   transitionCandidates, cutCandidates, clamp, leftSocketAvailability, rightSocketAvailability,
-  unwireOutput, wireConnection, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
+  unwireOutput, wireConnection, wireStart, unwireStart, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
   introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime,
 } from '../core.js';
 import { engine, performAdvance } from '../audioEngine.js';
@@ -202,6 +202,16 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition',
     }));
   }
+  // The toolbar's "Start set" button — reads whatever's actually wired to
+  // the Start Set node on the graph (a real, persistent connection, not a
+  // one-shot trigger) and starts there. Mirrors "End set" being the one
+  // real trigger for the graph's other bookend.
+  function triggerStartSet() {
+    const startSongId = activePlaylist.startSongId;
+    if (!startSongId || !songs[startSongId]) return;
+    const node = activePlaylist.nodes[startSongId];
+    startSet(startSongId, node && node.startMode === 'intro' ? 'intro' : 'cut');
+  }
   // Dragging or clicking the playhead — `fraction` is 0-1 along the bar.
   // Restarts the real audio deck at the new offset when Now Playing has
   // one (engine.seekMain), and always updates the wall-clock `timeLeft`
@@ -395,6 +405,16 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setSession(prev => ({ ...prev, activePlaylist: wireConnection(prev.activePlaylist, source, target, endMode, endEdgeId, startMode, startEdgeId) }));
   }, [setSession]);
 
+  // Start Set's own wire — see wireStart (core.js) for why this needs a
+  // dedicated pointer instead of reusing endMode/nextSongId the way every
+  // other connection does (Start isn't a song; nothing plays "from" it).
+  const commitStartWire = useCallback((songId, startMode, startEdgeId) => {
+    setSession(prev => ({ ...prev, activePlaylist: wireStart(prev.activePlaylist, songId, startMode, startEdgeId) }));
+  }, [setSession]);
+  const disconnectStart = useCallback(() => {
+    setSession(prev => ({ ...prev, activePlaylist: unwireStart(prev.activePlaylist) }));
+  }, [setSession]);
+
   // Only a Transition output may ever meet a Transition input — everything
   // else (None/Outro on the left of the drag, None/Intro on the right)
   // freely mixes, since those four don't correspond to a specific produced
@@ -412,13 +432,20 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // wired. Without this, every 1-second playback tick — which produces a
   // brand new `session` object and so a brand new inline function here —
   // would make the disconnect button flicker during an actual live set.
-  // A drag from the Start Set node is a request to begin the set at
-  // whichever song's socket it's dropped on — Intro or None only (there's
-  // no "Start Transition", the same way there's no such thing as Outro on
-  // the left side of a song).
+  // A drag from the Start Set node marks whichever song it's dropped on as
+  // the set's entry point — Intro or None only (there's no "Start
+  // Transition", the same way there's no Outro on the left side of a
+  // song). A drag into the End Set node is the same idea in reverse: only
+  // a None/Outro *output* can end there, never a Transition (an active
+  // transition already has its own real destination song). Both wires
+  // persist on the graph exactly like a song-to-song connection — see
+  // commitStartWire below and the plain `commitWire` reuse for End, since
+  // END is just an ordinary target id as far as wireConnection is
+  // concerned.
   const isValidConnection = useCallback((conn) => {
     if (conn.source === conn.target) return false;
     if (conn.source === START) return conn.targetHandle === 'left-none' || conn.targetHandle === 'left-intro';
+    if (conn.target === END) return conn.sourceHandle === 'right-none' || conn.sourceHandle === 'right-outro';
     const sourceType = conn.sourceHandle.slice('right-'.length);
     const targetType = conn.targetHandle.slice('left-'.length);
     if (sourceType === 'transition' || targetType === 'transition') return sourceType === 'transition' && targetType === 'transition';
@@ -433,8 +460,18 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // through. Nothing here ever guesses at which *song* to connect: that
   // part still only ever comes from the drag itself.
   const handleConnect = useCallback((conn) => {
-    if (conn.source === START) { startSet(conn.target, conn.targetHandle === 'left-intro' ? 'intro' : 'cut'); return; }
+    if (conn.source === START) {
+      const startMode = conn.targetHandle === 'left-intro' ? 'intro' : 'none';
+      const startEdgeId = startMode === 'intro' ? ((introEdgeFor(visibleEdges, conn.target)) || {}).id || null : null;
+      commitStartWire(conn.target, startMode, startEdgeId);
+      return;
+    }
     const sourceType = conn.sourceHandle.slice('right-'.length);
+    if (conn.target === END) {
+      const endEdgeId = sourceType === 'outro' ? ((outroEdgeFor(visibleEdges, conn.source)) || {}).id || null : null;
+      commitWire(conn.source, END, sourceType, endEdgeId, 'none', null);
+      return;
+    }
     const targetType = conn.targetHandle.slice('left-'.length);
     if (sourceType === 'transition') {
       const candidates = transitionEdgesBetween(visibleEdges, conn.source, conn.target);
@@ -446,7 +483,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     const startEdgeId = targetType === 'intro' ? ((introEdgeFor(visibleEdges, conn.target)) || {}).id || null : null;
     commitWire(conn.source, conn.target, sourceType, endEdgeId, targetType, startEdgeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleEdges, commitWire, startSet]);
+  }, [visibleEdges, commitWire, commitStartWire]);
 
   // A socket's dropdown (only rendered when 2+ candidates exist — see
   // socketDataById) swaps which produced edge fills an already-active
@@ -624,6 +661,11 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <span><i className="swatch swatch-later" />later</span>
         </div>
 
+        {!hasStarted && activePlaylist.startSongId && songs[activePlaylist.startSongId] && (
+          <button className="toolbar-start-set-btn" onClick={triggerStartSet} data-tooltip={'Start playing from ' + songs[activePlaylist.startSongId].title}>
+            <Icon path={ICONS.play} filled size={12} /> Start set
+          </button>
+        )}
         {hasStarted && (
           <button className="toolbar-end-set-btn" onClick={requestEndSet} data-tooltip="Stop the set after this">
             <Icon path={ICONS.stop} filled size={12} /> End set
@@ -637,10 +679,11 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             songs={songs} positions={positions} transitionEdgesRaw={transitionEdgesRaw} activePlaylist={activePlaylist}
             socketDataById={socketDataById} onToggleSocket={toggleSocket} onSelectVariant={selectVariant} mixingEdgeId={mixingEdgeId}
             onConnect={handleConnect} isValidConnection={isValidConnection} onDisconnectSong={disconnectSong}
+            onDisconnectStart={disconnectStart}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive} laterCandidateIds={laterCandidateIds}
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
-            endQueued={queueIds.includes(END)} hasStarted={hasStarted}
+            endQueued={queueIds.includes(END)}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
           />
           <QueueBar songs={songs} nowPlayingId={session.nowPlayingId} queue={session.queue} autoHistory={session.autoHistory} onRemoveQueueItem={removeQueueFrom} onRemoveQueueItemOnly={removeQueueOne} />

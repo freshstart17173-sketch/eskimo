@@ -149,10 +149,10 @@ const edgeTypes = { fanned: FannedEdge, active: ActiveEdge };
 
 export default function GraphPane({
   songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId,
-  onConnect, isValidConnection, onDisconnectSong,
+  onConnect, isValidConnection, onDisconnectSong, onDisconnectStart,
   stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive, laterCandidateIds,
-  onDragSongPosition, endQueued, hasStarted, onSelectSong,
+  onDragSongPosition, endQueued, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
 }) {
   const { isDark } = useTheme();
@@ -199,9 +199,10 @@ export default function GraphPane({
   }
   function startNodeFor() {
     const pos = positions[START] || { x: -170, y: 20 };
+    const wiredSong = activePlaylist.startSongId ? songs[activePlaylist.startSongId] : null;
     return {
       id: START, type: 'start', position: pos, draggable: true,
-      data: { hasStarted },
+      data: { wiredSongTitle: wiredSong ? wiredSong.title : null },
       style: START_STYLE,
     };
   }
@@ -238,7 +239,7 @@ export default function GraphPane({
       return { ...updated, position: n.position };
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs, stateFor, ioById, socketDataById, endQueued, hasStarted, nowPlayingId, onSelectSong]);
+  }, [songs, stateFor, ioById, socketDataById, endQueued, activePlaylist.startSongId, nowPlayingId, onSelectSong]);
 
   // The one place `position` actually gets written from outside RF's own
   // drag handling: a real layout change (auto-arrange, or a song's stored
@@ -314,8 +315,20 @@ export default function GraphPane({
         });
       }
     });
+    if (activePlaylist.startSongId && songs[activePlaylist.startSongId]) {
+      const destNode = activePlaylist.nodes[activePlaylist.startSongId];
+      const startMode = (destNode && destNode.startMode) || 'none';
+      edgesOut.push({
+        id: 'link-start', source: START, target: activePlaylist.startSongId,
+        sourceHandle: 'start-out', targetHandle: 'left-' + startMode,
+        type: 'active',
+        data: { onDisconnect: onDisconnectStart },
+        style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
+        markerEnd: { type: MarkerType.ArrowClosed, color: lineColor.ink, width: 10, height: 10 },
+      });
+    }
     return edgesOut;
-  }, [transitionEdgesRaw, activePlaylist, lineColor, mixingEdgeId, onDisconnectSong]);
+  }, [transitionEdgesRaw, activePlaylist, songs, lineColor, mixingEdgeId, onDisconnectSong, onDisconnectStart]);
 
   const onNodeDragStop = useCallback((_, node) => {
     if (node.id === END || node.id === START) return;
