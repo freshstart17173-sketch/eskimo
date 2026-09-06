@@ -43,12 +43,18 @@ export default function App() {
   }, []);
 
   // ---- debounced persistence: local write is instant, remote push is best-effort ----
+  const [saveError, setSaveError] = useState(false);
   const saveTimer = useRef(null);
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       const data = { songs, edges, session, venueName, isDemo, playlists };
-      Store.save(data);
+      // Store.save already logs a console warning on failure (e.g. a
+      // localStorage quota error) — that alone is easy to miss for days
+      // while every change since silently stops persisting, so surface it
+      // as a real, impossible-to-miss banner too instead of only a devtools
+      // line.
+      setSaveError(!Store.save(data));
       Store.pushRemote(data);
     }, 400);
     return () => clearTimeout(saveTimer.current);
@@ -261,7 +267,7 @@ export default function App() {
           )}
           {tab === 'addAudio' && (
             <AddAudioPage
-              songs={songs}
+              songs={songs} edges={edges}
               onAddEdge={(edge) => setEdges(prev => [...prev, edge])}
               onViewSong={() => setTab('library')}
               goUpload={() => setTab('upload')}
@@ -284,6 +290,13 @@ export default function App() {
         <div className="toast">
           <span className="toast-message">{undoToast.message}</span>
           <button className="btn btn-ghost btn-sm" onClick={undoDelete}>Undo</button>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="toast toast-danger">
+          <span className="toast-message">Couldn't save — storage is full. Your last change isn't saved; a reload may lose it.</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setSaveError(false)}>Dismiss</button>
         </div>
       )}
     </div>

@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { fmtBytes } from '../core.js';
-import { resolveAudioUrl } from '../localAudioStore.js';
+import { resolveAudioUrl, isLocalAudioMarker } from '../localAudioStore.js';
 
 // `song.audioUrl`/`edge.audioUrl` may be a `local:` marker (audio stored in
 // IndexedDB, no backend configured — see localAudioStore.js) rather than a
@@ -9,10 +9,15 @@ import { resolveAudioUrl } from '../localAudioStore.js';
 // `blob:` URL first — this hook does that once per marker/URL and re-runs
 // if it changes (e.g. a song's audio gets replaced).
 export function useResolvedAudioUrl(url) {
-  const [resolved, setResolved] = useState(null);
+  // Lazy-init to the real URL immediately when it isn't a marker at all
+  // (a cover's data:/https: URL, most of the time) — otherwise every
+  // `<AlbumArt>` would flash its empty placeholder for one tick while the
+  // always-async effect below resolves a value it already had.
+  const [resolved, setResolved] = useState(() => (url && !isLocalAudioMarker(url) ? url : null));
   useEffect(() => {
     let cancelled = false;
     if (!url) { setResolved(null); return undefined; }
+    if (!isLocalAudioMarker(url)) { setResolved(url); return undefined; }
     resolveAudioUrl(url).then((real) => { if (!cancelled) setResolved(real); });
     return () => { cancelled = true; };
   }, [url]);
@@ -50,7 +55,8 @@ export const ICONS = {
 // A real cover thumbnail when a song has one (url), otherwise the same
 // decorative diagonal-stripe placeholder as before.
 export function AlbumArt({ className, style, url }) {
-  if (url) return <img className={'art-swatch art-photo ' + (className || '')} style={style} src={url} alt="" />;
+  const resolved = useResolvedAudioUrl(url);
+  if (resolved) return <img className={'art-swatch art-photo ' + (className || '')} style={style} src={resolved} alt="" />;
   return <div className={'art-swatch ' + (className || '')} style={style} />;
 }
 

@@ -117,6 +117,12 @@ class AudioEngine {
 
   _startMain(buffer, songId, offsetSec) {
     const ctx = this.ensureContext();
+    // pause() suspends the whole context; nothing elsewhere ever resumes it
+    // again except an explicit Play/Pause toggle. Starting a new main deck
+    // (Start Set, Play again, or a fresh song after a pause) needs to be
+    // audible immediately even when the previous set was left paused, not
+    // silently schedule a source into a still-suspended context.
+    if (ctx.state !== 'running') ctx.resume();
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     const gain = ctx.createGain();

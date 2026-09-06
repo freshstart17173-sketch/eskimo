@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { uid, fmtTime, pseudoCuePoints, pickDetectedSongs, uploadAudioIfConfigured } from '../core.js';
+import { uid, fmtTime, clamp, pseudoCuePoints, pickDetectedSongs, uploadAudioIfConfigured, occludedTransitions } from '../core.js';
 import { detectMatch } from '../audioDetect.js';
 import { Field, Dropzone, SongPicker } from './shared.jsx';
 
-export default function AddAudioPage({ songs, onAddEdge, onViewSong, goUpload, onLoadExample }) {
+export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUpload, onLoadExample }) {
   const [file, setFile] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total } | null
@@ -68,6 +68,14 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong, goUpload, o
         inSeconds: (realCue && realCue.inSeconds != null) ? realCue.inSeconds : pseudoCue.inSeconds,
       }
     : null;
+  // A long outro/intro variant (see occludedTransitions, core.js) can start
+  // diverging from the plain master well before its own cue point — surface
+  // any already-built transition that would clash with this one before it's
+  // saved, since nothing later filters it (only one ending is ever active
+  // per song at a time).
+  const conflicts = (cue && (derivedType === 'outro' || derivedType === 'intro'))
+    ? occludedTransitions(edges, { type: derivedType, l: leftId, r: rightId, outSeconds: cue.outSeconds, inSeconds: cue.inSeconds })
+    : [];
 
   // There's no separate "unverified" state to fix later — you listen to it
   // right here before it ever becomes part of the graph, so anything saved
@@ -89,6 +97,19 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong, goUpload, o
   }
 
   const typeLabel = derivedType ? ({ transition: 'Transition', intro: 'Intro', outro: 'Outro' })[derivedType] : '—';
+  // Where the detected cue point actually falls along the reference song's
+  // own waveform — these used to be fixed at 71%/12% regardless of the real
+  // detected timecode, which looked plausible but was pure decoration: a
+  // cue point near the very start or end of a song rendered in the exact
+  // same spot as one near the middle.
+  function outPct(song, seconds) {
+    if (!song || !song.durationSec || seconds == null) return 71;
+    return clamp((seconds / song.durationSec) * 100, 0, 100);
+  }
+  function inPct(song, seconds) {
+    if (!song || !song.durationSec || seconds == null) return 12;
+    return clamp((seconds / song.durationSec) * 100, 0, 100);
+  }
 
   if (songIds.length === 0) {
     return (
@@ -166,8 +187,8 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong, goUpload, o
                   <div>
                     <div className="field-label">{leftSong.title} — detected out point</div>
                     <div className="waveform-bar">
-                      <div className="waveform-marker" style={{ left: '71%' }} />
-                      <div className="waveform-marker-label" style={{ left: '71%' }}>OUT <span className="mono-num">{fmtTime(cue.outSeconds)}</span></div>
+                      <div className="waveform-marker" style={{ left: outPct(leftSong, cue.outSeconds) + '%' }} />
+                      <div className="waveform-marker-label" style={{ left: outPct(leftSong, cue.outSeconds) + '%' }}>OUT <span className="mono-num">{fmtTime(cue.outSeconds)}</span></div>
                     </div>
                   </div>
                 )}
@@ -175,11 +196,20 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong, goUpload, o
                   <div>
                     <div className="field-label">{rightSong.title} — detected in point</div>
                     <div className="waveform-bar">
-                      <div className="waveform-marker" style={{ left: '12%' }} />
-                      <div className="waveform-marker-label" style={{ left: '12%' }}>IN <span className="mono-num">{fmtTime(cue.inSeconds)}</span></div>
+                      <div className="waveform-marker" style={{ left: inPct(rightSong, cue.inSeconds) + '%' }} />
+                      <div className="waveform-marker-label" style={{ left: inPct(rightSong, cue.inSeconds) + '%' }}>IN <span className="mono-num">{fmtTime(cue.inSeconds)}</span></div>
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {conflicts.length > 0 && (
+              <div className="error-note">
+                This {derivedType} takes over at {fmtTime(derivedType === 'outro' ? cue.outSeconds : cue.inSeconds)} —
+                {' '}{conflicts.length} existing transition{conflicts.length > 1 ? 's' : ''} off this song cue{' '}
+                {derivedType === 'outro' ? 'later' : 'earlier'} than that and would clash if this one plays: {' '}
+                {conflicts.map(e => (songs[derivedType === 'outro' ? e.r : e.l] || {}).title || '?').join(', ')}
               </div>
             )}
 

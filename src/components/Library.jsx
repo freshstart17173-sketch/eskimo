@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { libraryRows, uploadCoverIfPossible } from '../core.js';
-import { Icon, ICONS, Field, AlbumArt, CoverPicker, useResolvedAudioUrl } from './shared.jsx';
+import { libraryRows, uploadCoverIfPossible, occludedTransitions } from '../core.js';
+import { Icon, ICONS, Field, AlbumArt, CoverPicker, SongPicker, useResolvedAudioUrl } from './shared.jsx';
 
 // `audioUrl` may be a `local:` marker (IndexedDB, no backend configured —
 // see localAudioStore.js) rather than a real URL, and resolving it is
@@ -25,12 +25,21 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   const [draftArtist, setDraftArtist] = useState(song.artist);
   const [draftBpm, setDraftBpm] = useState(String(song.bpm));
   const [draftKey, setDraftKey] = useState(song.key);
+  const [draftMashupA, setDraftMashupA] = useState((song.mashupOf && song.mashupOf[0]) || null);
+  const [draftMashupB, setDraftMashupB] = useState((song.mashupOf && song.mashupOf[1]) || null);
+  // Other songs only — picking itself as one of its own two mashup parts
+  // wouldn't mean anything.
+  const pickableSongs = useMemo(() => {
+    const { [song.id]: _omit, ...rest } = songs;
+    return rest;
+  }, [songs, song.id]);
 
   function saveEdits() {
     const bpmNum = Number(draftBpm);
     onUpdateSong(song.id, {
       title: draftTitle.trim() || song.title, artist: draftArtist.trim() || song.artist,
       bpm: Number.isFinite(bpmNum) && bpmNum > 0 ? bpmNum : song.bpm, key: draftKey.trim() || song.key,
+      mashupOf: (draftMashupA && draftMashupB) ? [draftMashupA, draftMashupB] : null,
     });
     setEditing(false);
   }
@@ -79,25 +88,45 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
               <Field label="Artist"><input className="input" value={draftArtist} onChange={(e) => setDraftArtist(e.target.value)} /></Field>
               <Field label="BPM"><input className="input" value={draftBpm} onChange={(e) => setDraftBpm(e.target.value)} /></Field>
               <Field label="Key"><input className="input" value={draftKey} onChange={(e) => setDraftKey(e.target.value)} /></Field>
+              <Field label="Mashup of (optional) — part 1">
+                <SongPicker songs={pickableSongs} value={draftMashupA} onChange={setDraftMashupA} allowFree freeLabel="Not a mashup" />
+              </Field>
+              {draftMashupA && (
+                <Field label="Mashup of — part 2">
+                  <SongPicker songs={pickableSongs} value={draftMashupB} onChange={setDraftMashupB} allowFree freeLabel="Pick the other half" />
+                </Field>
+              )}
               <button className="btn btn-primary btn-sm" onClick={saveEdits}>Save</button>
               <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>Cancel</button>
             </div>
           )}
+          {!editing && song.mashupOf && songs[song.mashupOf[0]] && songs[song.mashupOf[1]] && (
+            <div className="hint-text">Mashup of {songs[song.mashupOf[0]].title} × {songs[song.mashupOf[1]].title}</div>
+          )}
           <div>
             <div className="section-label">Built audio</div>
             <div className="lib-pieces">
-              {ownEdges.map(e => (
-                <div key={e.id} className="drawer-frag">
-                  <div className="drawer-frag-row">
-                    <span className="drawer-frag-label">{labelOf(e)}</span>
-                    <div className="drawer-frag-actions">
-                      <EdgeAudioPreview edge={e} />
-                      <button className="btn btn-ghost btn-xs" onClick={() => onDeleteEdge(e.id)}>Remove</button>
+              {ownEdges.map(e => {
+                const clashes = occludedTransitions(edges, e);
+                return (
+                  <div key={e.id} className="drawer-frag">
+                    <div className="drawer-frag-row">
+                      <span className="drawer-frag-label">{labelOf(e)}</span>
+                      <div className="drawer-frag-actions">
+                        <EdgeAudioPreview edge={e} />
+                        <button className="btn btn-ghost btn-xs" onClick={() => onDeleteEdge(e.id)}>Remove</button>
+                      </div>
                     </div>
+                    <div className="drawer-frag-dest">{destText(e)}</div>
+                    {clashes.length > 0 && (
+                      <div className="hint-text" style={{ color: 'var(--danger)' }}>
+                        takes over before {clashes.length} transition{clashes.length > 1 ? 's' : ''} off this song — clashes if picked: {' '}
+                        {clashes.map(c => (songs[e.type === 'outro' ? c.r : c.l] || {}).title || '?').join(', ')}
+                      </div>
+                    )}
                   </div>
-                  <div className="drawer-frag-dest">{destText(e)}</div>
-                </div>
-              ))}
+                );
+              })}
               {ownEdges.length === 0 && <div className="empty-note-sm">nothing built for this song yet</div>}
             </div>
           </div>

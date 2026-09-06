@@ -145,7 +145,7 @@ export default function SequencePane({
   nextRows, laterRows, setHoveredId,
   startPickId, onSetStartPick,
   onTogglePlaying, onResumeSet, onPlayAgain, onStartSet, onSetNextMode,
-  onCommitRow, onSkipNext, onRequestEndSet, onSeek,
+  onCommitRow, onSkipNext, onSeek,
 }) {
   const [startStarting, setStartStarting] = useState('cut');
 
@@ -241,7 +241,6 @@ export default function SequencePane({
                 >Outro</button>
               </div>
             </div>
-            <button className="seq-end-set-link" onClick={onRequestEndSet}>End set…</button>
           </div>
         )}
 

@@ -139,6 +139,7 @@ a { color: var(--accent); }
 .toast-message { font-size: 12.5px; font-weight: 500; }
 .toast .btn-ghost { background: rgba(252, 252, 252, .12); color: var(--paper); }
 .toast .btn-ghost:hover { background: rgba(252, 252, 252, .2); }
+.toast-danger { background: var(--danger); }
 @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
 /* A real confirm dialog — centered, blocks the page behind it. Reserved
@@ -553,9 +554,14 @@ a { color: var(--accent); }
 .toolbar-end-set-btn:hover { filter: brightness(1.1); }
 .toolbar-start-set-btn {
   display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
-  padding: 6px 12px; border-radius: var(--radius); background: var(--good); color: #fff;
+  padding: 6px 12px; border-radius: var(--radius); background: #2e7d32; color: #fff;
 }
 .toolbar-start-set-btn:hover { filter: brightness(1.1); }
+.toolbar-stop-set-btn {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+  padding: 6px 12px; border-radius: var(--radius); background: var(--ink); color: var(--paper);
+}
+.toolbar-stop-set-btn:hover { filter: brightness(1.3); }
 
 /* ---------------------------------------------------------------
    Graph canvas (React Flow) — themed to match the flat/paper design

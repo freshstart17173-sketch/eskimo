@@ -124,7 +124,28 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasStarted, fromId, isTransitionMode, visibleEdges, usedIds, songs, nowSong, session.timeLeft]);
 
-  const nextCandidateIds = useMemo(() => new Set(nextRows.map(r => r.destId)), [nextRows]);
+  // Stabilized against `nextRows` itself changing identity every second —
+  // `nextRows` carries a live `secondsLeft` countdown (see its own comment
+  // above, keyed off `session.timeLeft`) so it's a brand new array every
+  // playback tick even when the *set* of candidate destIds hasn't actually
+  // changed. Without this, `stateFor` below (which reads `nextCandidateIds`)
+  // gets a new identity every tick too, GraphPane's node-rebuild effect
+  // (keyed on `stateFor`) refires every tick, and every node on the canvas
+  // gets a brand new object once a second during any live set — exactly the
+  // same class of bug already found and fixed once for `hoveredId` (see the
+  // long comment on `stateFor` below), just reached through a different
+  // dependency. Measured directly: with this memo naively keyed on
+  // `nextRows`, the graph's disconnect-✕ buttons got their DOM node torn
+  // down and recreated once a second during playback — read by a user as
+  // "flickering" even while holding the mouse perfectly still over one.
+  const nextCandidateIdsRef = useRef(new Set());
+  const nextCandidateIds = useMemo(() => {
+    const next = new Set(nextRows.map(r => r.destId));
+    const prev = nextCandidateIdsRef.current;
+    if (prev.size === next.size && [...next].every(id => prev.has(id))) return prev;
+    nextCandidateIdsRef.current = next;
+    return next;
+  }, [nextRows]);
 
   // Hover preview ("what would picking this lead to") — not a staged plan,
   // just a look-ahead. Only shows once you're hovering an actual candidate.
@@ -661,15 +682,20 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <span><i className="swatch swatch-later" />later</span>
         </div>
 
-        {!hasStarted && activePlaylist.startSongId && songs[activePlaylist.startSongId] && (
+        {!session.isPlaying && activePlaylist.startSongId && songs[activePlaylist.startSongId] && (
           <button className="toolbar-start-set-btn" onClick={triggerStartSet} data-tooltip={'Start playing from ' + songs[activePlaylist.startSongId].title}>
             <Icon path={ICONS.play} filled size={12} /> Start set
           </button>
         )}
         {hasStarted && (
-          <button className="toolbar-end-set-btn" onClick={requestEndSet} data-tooltip="Stop the set after this">
-            <Icon path={ICONS.stop} filled size={12} /> End set
-          </button>
+          <>
+            <button className="toolbar-end-set-btn" onClick={requestEndSet} data-tooltip="Play this out, then stop">
+              <Icon path={ICONS.stop} filled size={12} /> End set
+            </button>
+            <button className="toolbar-stop-set-btn" onClick={resumeSet} data-tooltip="Stop right now">
+              <Icon path={ICONS.stop} filled size={12} /> Stop set
+            </button>
+          </>
         )}
       </div>
 
@@ -696,7 +722,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           nextRows={nextRows} laterRows={laterRows} setHoveredId={setHoveredId}
           startPickId={startPickId} onSetStartPick={setStartPickId}
           onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onPlayAgain={playAgain} onStartSet={startSet} onSetNextMode={setNextMode}
-          onCommitRow={commitRow} onSkipNext={skipNow} onRequestEndSet={requestEndSet}
+          onCommitRow={commitRow} onSkipNext={skipNow}
           onSeek={seekPlayhead}
         />
       </div>

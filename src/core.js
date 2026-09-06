@@ -4,7 +4,7 @@
 // =====================================================================================
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from './config.js';
-import { putLocalAudio } from './localAudioStore.js';
+import { putLocalAudio } from './localAudioStore.js'; // generic IndexedDB blob store despite the name — see uploadCoverIfPossible below
 
 export const END = '__end__';
 // Purely a visual bookend on the graph canvas (see GraphNodes.jsx's
@@ -295,11 +295,41 @@ export async function uploadAudioIfConfigured(file) {
   }
 }
 
+// Downscales an image file to a small JPEG thumbnail — a raw phone-camera
+// photo can run several MB, and a cover art thumbnail never needs to be
+// bigger than it'll ever actually be drawn (a few dozen px in the UI).
+function downscaleImage(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('toBlob failed'))), 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image decode failed')); };
+    img.src = url;
+  });
+}
+
 // Cover art upload: same worker endpoint as audio when one's configured
-// (it doesn't care about content type), but — unlike a full audio master —
-// a small cover thumbnail is cheap enough to fall back to storing directly
-// as a data URL when there's no worker, so real cover art works with zero
-// backend setup instead of staying a placeholder until R2 is wired up.
+// (it doesn't care about content type). Without a worker, a cover used to
+// fall back to a raw base64 data: URL saved straight into localStorage —
+// fine for a genuinely small thumbnail, but a real phone photo can run
+// several MB, and localStorage's ~5-10MB per-origin quota is shared with
+// literally everything else the app saves (songs, edges, the whole active
+// playlist). One large cover was enough to blow that quota — Store.save
+// caught the resulting error and only logged a console warning, so every
+// save silently failed afterward and a reload lost the entire library, not
+// just the cover. Downscaling to a thumbnail first and storing the actual
+// bytes in IndexedDB (same no-backend path as song audio, see
+// localAudioStore.js) fixes both: a `local:` marker is a few dozen bytes
+// in localStorage regardless of how big the original photo was.
 export async function uploadCoverIfPossible(file) {
   if (!file) return null;
   const workerUrl = APP_CONFIG.UPLOAD_WORKER_URL;
@@ -317,12 +347,13 @@ export async function uploadCoverIfPossible(file) {
       console.warn('Eskimo Studio: cover upload failed, falling back to local storage', e);
     }
   }
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
+  try {
+    const thumb = await downscaleImage(file, 480, 0.85);
+    return await putLocalAudio(thumb);
+  } catch (e) {
+    console.warn('Eskimo Studio: local cover storage failed', e);
+    return null;
+  }
 }
 
 // The one and only "no saved state yet" starting point — a genuinely empty
@@ -354,6 +385,30 @@ export function mockDuration(seed) { return 150 + (hashString(seed || 'x') % 110
 
 // A short, deterministic pseudo-cue-point pair derived from two song ids, so the
 // "detected" cue markers in Add Audio vary per pair instead of always looking identical.
+// A long intro/outro variant is really an alternate mix of the song
+// (rendered with the original still attached, per the upload workflow) that
+// can start diverging from the plain master well before the clip's own
+// edge — "consuming" part of the song's own timeline a transition's cue
+// point might sit inside. Only one ending/start method is ever active on a
+// song at a time (endMode/startMode) so this can't silently corrupt a live
+// wire the way a genuine mid-set collision would; the value here is
+// surfacing the conflict at build time (Add Audio, Library) so whoever's
+// producing the graph can see it before picking this variant as the live
+// choice, not filtering a socket's dropdown that doesn't cross-list outro
+// and transition candidates together in the first place.
+export function occludedTransitions(edges, clipEdge) {
+  if (!clipEdge) return [];
+  if (clipEdge.type === 'outro') {
+    if (clipEdge.outSeconds == null) return [];
+    return edges.filter(e => e.type === 'transition' && e.l === clipEdge.l && e.outSeconds != null && e.outSeconds > clipEdge.outSeconds);
+  }
+  if (clipEdge.type === 'intro') {
+    if (clipEdge.inSeconds == null) return [];
+    return edges.filter(e => e.type === 'transition' && e.r === clipEdge.r && e.inSeconds != null && e.inSeconds < clipEdge.inSeconds);
+  }
+  return [];
+}
+
 export function pseudoCuePoints(leftId, rightId) {
   const h = hashString((leftId || '_') + '|' + (rightId || '_'));
   const out = 90 + (h % 90); // 90s..180s "out" point on the left song

@@ -210,6 +210,14 @@ export function bestCorrelation(a, b) {
   if (a.length === 0 || b.length === 0) return { score: 0, lag: 0 };
   const na = zScore(a), nb = zScore(b);
   const maxLag = Math.min(na.length, nb.length) - 1;
+  // A lag near the search's extremes only overlaps a handful of windows —
+  // on z-scored (zero-mean, unit-variance) data, a handful of points can
+  // score deceptively high by pure chance, which the old flat `count < 4`
+  // floor let straight through as a "confident" match. Requiring most of
+  // the shorter envelope to actually be compared (not just 4 windows'
+  // worth) makes a spurious short-overlap coincidence far less likely to
+  // clear MATCH_THRESHOLD.
+  const minCount = Math.max(4, Math.floor(Math.min(na.length, nb.length) * 0.6));
   let best = -Infinity, bestLag = 0;
   for (let lag = -maxLag; lag <= maxLag; lag++) {
     let sum = 0, count = 0;
@@ -219,7 +227,7 @@ export function bestCorrelation(a, b) {
       sum += na[i] * nb[j];
       count++;
     }
-    if (count < 4) continue;
+    if (count < minCount) continue;
     const score = sum / count;
     if (score > best) { best = score; bestLag = lag; }
   }
