@@ -2,8 +2,8 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
-  END, getVisibleEdges, inOutCounts, queueTailId, removeQueueItem,
-  transitionCandidates, cutCandidates, clamp, leftSocketTypes, rightSocketTypes,
+  END, START, getVisibleEdges, inOutCounts, queueTailId, removeQueueItem,
+  transitionCandidates, cutCandidates, clamp, leftSocketAvailability, rightSocketAvailability,
   unwireOutput, wireConnection, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
   introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime,
 } from '../core.js';
@@ -210,6 +210,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     const p = {};
     Object.keys(songs).forEach(id => { p[id] = autoPositions ? autoPositions[id] : { x: songs[id].x, y: songs[id].y }; });
     p[END] = autoPositions ? autoPositions[END] : { x: 1250, y: 20 };
+    p[START] = autoPositions ? autoPositions[START] : { x: -170, y: 20 };
     return p;
   }, [songs, autoPositions]);
 
@@ -229,15 +230,18 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   }, [session.nowPlayingId, queueIds, nextCandidateIds, laterCandidateIds]);
 
   // ---------------- playlist-editor sockets (see TODO.md) ----------------
-  // One entry per song: which typed sockets it can even show (hidden
-  // entirely when a type has zero eligible options) and which one is
-  // currently active per the live wiring. The row label itself always
-  // stays the fixed type name ("Transition"/"Intro"/"Outro") — it never
-  // renames itself to whichever specific edge is wired, since that read as
-  // the socket *type* changing rather than just a choice underneath it.
-  // When more than one produced edge could fill an active slot, `*Options`
-  // carries the full candidate list (each `{ id, label }`) for a dropdown
-  // next to the row; a single candidate needs no picker at all.
+  // One entry per song. Every song shows the same fixed three rows per
+  // side (LEFT_SOCKET_TYPES/RIGHT_SOCKET_TYPES in core.js) — a row a song
+  // can't actually use (no produced edge) still renders, greyed out and
+  // non-interactive, rather than disappearing, so every node scans the
+  // same shape at a glance. `*Available` says which rows are real for this
+  // song. The row label itself always stays the fixed type name
+  // ("Transition"/"Intro"/"Outro") — it never renames itself to whichever
+  // specific edge is wired, since that read as the socket *type* changing
+  // rather than just a choice underneath it. When more than one produced
+  // edge could fill an active slot, `*Options` carries the full candidate
+  // list (each `{ id, label }`) for a dropdown next to the row; a single
+  // candidate needs no picker at all.
   const activePlaylist = session.activePlaylist;
   const socketDataById = useMemo(() => {
     const map = {};
@@ -252,10 +256,10 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       }
       if (rightActive === 'outro') {
         const candidates = outroEdgesFor(visibleEdges, id);
-        if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Outro' }));
+        if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Outro', outSeconds: e.outSeconds }));
       } else if (rightActive === 'transition' && node.nextSongId) {
         const candidates = transitionEdgesBetween(visibleEdges, id, node.nextSongId);
-        if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Transition' }));
+        if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Transition', outSeconds: e.outSeconds }));
       }
       // The countdown ring (GraphNodes.jsx) needs the cue point behind
       // whichever edge is actually wired right now — Outro and Transition
@@ -265,7 +269,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         if (edge && edge.outSeconds != null) rightCueSeconds = edge.outSeconds;
       }
       map[id] = {
-        leftTypes: leftSocketTypes(visibleEdges, id), rightTypes: rightSocketTypes(visibleEdges, id),
+        leftAvailable: leftSocketAvailability(visibleEdges, id), rightAvailable: rightSocketAvailability(visibleEdges, id),
         leftActive, rightActive,
         leftEdgeId: node ? node.startEdgeId : null, rightEdgeId: node ? node.endEdgeId : null,
         leftOptions, rightOptions, rightCueSeconds,
@@ -380,7 +384,8 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   function centerFor(id) {
     const pos = positions[id];
     if (!pos) return null;
-    const w = id === END ? END_W : NODE_W, h = id === END ? END_H : NODE_H;
+    const isSentinel = id === END || id === START;
+    const w = isSentinel ? END_W : NODE_W, h = isSentinel ? END_H : NODE_H;
     return { x: pos.x + w / 2, y: pos.y + h / 2 };
   }
   const focusOn = useCallback((id, zoom = 1.15) => {
@@ -541,7 +546,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition}
-            endQueued={queueIds.includes(END)}
+            endQueued={queueIds.includes(END)} hasStarted={hasStarted}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
           />
           <QueueBar songs={songs} nowPlayingId={session.nowPlayingId} queue={session.queue} autoHistory={session.autoHistory} onRemoveQueueItem={removeQueueFrom} onRemoveQueueItemOnly={removeQueueOne} />

@@ -415,6 +415,95 @@ pan/zoom the graph there — it's a navigation aid, not an editor.
    bug (b) for why that's a context and not node `data`). Outro and
    Transition both read it off `endEdgeId`'s `outSeconds`, so both get a
    real "is there still time" signal, not just a number.
+4b. [x] ~~**A full UI pass on the socket redesign**~~, after seeing items 2-4
+   land: every socket now shows a **fixed three-row layout, always** —
+   None/Intro/Transition on the left, None/Outro/Transition on the right,
+   in that order, on every song, whether or not this particular song can
+   use a given row. `LEFT_SOCKET_TYPES`/`RIGHT_SOCKET_TYPES` (`core.js`)
+   replace the old `leftSocketTypes`/`rightSocketTypes` (which returned
+   only the eligible ones, giving each song a different row count); the
+   new `leftSocketAvailability`/`rightSocketAvailability` say which of the
+   fixed three are real for this song. An unavailable row still renders —
+   grey dot, dim label, `isConnectable={false}`, no click handler — rather
+   than disappearing, so every card scans the same shape. Available dots
+   (active or not) all render identically now too: solid, filled with the
+   type's color, straddling the card edge at the same `-14px` offset every
+   row uses — the earlier pass had active dots solid-filled and merely-
+   available ones hollow-outlined, which read as two different socket
+   *styles* rather than one style plus a selection state; the active one
+   now gets a ring/glow (`box-shadow`) on top of the same fill instead.
+   Measured directly (not just eyeballed) and confirmed the LEFT-side dots
+   sit centered on the card's actual border to well under a pixel — but
+   raised again immediately after, specifically about the RIGHT side, and
+   that report was correct: two real bugs, not one.
+   (a) `.node-socket-side-right` set `align-items: flex-end` so a right
+   row would shrink-wrap to its label's width and align to the column's
+   end, rather than stretching full-width the way left rows do by default
+   — and since the socket dot is `position: absolute` (out of flow, taking
+   no part in that sizing at all), a shrink-wrapped row's own edge simply
+   didn't land on the card's actual border anymore. Fixed by dropping that
+   override so both sides stretch identically.
+   (b) A second, deeper bug this exposed: `.node-socket-row .node-socket
+   { left: -14px }` and `.node-socket-row-right .node-socket { right:
+   -14px }` are two different CSS properties, so the second rule was never
+   "overriding" the first just for being more specific to the right-side
+   case — **both** applied at once, and per the absolute-positioning spec,
+   a fixed (non-`auto`) width means `left` wins outright and `right` is
+   silently discarded. Every right-side socket on every song, and Start
+   Set's one (source, right-side) socket, had actually been positioned via
+   the LEFT rule the entire time — nowhere near the card's real edge, which
+   is exactly why an arrow into a right-side socket looked like it was
+   landing in empty space, and why Start Set's socket looked like it was
+   sitting on the wrong side entirely (its "wrong side" was never really a
+   left/right logic bug in `StartNode` itself — `Position.Right` and the
+   `-right` row class were already correct there; the CSS underneath them
+   was silently ignoring `right` everywhere). Fixed with an explicit
+   `left: auto` on the right-side rule so `right` actually takes effect.
+   Confirmed by direct measurement afterward: dot-to-border distance is
+   sub-pixel on both sides now, not just the left.
+   **A real bug, and the highest-priority one reported this pass**: with
+   three stacked handles now always present per side (all sharing the same
+   React Flow `Position.Left`/`Position.Right`, distinguished only by
+   `id`), `rfEdges` (`GraphPane.jsx`) had never set `sourceHandle`/
+   `targetHandle` on any edge — so React Flow had no way to know which of
+   the three a given arrow should anchor to, and every arrow visually
+   landed on the first (None) row regardless of which socket was actually
+   wired. Every edge builder now sets both explicitly (transitions always
+   `right-transition`/`left-transition`; the synthesized non-transition
+   links use the source's real `endMode` and the destination's real
+   `startMode`). This was a latent bug from the very first socket pass —
+   it only became glaringly visible once every song showed all three rows
+   at once instead of just whichever one was active.
+   The dropdown (item 2) is no longer a native `<select>` — a custom
+   listbox (`SocketDropdown` in `GraphNodes.jsx`) so the still-*closed*
+   candidates can carry their own live countdown ring too (a native
+   `<option>` can only ever be plain text), which was the actual point of
+   moving the ring near the dropdown in the first place: opening it shows
+   which of the wired song's produced options is soonest, not just the one
+   currently selected. Click-outside-to-close via a plain `mousedown`
+   listener while open. The ring itself also shrank by half and moved to
+   sit directly after the row's label (not past the dropdown).
+   The hover-✕ disconnect button is no longer permanently visible — a
+   `HoveredEdgeContext` (`GraphPane.jsx`) tracks which edge id the pointer
+   is over via React Flow's own `onEdgeMouseEnter`/`onEdgeMouseLeave`, kept
+   out of `rfEdges`' own memo so hovering doesn't force every edge object
+   to recompute. The button also claims "hovered" on its own
+   `onMouseEnter` (it lives in a separate `EdgeLabelRenderer` DOM subtree
+   from the edge path, so crossing the small gap between line and button
+   would otherwise flicker it closed right as you reach for it).
+   Snap feedback while dragging a connection: React Flow already marks the
+   closest compatible handle within `connectionRadius` with real `valid`/
+   `connectingto` classes — there was just no CSS reacting to them, so a
+   drag landing near a real target looked identical to one landing in
+   empty space. `connectionRadius` raised to 32 (from the default 20) and
+   `.connectingto.valid` now scales the handle 1.5x with a ring glow.
+   Added a **Start Set** node (`StartNode`, `GraphNodes.jsx`) — the graph
+   had an End Set bookend but no symmetric entry point. It's purely
+   informational like End Set (an intro edge ranks a song against it in
+   `computeDagreLayout` the same way an outro edge ranks one against END);
+   unlike End Set, nothing ever gets "queued" at Start — a set can begin
+   from any song, so there's no equivalent operational meaning to invent,
+   just a hint reflecting whether one has already started.
 5. [ ] **Save/Load playlist** — toolbar button, persisted `playlists`
    array, confirm-before-replace on load.
 6. [ ] **Readonly filmstrip** replacing `QueueBar`.
@@ -534,11 +623,33 @@ None of the three steps depend on each other — do them in any order, or
 skip whichever you don't need. Current status of each, as of this pass:
 
 ### 1. GitHub Pages — get a public URL
-**Status: not yet confirmed done.**
-1. In the repo on GitHub: **Settings → Pages → Source → "GitHub Actions"**.
-2. Push to `main` (or re-run the "Deploy to GitHub Pages" workflow from the
-   Actions tab). `.github/workflows/pages.yml` already exists and does
-   `npm ci && npm run build`, deploying `dist/` — nothing else to write.
+**Status: confirmed broken, two separate causes, both need a human.**
+Checked via the GitHub MCP connection: `pages.yml` has run 29 times, every
+one triggered by a push, every one `conclusion: failure` — but
+`list_workflow_jobs` on the most recent run shows **zero jobs ever ran**,
+and its log URL 404s. Zero jobs plus an instant failure is what it looks
+like when a run is rejected at the `environment: github-pages` gate before
+any step executes — i.e. **GitHub Pages has never actually been enabled**
+for this repo. Separately, `pages.yml` triggers `on: push: branches:
+[main]`, but **this repository has no branch named `main`** — every commit
+so far lives on `claude/codebase-onboarding-tasks-ng8pny` or the default
+branch `claude/eskimo-ui-mockup-uxdg8z`. Either alone would keep the site
+from ever deploying; both are true at once here. Neither is fixable from
+this session — enabling Pages and choosing/renaming a default branch are
+both repo-Settings actions with no equivalent exposed through the GitHub
+MCP tools available here.
+1. **Enable Pages**: repo → **Settings → Pages → Build and deployment →
+   Source → "GitHub Actions"**. If that page has never been touched,
+   Source is likely unset — this is step one, not optional.
+2. **Give the workflow a branch that exists**: either (a) rename
+   `.github/workflows/pages.yml`'s trigger to the branch you actually want
+   to deploy from (simplest: change `[main]` to the current default
+   branch's name), or (b) create a real `main` branch from whichever branch
+   has the code you want live and merge into it going forward, matching
+   what the workflow already expects. Once both of these are true, the
+   next push (or a manual "Run workflow" from the Actions tab — the
+   workflow already has `workflow_dispatch` enabled) should actually
+   execute and deploy `dist/`.
 3. The workflow's Actions run will show the live URL once it finishes
    (also visible under Settings → Pages afterward).
 

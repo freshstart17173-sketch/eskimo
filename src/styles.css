@@ -158,15 +158,18 @@ a { color: var(--accent); }
 /* The hover-✕ on an active wire (a real transition or a plain wired
    sequence link) — deliberately its own small dedicated target rather
    than the wire itself being clickable, same reasoning as every other
-   hard-to-hit destructive control in this app. Always present, not
-   hover-revealed, since it already reads as a small secondary control
-   rather than a hazard. */
+   hard-to-hit destructive control in this app. Hidden until the wire (or
+   the button's own small hit-area) is hovered — see GraphPane.jsx's
+   HoveredEdgeContext — rather than a permanent dot sitting on every active
+   connection whether or not you're doing anything with it. */
 .edge-disconnect-btn {
-  position: absolute; width: 16px; height: 16px; border-radius: 50%;
+  position: absolute; width: 14px; height: 14px; border-radius: 50%;
   background: var(--paper); border: 1.5px solid var(--ink); color: var(--ink);
-  font-size: 11px; line-height: 1; display: flex; align-items: center; justify-content: center;
-  pointer-events: auto; z-index: 4;
+  font-size: 10px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  pointer-events: auto; z-index: 4; box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
+  opacity: 0; transition: opacity .12s ease, background .12s ease, color .12s ease;
 }
+.edge-disconnect-btn-visible { opacity: 1; }
 .edge-disconnect-btn:hover { background: var(--ink); color: var(--paper); }
 
 .sidebar {
@@ -543,15 +546,31 @@ a { color: var(--accent); }
    small fixed four-color legend, the same on every node, which is what
    actually makes a node graph scannable at a glance. */
 .node-socket-section {
-  display: flex; justify-content: space-between; gap: 10px; margin-top: 9px; padding-top: 8px;
+  display: flex; flex-direction: column; gap: 2px; margin-top: 9px; padding-top: 8px;
   border-top: 1px dashed var(--line);
 }
 .state-playing .node-socket-section { border-top-color: rgba(252, 252, 252, .25); }
+/* The two label/dot columns — kept compact so the fixed three rows per
+   side never take much vertical space; a dropdown never lives in here,
+   it drops to its own full-width line below (see .node-socket-dropdown-row). */
+.node-socket-columns { display: flex; justify-content: space-between; gap: 10px; }
+/* Rows deliberately stretch to the *column's* full width on both sides
+   (no align-items override here) rather than shrink-wrapping to their
+   label text — the socket dot is `position: absolute` and so takes no
+   part in that sizing at all, meaning a shrink-wrapped row's own edge
+   does NOT reliably land on the card's actual border. That was a real
+   bug on the right side specifically: `align-items: flex-end` let each
+   right row size down to just its label, so `right: -14px` (below) ended
+   up well inside the card instead of straddling its edge, and every
+   arrow into a right-side socket looked like it was landing nowhere near
+   the card. Stretching first, then letting `flex-direction: row-reverse`
+   pack the label against the row's own right edge, is what makes the
+   left and right offsets in `.node-socket-row .node-socket` actually
+   symmetric. */
 .node-socket-side { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
-.node-socket-side-right { align-items: flex-end; }
 .node-socket-row {
-  position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
-  min-height: 15px; min-width: 0; padding: 1px 0;
+  position: relative; display: flex; align-items: center; gap: 5px;
+  height: 15px; min-width: 0;
 }
 .node-socket-row-right { flex-direction: row-reverse; }
 .node-socket-label {
@@ -559,43 +578,105 @@ a { color: var(--accent); }
   text-overflow: ellipsis; pointer-events: none;
 }
 .node-socket-row-active .node-socket-label { color: var(--ink); font-weight: 700; }
+.node-socket-row-unavailable .node-socket-label { color: var(--faint); font-weight: 500; }
 .state-playing .node-socket-label { color: rgba(252, 252, 252, .6); }
 .state-playing .node-socket-row-active .node-socket-label { color: var(--paper-fixed); }
+.state-playing .node-socket-row-unavailable .node-socket-label { color: rgba(252, 252, 252, .3); }
 
-/* Appears next to an already-active socket only when 2+ produced
-   candidates exist for it (see socketDataById's `*Options`) — switching
-   which one is wired is then a plain select, not a second popup. `nodrag`
+/* One full-width line per side that currently has 2+ produced candidates
+   for its active slot (see socketDataById's `*Options`) — deliberately
+   NOT squeezed into one column's half-width the way the socket rows
+   above are: a real transition/fragment name needs the room, matching
+   how Blender's own socket dropdowns run the full node width. `nodrag`
    keeps a click/drag inside it from being read as a node-drag start. */
+.node-socket-dropdown-row { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.node-socket-dropdown-caption {
+  font-size: 9px; font-weight: 700; color: var(--muted); white-space: nowrap; flex: none;
+}
+.state-playing .node-socket-dropdown-caption { color: rgba(252, 252, 252, .6); }
+.node-socket-select-wrap { position: relative; flex: 1; min-width: 0; }
 .node-socket-select {
-  font-size: 8px; max-width: 70px; padding: 1px 2px; border-radius: 3px;
+  display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0;
+  font-size: 10px; padding: 3px 5px; border-radius: 4px; text-align: left;
   border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer;
 }
 .state-playing .node-socket-select { background: rgba(252, 252, 252, .12); border-color: rgba(252, 252, 252, .35); color: var(--paper-fixed); }
+.node-socket-select-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-socket-select-chevron { flex: none; font-size: 8px; color: var(--muted); }
+.state-playing .node-socket-select-chevron { color: rgba(252, 252, 252, .5); }
+
+/* The open listbox — an absolutely positioned overlay so it doesn't push
+   the node's own layout around, matching how a native <select> popup
+   behaves. Each row can carry its own live countdown ring (see
+   SocketDropdown in GraphNodes.jsx) — the whole point of building this
+   instead of a native <select>, which can only ever show plain text. */
+.node-socket-listbox {
+  position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 20;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 5px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18); overflow: hidden auto; max-height: 160px;
+}
+.node-socket-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  width: 100%; padding: 5px 7px; font-size: 10px; color: var(--ink); text-align: left;
+}
+.node-socket-option:hover { background: var(--panel); }
+.node-socket-option-selected { font-weight: 700; }
+.node-socket-option-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* A ring, not a bar — cheaper on card width, just as readable, and its
    color sweep (green -> red, computed in GraphNodes.jsx) does the same
-   job a discrete "warning" color step would, without a hard jump. */
+   job a discrete "warning" color step would, without a hard jump. Sits
+   right after the label so a glance at the row shows urgency without
+   needing to read the dropdown first. */
 .socket-countdown-ring { flex: none; }
 .socket-countdown-track { stroke: var(--line); stroke-width: 2.4; }
 .state-playing .socket-countdown-track { stroke: rgba(252, 252, 252, .25); }
 
+/* One dot style, everywhere, full stop — no socket looks like an
+   exception. Every *available* socket (active or not) renders identically:
+   solid, filled with its type's color, straddling the card's edge at the
+   same offset. The only extra treatment is a ring/glow on the active one.
+   An *unavailable* socket (no produced edge for this song) is flat grey
+   and inert — still occupies its row, per the fixed three-row layout, but
+   can't be dragged, clicked, or connected to. */
 .graph-pane .react-flow__handle.node-socket {
   position: absolute; top: 50%; transform: translateY(-50%);
-  width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--socket-border);
-  background: var(--paper); z-index: 3; opacity: 1; pointer-events: auto; flex: none;
+  width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--socket-border);
+  background: var(--socket-border); z-index: 3; opacity: 1; pointer-events: auto; flex: none;
 }
 .node-socket-row .node-socket { left: -14px; }
-.node-socket-row-right .node-socket { right: -14px; }
-.graph-pane .react-flow__handle.node-socket.node-socket-active { background: var(--socket-border); }
+/* `left` and `right` are different properties, so the ruleset above never
+   gets "overridden" by this one just for coming later — both values apply
+   at once, and per the absolute-positioning spec, a fixed (non-auto)
+   width means `left` wins and `right` is silently ignored. Without
+   `left: auto` here, every right-side socket was actually being
+   positioned by the LEFT rule above (relative to the row's left edge, the
+   wrong side entirely) — this is what made right-side arrows look like
+   they came out of nowhere on the card, not just an offset tweak. */
+.node-socket-row-right .node-socket { left: auto; right: -14px; }
+.graph-pane .react-flow__handle.node-socket.node-socket-active { box-shadow: 0 0 0 3px var(--socket-ring); }
 .node-socket-clickable { cursor: pointer; }
 .node-socket-clickable:hover { box-shadow: 0 0 0 4px var(--socket-ring); }
 .node-socket-draggable { cursor: crosshair; }
-.node-socket-draggable:hover { box-shadow: 0 0 0 4px var(--socket-ring); transform: translateY(-50%) scale(1.25); }
+.node-socket-draggable:hover { box-shadow: 0 0 0 4px var(--socket-ring); transform: translateY(-50%) scale(1.2); }
+.graph-pane .react-flow__handle.node-socket:not(.node-socket-available) {
+  background: var(--line); border-color: var(--line); pointer-events: none; cursor: default;
+}
 
 .node-socket-none { --socket-border: var(--muted); --socket-ring: rgba(154, 154, 154, .3); }
 .node-socket-intro { --socket-border: #3f9e82; --socket-ring: rgba(63, 158, 130, .3); }
 .node-socket-outro { --socket-border: #c98a3e; --socket-ring: rgba(201, 138, 62, .3); }
 .node-socket-transition { --socket-border: #8b6fc9; --socket-ring: rgba(139, 111, 201, .3); }
+
+/* Visual snap feedback while dragging a connection: React Flow marks the
+   closest compatible handle within `connectionRadius` with `.valid` (and
+   the pane itself with `.connecting`) — without this, a drag landing near
+   a real target looked identical to one landing in empty space, so there
+   was no felt "snap." */
+.graph-pane .react-flow__handle.connectingto.valid {
+  transform: translateY(-50%) scale(1.5); box-shadow: 0 0 0 5px var(--socket-ring);
+}
+.node-socket-row-right .react-flow__handle.connectingto.valid { transform: translateY(-50%) scale(1.5); }
 
 .node-card {
   width: 208px; border-radius: var(--radius); padding: 9px;

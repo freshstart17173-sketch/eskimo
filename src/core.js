@@ -6,6 +6,12 @@ import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from './config.js';
 
 export const END = '__end__';
+// Purely a visual bookend on the graph canvas (see GraphNodes.jsx's
+// StartNode) — unlike END, nothing ever gets queued "at" START; a set can
+// start from any song, so there's no equivalent operational meaning to
+// bolt on here. It exists so the canvas reads as a graph with a real
+// entry point, symmetric with how END gives it a real exit point.
+export const START = '__start__';
 const STORAGE_KEY = 'djflow:v3';
 
 // ---------------------------------------------------------------------------
@@ -357,10 +363,14 @@ export function cutCandidates(songs, excludeIds) {
 }
 
 // ---------------------------------------------------------------------------
-// Graph socket helpers (the playlist editor — see TODO.md). A socket only
-// renders when it's actually possible for that song — an Outro socket on a
-// song with no produced outro just doesn't exist, rather than sitting there
-// permanently disabled.
+// Graph socket helpers (the playlist editor — see TODO.md). Every song
+// shows the same fixed three rows per side (None/Intro/Transition on the
+// left, None/Outro/Transition on the right) — a variable row count read as
+// visual noise and made it harder to scan several nodes at a glance.
+// *Available maps say which of those a song can actually use (a produced
+// edge exists); the type still appears when unavailable, just greyed out
+// and non-interactive, the same way Blender leaves an unwired socket in
+// place rather than removing it.
 // ---------------------------------------------------------------------------
 // Plural — every produced intro/outro fragment for this song, not just
 // one. A song can have several (e.g. a short vs. long intro edit); the
@@ -375,17 +385,21 @@ export function transitionEdgesTo(visibleEdges, songId) { return visibleEdges.fi
 export function transitionEdgesBetween(visibleEdges, fromId, toId) {
   return visibleEdges.filter(e => e.type === 'transition' && e.l === fromId && e.r === toId);
 }
-export function leftSocketTypes(visibleEdges, songId) {
-  const types = ['none'];
-  if (introEdgesFor(visibleEdges, songId).length) types.push('intro');
-  if (transitionEdgesTo(visibleEdges, songId).length) types.push('transition');
-  return types;
+export const LEFT_SOCKET_TYPES = ['none', 'intro', 'transition'];
+export const RIGHT_SOCKET_TYPES = ['none', 'outro', 'transition'];
+export function leftSocketAvailability(visibleEdges, songId) {
+  return {
+    none: true,
+    intro: introEdgesFor(visibleEdges, songId).length > 0,
+    transition: transitionEdgesTo(visibleEdges, songId).length > 0,
+  };
 }
-export function rightSocketTypes(visibleEdges, songId) {
-  const types = ['none'];
-  if (outroEdgesFor(visibleEdges, songId).length) types.push('outro');
-  if (transitionCandidates(visibleEdges, songId, new Set()).length) types.push('transition');
-  return types;
+export function rightSocketAvailability(visibleEdges, songId) {
+  return {
+    none: true,
+    outro: outroEdgesFor(visibleEdges, songId).length > 0,
+    transition: transitionCandidates(visibleEdges, songId, new Set()).length > 0,
+  };
 }
 
 // Autoplay's picking policy: prefer a random *built* transition out of the
