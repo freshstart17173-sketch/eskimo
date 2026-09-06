@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useEffect, useState, createContext, useContext } from 'react';
-import { ReactFlow, Background, BackgroundVariant, MarkerType, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode } from '@xyflow/react';
+import { ReactFlow, Background, BackgroundVariant, MarkerType, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode, useViewport } from '@xyflow/react';
 import { END, START } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphLayout.js';
 import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext } from './GraphNodes.jsx';
@@ -107,6 +107,19 @@ function FannedEdge({ id, sourceX, sourceY, targetX, targetY, style, markerEnd, 
 function ActiveEdge({ id, sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, style, markerEnd, animated, data }) {
   const offset = data && data.offset;
   const { hoveredId, setHoveredId } = useContext(HoveredEdgeContext);
+  // EdgeLabelRenderer content lives inside the same zoomed/panned viewport
+  // as the edge itself, so without this the button's real on-screen size
+  // (and the area a real mouse can actually land on) shrinks right along
+  // with the canvas zoom — at a fairly ordinary zoomed-out level it was
+  // measured at well under 7px on screen, small enough that ordinary hand
+  // tremor while trying to hold the cursor over it reads as "flickering in
+  // and out" even though nothing in the app logic is actually toggling it.
+  // `scale(1/zoom)` on this element cancels the ancestor's zoom for its own
+  // rendered size/position offset while leaving the label's actual
+  // position (`labelX,labelY`, in canvas coordinates) to track the edge
+  // normally — the standard fix for "keep this overlay a constant screen
+  // size" in a zoomable canvas.
+  const { zoom } = useViewport();
   let path, labelX, labelY;
   if (offset) {
     path = fannedBezierPath({ sourceX, sourceY, targetX, targetY, offset });
@@ -122,7 +135,7 @@ function ActiveEdge({ id, sourceX, sourceY, sourcePosition, targetX, targetY, ta
         <button
           className={'edge-disconnect-btn' + (visible ? ' edge-disconnect-btn-visible' : '')}
           data-tooltip="Disconnect" data-tooltip-above
-          style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          style={{ transform: `translate(${labelX}px, ${labelY}px) scale(${1 / zoom}) translate(-50%, -50%)` }}
           onClick={(e) => { e.stopPropagation(); data.onDisconnect(); }}
           onMouseEnter={() => setHoveredId(id)}
           onMouseLeave={() => setHoveredId(null)}

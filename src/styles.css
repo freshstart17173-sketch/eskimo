@@ -169,6 +169,17 @@ a { color: var(--accent); }
   pointer-events: auto; z-index: 4; box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
   opacity: 0; transition: opacity .12s ease, background .12s ease, color .12s ease;
 }
+/* A much bigger invisible hit area around the visible ×, same idea as the
+   graph's own socket dots: real hand tremor over a target this small reads
+   as the button flickering in and out even when nothing is actually
+   toggling it (confirmed — GraphPane's own `scale(1/zoom)` fix keeps this
+   button a constant 14px on screen regardless of canvas zoom, but 14px is
+   still small for a mouse to hold still on). Doesn't grow the visible
+   circle itself, just what counts as "still on it". */
+.edge-disconnect-btn::before {
+  content: ''; position: absolute; top: 50%; left: 50%; width: 30px; height: 30px;
+  transform: translate(-50%, -50%);
+}
 .edge-disconnect-btn-visible { opacity: 1; }
 .edge-disconnect-btn:hover { background: var(--ink); color: var(--paper); }
 
@@ -673,6 +684,32 @@ a { color: var(--accent); }
   width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--socket-border);
   background: var(--socket-border); z-index: 3; opacity: 1; pointer-events: auto; flex: none;
 }
+/* The visible dot stays tiny (9px, matching the row's scale) but the real
+   clickable/draggable target is a much bigger invisible circle around it —
+   a `::before` pseudo-element doesn't change the handle's own measured
+   `getBoundingClientRect` (what React Flow registers as this handle's
+   position for connection-radius math), only what the browser's own
+   hit-testing considers "inside" it, so this doesn't reopen the handle-
+   bounds-drift issue fixed earlier. Positioned relative to the handle's own
+   box (its `position: absolute` already makes it a containing block for
+   this), so it recenters correctly on both left- and right-side rows
+   without needing a separate rule for each.
+   Deliberately NOT counter-scaled against zoom the way the edge disconnect
+   button is (see ActiveEdge in GraphPane.jsx) — tried that first, and at a
+   fairly ordinary zoomed-out view it made adjacent rows' hit-areas overlap
+   so much that clicking the *space between* None/Intro/Transition would
+   land on whichever one happened to win the DOM order, not whichever you
+   were actually closest to (confirmed directly: the same screen point hit
+   .node-socket-intro's hit-area instead of the .node-socket-none it was
+   closest to). 16px keeps this proportional to canvas zoom like the dot
+   itself and everything else on the card — still nearly double the bare
+   9px dot at any zoom level, and safely inside the 19px canvas-unit
+   spacing between stacked rows (`.node-socket-row` height 15px + `gap`
+   4px) so neighboring rows' hit-areas don't meaningfully overlap. */
+.graph-pane .react-flow__handle.node-socket::before {
+  content: ''; position: absolute; top: 50%; left: 50%; width: 16px; height: 16px;
+  transform: translate(-50%, -50%);
+}
 .node-socket-row .node-socket { left: -14px; }
 /* `left` and `right` are different properties, so the ruleset above never
    gets "overridden" by this one just for coming later — both values apply
@@ -772,8 +809,14 @@ a { color: var(--accent); }
    without fighting inline-style writes the way an active CSS animation
    would (an animation targeting the same property always wins over an
    inline style, which would make JS-driven heights silently do nothing). */
-.node-waveform { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
-.node-waveform span { width: 2.5px; background: var(--accent); border-radius: 1px; height: 15%; transition: height .08s linear; }
+/* `flex: 1` + `justify-content: space-between` instead of a fixed `gap` —
+   this spreads however many bars there are across whatever width is left
+   in the row after the elapsed-time readout, so it actually uses the space
+   next to it (previously most of the row sat empty, gap-sized between a
+   handful of bars and the time text) rather than sizing to a fixed count
+   times a fixed gap. */
+.node-waveform { display: flex; align-items: flex-end; justify-content: space-between; flex: 1; height: 12px; max-width: 130px; }
+.node-waveform span { width: 3px; background: var(--accent); border-radius: 1px; height: 15%; transition: height .08s linear; }
 
 .end-node {
   width: 132px; border-radius: var(--radius); padding: 9px;

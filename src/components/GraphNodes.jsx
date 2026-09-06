@@ -10,13 +10,17 @@ import { Icon, ICONS, AlbumArt } from './shared.jsx';
 // are updated by directly setting each span's inline `style.height` every
 // animation frame (a ref per bar, no React state) — going through
 // `setState`/re-render at ~60fps would be needless work for a value that
-// only ever affects five small inline styles.
+// only ever affects some small inline styles. A wider bar count than the
+// original 5 — the row had a lot of unused space between the meter and the
+// elapsed-time readout, and more/thinner bars reads more like a real
+// spectrum than a few wide ones.
+const WAVEFORM_BARS = 14;
 function LiveWaveform() {
   const barRefs = useRef([]);
   useEffect(() => {
     let raf;
     function tick() {
-      const levels = engine.getLevels(5);
+      const levels = engine.getLevels(WAVEFORM_BARS);
       barRefs.current.forEach((el, i) => {
         if (!el) return;
         const pct = levels ? Math.round(15 + levels[i] * 85) : 15;
@@ -29,7 +33,9 @@ function LiveWaveform() {
   }, []);
   return (
     <div className="node-waveform">
-      {[0, 1, 2, 3, 4].map((i) => <span key={i} ref={(el) => { barRefs.current[i] = el; }} />)}
+      {Array.from({ length: WAVEFORM_BARS }, (_, i) => (
+        <span key={i} ref={(el) => { barRefs.current[i] = el; }} />
+      ))}
     </div>
   );
 }

@@ -44,7 +44,7 @@ class AudioEngine {
       // inline between master and the destination doesn't change what's
       // actually heard.
       this.analyser = this.ctx.createAnalyser();
-      this.analyser.fftSize = 128;
+      this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.75;
       this._freqData = new Uint8Array(this.analyser.frequencyBinCount);
       this.master.connect(this.analyser);
