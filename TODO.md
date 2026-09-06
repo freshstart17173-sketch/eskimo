@@ -249,6 +249,17 @@ transition cards per song pair, immediate commit on click, mode switching
 changing the list contents, the End Set modal from both entry points
 (link and graph node), and the graph node's live numeric position.
 
+**Follow-up in the same pass**: a Next-list card's built audio (a
+transition's fragment, or a cut/outro candidate's intro) can now be
+previewed before committing — a small round play/pause button on the
+card, self-contained (`PreviewButton` in `SequencePane.jsx`), that stops
+its click from reaching the card underneath it so listening never doubles
+as a commit. Library already had this for every built edge via its own
+`<audio controls>` in the song drawer, so this closes the one place that
+didn't: Perform's Next list. Verified with Playwright (real WAV data
+URIs): clicking preview plays audio and leaves the queue untouched;
+present on both a transition card and an intro-carrying cut/outro card.
+
 ### Done this pass (round 3 — multi-transition picker, mixing-into, finished + verified)
 Answers the user's three questions: (1) multiple produced transitions
 between the same two songs are now all usable, not just the first found;

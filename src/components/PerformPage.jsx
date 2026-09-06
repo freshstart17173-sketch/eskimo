@@ -66,6 +66,10 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   }, [session.nowPlayingId, hasOutroForPlaying]);
 
   // ---------------- the manual Next list: what the Playing card's mode toggle currently offers ----------------
+  // Every row carries its own built audio's URL when there is one — the
+  // side panel plays it inline so you can actually hear a transition (or
+  // an intro, for a cut/outro candidate) before committing to it, not just
+  // read its label and cue time.
   function rowsFrom(candidateFromId, excludeIds) {
     if (isTransitionMode) {
       return transitionCandidates(visibleEdges, candidateFromId, excludeIds).map(e => {
@@ -73,14 +77,17 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         return {
           kind: 'transition', key: e.id, edgeId: e.id, label: e.label || null,
           destId: e.r, destTitle: dest.title, destArtist: dest.artist, destCoverUrl: dest.coverUrl, destDurationSec: dest.durationSec,
-          outSeconds: e.outSeconds,
+          outSeconds: e.outSeconds, previewUrl: e.audioUrl || null,
         };
       });
     }
     return cutCandidates(songs, excludeIds).map(id => {
       const s = songs[id];
-      const hasIntro = !!findEdge(e => e.type === 'intro' && e.r === id);
-      return { kind: 'cut', key: id, destId: id, destTitle: s.title, destArtist: s.artist, destCoverUrl: s.coverUrl, destDurationSec: s.durationSec, hasIntro };
+      const introEdge = findEdge(e => e.type === 'intro' && e.r === id);
+      return {
+        kind: 'cut', key: id, destId: id, destTitle: s.title, destArtist: s.artist, destCoverUrl: s.coverUrl, destDurationSec: s.durationSec,
+        hasIntro: !!introEdge, previewUrl: introEdge ? (introEdge.audioUrl || null) : null,
+      };
     });
   }
 

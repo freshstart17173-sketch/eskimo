@@ -361,6 +361,12 @@ a { color: var(--accent); }
 .seq-card-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
 .seq-card-sub-artist { color: var(--faint); }
 .seq-card-intro-tag { font-size: 9px; padding: 1px 5px; flex: none; }
+.seq-card-preview {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(19, 19, 19, .08); color: var(--ink);
+  display: flex; align-items: center; justify-content: center;
+}
+.seq-card-preview:hover { background: rgba(19, 19, 19, .16); }
 .seq-card-nums { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .seq-card-cue { font-size: 11.5px; font-weight: 600; }
 .seq-card-length { font-size: 10px; color: var(--faint); }

@@ -1,12 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { fmtTime, clamp } from '../core.js';
 import { Icon, ICONS, SongPicker, AlbumArt } from './shared.jsx';
+
+// A self-contained play/pause toggle over the row's own built audio (a
+// transition's fragment, or a cut/outro candidate's intro) — stops the
+// click from reaching the card underneath it, so previewing never
+// accidentally commits the pick the way clicking the card itself does.
+function PreviewButton({ url }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  function toggle(e) {
+    e.stopPropagation();
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) el.pause();
+    else { el.currentTime = 0; el.play(); }
+  }
+  return (
+    <button className="seq-card-preview" onClick={toggle} data-tooltip={playing ? 'Pause preview' : 'Preview'} data-tooltip-above>
+      <Icon path={playing ? ICONS.pause : ICONS.play} filled={!playing} size={10} />
+      <audio ref={audioRef} src={url} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} style={{ display: 'none' }} />
+    </button>
+  );
+}
 
 // One candidate — either a produced transition (own card, cue countdown +
 // drain bar, destination shown underneath the label) or a cut/outro target
 // (destination is the headline, no cue since a hard cut has no urgency).
 // A single flat list of these, no nested sub-lists: clicking commits
-// immediately, there's no separate stage-then-confirm step anymore.
+// immediately, there's no separate stage-then-confirm step anymore — a
+// built audio piece gets its own preview button instead, precisely so a
+// listen doesn't double as a commit.
 function Card({ row, onClick, onMouseEnter, onMouseLeave, readOnly }) {
   const drainPct = (row.kind === 'transition' && row.hasCue && row.basisSec)
     ? clamp(Math.round((row.secondsLeft / row.basisSec) * 100), 0, 100) : 0;
@@ -35,6 +59,7 @@ function Card({ row, onClick, onMouseEnter, onMouseLeave, readOnly }) {
             </>
           )}
         </div>
+        {row.previewUrl && <PreviewButton url={row.previewUrl} />}
         <div className="seq-card-nums">
           {row.kind === 'transition' && row.hasCue && <span className="seq-card-cue mono-num">{fmtTime(row.secondsLeft)}</span>}
           <span className="seq-card-length mono-num">{fmtTime(row.destDurationSec)}</span>
