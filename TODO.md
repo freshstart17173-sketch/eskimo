@@ -285,13 +285,52 @@ pan/zoom the graph there — it's a navigation aid, not an editor.
    back to the first song) cycles indefinitely — confirmed over multiple
    hops — with zero manual clicks and zero reliance on autoplay's
    randomness, which is the entire point ("you can walk away from it").
-2. [ ] **Graph visuals, read-only first** — the three arrow tiers (grey
-   dotted always-on, replacing today's tiered coloring), typed sockets
-   rendered (hidden when ineligible) but not yet interactive. Get this
-   looking right before wiring up interaction.
-3. [ ] **Socket interaction** — click-to-toggle None/Intro/Outro, drag-to-
-   connect Transition sockets (with the multi-candidate popup), the
-   hover-✕ disconnect, the connected-socket label + reopen behavior.
+2. [x] ~~**Graph visuals**~~ — done: the old tiered next/later/base edge
+   coloring is gone, replaced by the three-state model in `GraphPane.jsx`
+   — every produced transition renders as a thin grey dotted arrow always
+   (`transitionEdgesRaw`, unconditional); the one actually active in
+   `activePlaylist` (matched by `endEdgeId`) renders instead as a thick
+   solid ink arrow, and animates (marching-ants) only while
+   `mixingEdgeId` says a real crossfade is in progress; active non-
+   transition links (Outro/None/Intro/None pairings with no produced edge
+   behind them) are synthesized straight from `activePlaylist.nodes` as a
+   separate ink-dotted family. `GraphNodes.jsx`'s old single hover-card
+   (Transition/Cut/Outro buttons) is gone, replaced by up to six typed
+   `Handle`s per node — None/Intro/Transition on the left, None/Outro/
+   Transition on the right, each hidden entirely when `leftSocketTypes`/
+   `rightSocketTypes` (`core.js`) say that type has zero eligible options
+   for that song. Socket type is coded by a small monochrome letter (N/I/
+   O/T), not a hue — a fixed color-per-type scheme was considered and
+   dropped for the same reason per-song cover coloring was: this app's
+   established brutalist/typographic style (the tags, the io counts)
+   already reads cleanly through ink/paper contrast and shape, and a new
+   color system here would just be another thing to keep consistent with
+   nothing gained. A wired side shows a small label (the transition's
+   name, or "Outro"/"Intro") just outside the card.
+2b. [x] ~~**Socket interaction (None/Intro/Outro)**~~ — done ahead of
+   drag-to-connect: clicking a None/Intro/Outro socket toggles it
+   directly (clicking the already-active one turns it back to None) via
+   `PerformPage.jsx`'s `toggleSocket`, which writes straight into
+   `session.activePlaylist` — Intro/Outro each resolve their own
+   `startEdgeId`/`endEdgeId` from the one produced intro/outro edge for
+   that song. Verified in a real browser: clicking Intro sets it and
+   toggling again clears it back to none; clicking Outro sets
+   `endMode:'outro'` with the right `endEdgeId`. One real testing
+   footgun worth recording: Playwright's synthetic `.click()` doesn't
+   reliably fire on a React Flow *source*-type `Handle` (it silently did
+   nothing in the first pass) even though a native DOM `.click()` on the
+   exact same element works correctly — confirmed this is a Playwright/
+   React-Flow interaction quirk, not a real bug, before moving on;
+   future tests against source-side sockets should dispatch via
+   `element.click()` in `page.evaluate` rather than Playwright's own
+   `.click()`.
+3. [ ] **Drag-to-connect Transition sockets** — the one piece of Phase 3
+   not yet built: dragging from a Transition output to a Transition input
+   (with the multi-candidate popup when more than one produced transition
+   exists for that pair), and the hover-✕ disconnect for any active wire.
+   `nodesConnectable` is still `false` at the `<ReactFlow>` level — this
+   is the next concrete step. `wireConnection`/`unwireOutput` (`core.js`)
+   already exist and are ready to be called from React Flow's `onConnect`.
 4. [ ] **Countdown bars everywhere** transitions/outros show up.
 5. [ ] **Save/Load playlist** — toolbar button, persisted `playlists`
    array, confirm-before-replace on load.

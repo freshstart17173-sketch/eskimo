@@ -3,7 +3,8 @@ import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
   END, getVisibleEdges, inOutCounts, queueTailId, removeQueueItem,
-  transitionCandidates, cutCandidates, clamp,
+  transitionCandidates, cutCandidates, clamp, leftSocketTypes, rightSocketTypes,
+  unwireOutput, playlistNextHop,
 } from '../core.js';
 import { engine, performAdvance } from '../audioEngine.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
@@ -226,15 +227,66 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     return null;
   }, [session.nowPlayingId, queueIds, nextCandidateIds, laterCandidateIds]);
 
-  // ---------------- edges: tiered coloring, all solid, no per-edge labels ----------------
-  // Only meaningful in Transition mode — a cut/outro candidate isn't backed
-  // by a specific edge, so there's nothing on the canvas to highlight for it.
-  const transitionEdges = useMemo(() => transitionEdgesRaw.map(e => {
-    let tier = 'base';
-    if (isTransitionMode && e.l === fromId && nextCandidateIds.has(e.r)) tier = 'next';
-    else if (isTransitionMode && hoveredId && e.l === hoveredId && laterCandidateIds.has(e.r)) tier = 'later';
-    return { ...e, _tier: tier };
-  }), [transitionEdgesRaw, isTransitionMode, fromId, nextCandidateIds, hoveredId, laterCandidateIds]);
+  // ---------------- playlist-editor sockets (see TODO.md) ----------------
+  // One entry per song: which typed sockets it can even show (hidden
+  // entirely when a type has zero eligible options), which one is
+  // currently active per the live wiring, and the small label a wired
+  // side displays (a transition's name, or "Outro"/"Intro"). GraphPane
+  // renders this straight onto each node — the three-tier edge coloring
+  // this replaced lived here too, now driven by activePlaylist instead of
+  // the old hover/next-candidate state.
+  const activePlaylist = session.activePlaylist;
+  const socketDataById = useMemo(() => {
+    const map = {};
+    Object.keys(songs).forEach(id => {
+      const node = activePlaylist.nodes[id];
+      let leftLabel = null, rightLabel = null;
+      if (node) {
+        if (node.startMode === 'intro') leftLabel = 'Intro';
+        else if (node.startMode === 'transition' && node.startEdgeId) {
+          const edge = visibleEdges.find(e => e.id === node.startEdgeId);
+          leftLabel = edge ? (edge.label || 'Transition') : 'Transition';
+        }
+        if (node.endMode === 'outro') rightLabel = 'Outro';
+        else if (node.endMode === 'transition' && node.endEdgeId) {
+          const edge = visibleEdges.find(e => e.id === node.endEdgeId);
+          rightLabel = edge ? (edge.label || 'Transition') : 'Transition';
+        }
+      }
+      map[id] = {
+        leftTypes: leftSocketTypes(visibleEdges, id), rightTypes: rightSocketTypes(visibleEdges, id),
+        leftActive: node ? node.startMode : 'none', rightActive: node ? node.endMode : 'none',
+        leftLabel, rightLabel,
+      };
+    });
+    return map;
+  }, [songs, visibleEdges, activePlaylist]);
+
+  // A socket click toggles None/Intro/Outro directly (clicking the type
+  // that's already active turns it back off, to None); a Transition
+  // socket is only ever set by a real drag-connect — see TODO.md. Intro
+  // and Outro don't need a destination to mean something on their own
+  // ("this song always starts with its intro" / "ends with its outro,
+  // even if nothing's wired after it yet") — dragging a connection later
+  // can still attach a specific next song on top of either.
+  function toggleSocket(songId, side, type) {
+    setSession(prev => {
+      const node = prev.activePlaylist.nodes[songId];
+      const base = node || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null };
+      if (side === 'left') {
+        const turningOn = base.startMode !== type;
+        const startMode = turningOn ? type : 'none';
+        const startEdgeId = startMode === 'intro' ? ((findEdge(e => e.type === 'intro' && e.r === songId) || {}).id || null) : null;
+        const nodes = { ...prev.activePlaylist.nodes, [songId]: { ...base, startMode, startEdgeId } };
+        return { ...prev, activePlaylist: { ...prev.activePlaylist, nodes } };
+      }
+      const turningOn = base.endMode !== type;
+      if (!turningOn) return { ...prev, activePlaylist: unwireOutput(prev.activePlaylist, songId) };
+      const endEdgeId = type === 'outro' ? ((findEdge(e => e.type === 'outro' && e.l === songId) || {}).id || null) : null;
+      const nodes = { ...prev.activePlaylist.nodes, [songId]: { ...base, endMode: type, endEdgeId } };
+      return { ...prev, activePlaylist: { ...prev.activePlaylist, nodes } };
+    });
+  }
 
   // ---------------- search (Fuse.js) ----------------
   const fuse = useMemo(() => new Fuse(Object.values(songs), { keys: ['title', 'artist'], threshold: 0.35, ignoreLocation: true }), [songs]);
@@ -308,38 +360,24 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchActive, matches, matchIndex, hasStarted]);
 
-  // ---------------- graph hover-card: same three-way ending choice the
-  // Playing card offers, but scoped to this one hovered song — a click
-  // commits immediately, no separate stage step, and each option shows up
-  // (or doesn't) based on whether it's actually reachable from here,
-  // independent of whatever the Playing card's own toggle is set to. ----
-  const hoverCardFor = useCallback((id) => {
-    if (!hasStarted || hoveredId !== id || usedIds.has(id)) return null;
-    const transitionEdge = transitionCandidates(visibleEdges, fromId, usedIds).find(e => e.r === id);
-    const canCut = cutCandidates(songs, usedIds).includes(id);
-    if (!transitionEdge && !canCut) return null;
-    return {
-      transition: transitionEdge ? { onCommit: () => commitTransition(transitionEdge.id, id) } : null,
-      cut: canCut ? { onCommit: () => commitCutOrOutro(id, 'cut') } : null,
-      outro: (canCut && hasOutroForPlaying) ? { onCommit: () => commitCutOrOutro(id, 'outro') } : null,
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasStarted, hoveredId, usedIds, fromId, visibleEdges, songs, hasOutroForPlaying]);
-
   const cueBarPct = nowSong && nowSong.durationSec ? Math.round((1 - session.timeLeft / nowSong.durationSec) * 100) : 0;
 
   // Spotify-style dual display: once we're within CROSSFADE_LOOKAHEAD_SEC of
   // the committed transition's real cue point, show both songs instead of
   // just Playing.
-  const queueHead = session.queue[0];
+  // A wired-but-not-manually-queued hop needs to show "mixing into" too —
+  // same effective-head reasoning as the tick loop's trigger check, so the
+  // UI and the real handoff always agree on what's about to happen.
+  const queueHead = session.queue[0] || (session.nowPlayingId ? playlistNextHop(activePlaylist, session.nowPlayingId) : null);
   const committedEdge = (queueHead && queueHead.mode === 'transition' && queueHead.edgeId)
     ? edges.find(e => e.id === queueHead.edgeId) : null;
-  let mixingIntoSong = null, crossfadePct = 0;
+  let mixingIntoSong = null, crossfadePct = 0, mixingEdgeId = null;
   if (nowSong && queueHead && queueHead.mode === 'transition') {
     const triggerAt = committedEdge && committedEdge.outSeconds != null ? committedEdge.outSeconds : nowSong.durationSec;
     if (triggerAt - elapsed <= 8) {
       mixingIntoSong = songs[queueHead.id] || null;
       crossfadePct = clamp(Math.round((1 - Math.max(0, triggerAt - elapsed) / 8) * 100), 0, 100);
+      mixingEdgeId = committedEdge ? committedEdge.id : null;
     }
   }
 
@@ -415,10 +453,11 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       <div className="perform-layout">
         <div className="graph-pane">
           <GraphPane
-            songs={songs} positions={positions} transitionEdges={transitionEdges}
+            songs={songs} positions={positions} transitionEdgesRaw={transitionEdgesRaw} activePlaylist={activePlaylist}
+            socketDataById={socketDataById} onToggleSocket={toggleSocket} mixingEdgeId={mixingEdgeId}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive}
-            onDragSongPosition={onDragSongPosition} hoverCardFor={hoverCardFor}
+            onDragSongPosition={onDragSongPosition}
             endQueued={queueIds.includes(END)}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
           />

@@ -517,6 +517,34 @@ a { color: var(--accent); }
 .graph-pane .react-flow__handle { opacity: 0; pointer-events: none; }
 .graph-pane .react-flow__node { cursor: pointer; }
 
+/* Typed left/right sockets (the playlist editor — see TODO.md). Higher
+   specificity than the blanket opacity:0 rule above (which still correctly
+   hides the End node's own plain handle) so these render as real, visible
+   dots rather than React Flow's default handle square. Monochrome and
+   type-coded by a letter, not a hue — a color-per-socket-type scheme was
+   considered and dropped for the same reason per-song cover coloring was:
+   it doesn't add real signal here, ink/paper contrast already does the
+   job at any zoom level. */
+.graph-pane .react-flow__handle.node-socket {
+  width: 15px; height: 15px; border-radius: 50%; background: var(--paper); border: 1.5px solid var(--ink);
+  display: flex; align-items: center; justify-content: center; z-index: 3; opacity: 1; pointer-events: auto;
+}
+.node-socket-label { font-size: 8px; font-weight: 700; line-height: 1; color: var(--ink); font-family: var(--font-mono); pointer-events: none; }
+.node-socket-active { background: var(--ink); }
+.node-socket-active .node-socket-label { color: var(--paper); }
+.node-socket-clickable { cursor: pointer; }
+.node-socket-clickable:hover { box-shadow: 0 0 0 3px rgba(19, 19, 19, .15); }
+.state-playing .node-socket-clickable:hover { box-shadow: 0 0 0 3px rgba(252, 252, 252, .25); }
+.state-playing .node-socket { background: var(--paper-fixed); }
+.state-playing .node-socket-active { background: var(--ink); }
+.state-playing .node-socket-active .node-socket-label { color: var(--paper-fixed); }
+
+/* The small label that appears on a side once it's actually wired to
+   something — a transition's name, or "Outro"/"Intro" — sitting just
+   outside the card so it doesn't fight the tags/art for space inside it. */
+.node-connection-labels { position: absolute; left: 0; right: 0; bottom: -18px; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: 600; color: var(--muted); pointer-events: none; }
+.node-connection-label { background: var(--paper); padding: 1px 4px; border-radius: 3px; border: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 48%; }
+
 .node-card {
   width: 190px; border-radius: var(--radius); padding: 9px;
   background: var(--paper); color: var(--ink); border: 1.5px solid var(--line);
