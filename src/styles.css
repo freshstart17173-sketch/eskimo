@@ -240,6 +240,7 @@ a { color: var(--accent); }
 .seq-mixing-text { min-width: 0; }
 .seq-mixing-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-mixing-artist { font-size: 10.5px; color: rgba(252, 252, 252, .6); }
+.seq-mixing-pct { font-family: var(--font-mono); font-weight: 600; font-size: 12px; color: var(--paper); flex: none; }
 .playhead-track.in-crossfade .playhead-fill { background: var(--state-later); }
 .seq-now .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper); }
 /* a regular playhead — elapsed/total, not a countdown — plus the missing
@@ -283,6 +284,24 @@ a { color: var(--accent); }
 .seq-toggle.active { background: var(--ink); color: var(--paper); }
 .seq-toggle:disabled { opacity: .35; cursor: not-allowed; }
 .seq-empty { font-size: 11.5px; color: var(--faint); font-style: italic; padding: 4px 2px; }
+
+/* multiple produced transitions between the row's song and Playing — shown
+   indented under the row, only when there's an actual choice to make */
+.seq-row-transitions { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 3px; margin-top: 7px; padding-left: 10px; border-left: 2px solid var(--line-soft); }
+.seq-transition-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); padding: 3px 5px; border-radius: var(--radius); }
+.seq-transition-item.selectable { cursor: pointer; }
+.seq-transition-item.selectable:hover { background: rgba(19, 19, 19, .05); }
+.seq-transition-item.active { background: var(--accent-bg); color: var(--accent-ink); }
+.seq-transition-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); flex: none; }
+.seq-transition-item.active .seq-transition-dot { background: var(--accent-ink); }
+.seq-transition-label { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seq-transition-cue { font-size: 10px; color: var(--faint); flex: none; }
+.seq-transition-item.active .seq-transition-cue { color: var(--accent-ink); opacity: .75; }
+.seq-row-more {
+  align-self: flex-start; font-size: 10.5px; font-weight: 600; color: var(--accent-ink);
+  padding: 3px 5px; text-decoration: underline; text-underline-offset: 2px;
+}
+.seq-row-more:hover { color: var(--ink); }
 
 .seq-path { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .seq-path-chip { display: flex; align-items: center; gap: 6px; padding: 3px 7px; border-radius: var(--radius); background: var(--panel); font-size: 11px; font-weight: 600; }

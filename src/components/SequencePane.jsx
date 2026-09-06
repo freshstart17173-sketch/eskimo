@@ -39,7 +39,7 @@ function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode
           <div className="seq-row-title">{row.title}</div>
           {!isEnd && <div className="seq-row-artist">{row.artist}</div>}
         </div>
-        {!isEnd && <span className="seq-row-countdown mono-num">{fmtTime(row.secondsLeft)}</span>}
+        {!isEnd && row.secondsLeft != null && <span className="seq-row-countdown mono-num">{fmtTime(row.secondsLeft)}</span>}
       </div>
 
       {hasChoice && (
