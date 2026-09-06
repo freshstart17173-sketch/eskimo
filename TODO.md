@@ -41,11 +41,13 @@ Intro, Outro, BPM, Key, Cue); only the app's own states are simplified to
 these three, used consistently in code, UI copy, and this document:
 
 - **Playing** — the song live right now.
-- **Next** — reachable-now candidates (the graph's purple-outlined nodes,
-  the Sequence pane's first list); once one is armed it's the thing that
-  will actually play after Playing.
-- **Later** — what's reachable *after* whatever's staged in Next — a
-  two-move lookahead, not an open chain.
+- **Next** — reachable-now candidates (the graph's accent-outlined nodes,
+  the Sequence pane's card list); clicking one commits it immediately as
+  the thing that will actually play after Playing — there's no separate
+  staging step (round 4).
+- **Later** — a hover-only preview (not a staged plan) of what picking a
+  given Next candidate would lead to — a one-move lookahead, not an open
+  chain, and nothing is committed by it.
 - **Cut** — a hard edge with no fragment.
 
 ## Graph model — decided, don't revisit
@@ -148,55 +150,112 @@ converts directly into the actual detected in/out timecodes (no longer
 the old deterministic placeholder matcher only when there's no reference
 audio anywhere yet to correlate against (and says so in the UI).
 
-## Your tasks (only you can do these — accounts, keys, hosting)
+## Your tasks — step by step, to get this fully working (only you can do these)
 
-1. **GitHub Pages**: Settings → Pages → Source: "GitHub Actions". The
-   updated workflow builds with `npm ci && npm run build` and deploys
-   `dist/` — next push to `main` gets you a live URL, no backend required.
-2. **Supabase — already live.** I found a Supabase project named "eskimo"
-   already on your account and used it: applied `supabase/schema.sql`
-   (one RLS-scoped `library` table) via the Supabase MCP connection, and
-   `src/config.js` already has that project's real URL + anon publishable
-   key. The one thing I *can't* do through that connection is flip the
-   Auth provider toggle — **Authentication → Providers → enable Anonymous
-   Sign-Ins** on that project (there's no login screen yet, so anonymous
-   auth is what gives each browser a stable identity to sync under). Sync
-   silently no-ops until that's on.
-3. **Cloudflare R2** (for audio storage — this is what unlocks real
-   detection + reference downloads for everyone, not just locally):
-   - Create a bucket: `npx wrangler r2 bucket create eskimo-studio-audio`
-     (name matches `worker/wrangler.toml`).
-   - Bucket → Settings → **Public access** → turn on (the free `r2.dev`
-     subdomain is fine to start) → put that URL into `wrangler.toml`'s
-     `PUBLIC_BUCKET_URL`.
-   - **CORS** — you asked about this, and yes, it's needed twice, for two
-     different things:
-     - *The bucket itself* needs a CORS policy so the browser can `fetch()`
-       reference audio directly (for detection, and for the download
-       button) from a different origin (your Pages site) than the bucket's
-       own. In the R2 bucket's Settings → CORS Policy, add:
-       ```json
-       [
-         {
-           "AllowedOrigins": ["*"],
-           "AllowedMethods": ["GET"],
-           "AllowedHeaders": ["*"],
-           "MaxAgeSeconds": 3600
-         }
-       ]
-       ```
-       (Tighten `AllowedOrigins` to your actual `https://<you>.github.io`
-       once you have that URL.)
-     - *The worker* (`worker/upload-worker.js`) already sets its own CORS
-       response headers for the `/upload` endpoint — that's a separate
-       concern from the bucket's CORS above (one governs uploads through
-       the worker, the other governs direct reads from the bucket).
-   - Deploy: `cd worker && npx wrangler login && npx wrangler deploy` →
-     copy the `*.workers.dev` URL into `src/config.js`'s
-     `UPLOAD_WORKER_URL` (or a repo secret, see the workflow file).
-4. Tell me once the above is done (or hand me anything you'd rather I
-   didn't do myself) and I'll verify sync + upload + detection end-to-end
-   against the real thing instead of just the local build.
+The app already **works right now with zero setup**: everything runs
+locally in `localStorage`, no account or config needed, and every feature
+in this file (including real audio analysis and real playback) works the
+moment you upload real audio files — none of the steps below are required
+just to use the app on one browser/one device. What they unlock:
+
+- **Step 1 (GitHub Pages)** — a public URL, so it's not just `localhost`.
+- **Step 2 (Supabase)** — your library syncs across your own devices/browsers.
+- **Step 3 (Cloudflare R2 + the worker)** — uploaded audio is actually
+  stored somewhere real (not just on the one browser you dropped it in),
+  which is also what turns on real audio detection in Add Audio and real
+  BPM/key/duration analysis and real playback in Upload Song / Perform for
+  everyone who opens your synced library, not just you, locally.
+
+None of the three steps depend on each other — do them in any order, or
+skip whichever you don't need. Current status of each, as of this pass:
+
+### 1. GitHub Pages — get a public URL
+**Status: not yet confirmed done.**
+1. In the repo on GitHub: **Settings → Pages → Source → "GitHub Actions"**.
+2. Push to `main` (or re-run the "Deploy to GitHub Pages" workflow from the
+   Actions tab). `.github/workflows/pages.yml` already exists and does
+   `npm ci && npm run build`, deploying `dist/` — nothing else to write.
+3. The workflow's Actions run will show the live URL once it finishes
+   (also visible under Settings → Pages afterward).
+
+### 2. Supabase — sync your library across devices
+**Status: mostly done — one toggle left.** A Supabase project named
+"eskimo" is already live and wired up: `supabase/schema.sql` (one
+RLS-scoped `library` table) is applied, and `src/config.js` already has
+that project's real URL and anon publishable key — nothing to create or
+copy here.
+1. Open the **eskimo** project at supabase.com/dashboard.
+2. Go to **Authentication → Providers**.
+3. Enable **Anonymous Sign-Ins** (there's no login screen in this app —
+   anonymous auth is what gives each browser a stable identity to sync
+   under).
+4. That's it — no further config. Sync silently does nothing (fails quiet,
+   logs a console warning) until this one toggle is on; every session run
+   in this pass still shows that same warning, so this is very likely
+   still off.
+
+### 3. Cloudflare R2 + the upload worker — real audio storage
+**Status: not started.** `UPLOAD_WORKER_URL` in `src/config.js` is still
+blank and `worker/wrangler.toml`'s `PUBLIC_BUCKET_URL` is still the
+placeholder — until this step is done, uploaded audio only ever becomes a
+local-to-your-browser file (metadata is saved, but there's no real
+`audioUrl`, so Add Audio detection, BPM/key/duration analysis, and real
+playback all silently fall back to their no-audio behavior for anyone else
+who opens the synced library).
+1. **Create the bucket** (needs a free Cloudflare account + `wrangler`,
+   installed automatically by `npx`):
+   ```
+   npx wrangler login
+   npx wrangler r2 bucket create eskimo-studio-audio
+   ```
+   (the name already matches `worker/wrangler.toml` — no edit needed for
+   the bucket name itself).
+2. **Turn on public access**: Cloudflare dashboard → R2 → your bucket →
+   Settings → **Public access** → enable it (the free `r2.dev` subdomain
+   is fine to start; a custom domain works too). Copy that public URL.
+3. **Paste that URL into `worker/wrangler.toml`**, replacing the
+   `PUBLIC_BUCKET_URL` placeholder under `[vars]`.
+4. **Add CORS to the bucket itself** (a separate concern from the worker's
+   own CORS below — this is what lets the browser `fetch()` reference
+   audio directly from R2 for detection/analysis/playback and the download
+   button). Bucket → Settings → **CORS Policy** → add:
+   ```json
+   [
+     {
+       "AllowedOrigins": ["*"],
+       "AllowedMethods": ["GET"],
+       "AllowedHeaders": ["*"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+   (Tighten `AllowedOrigins` to your actual `https://<you>.github.io` once
+   step 1 gives you that URL — `"*"` is fine to get started.)
+5. **Deploy the worker** (this is what the app's Upload Song / Add Audio
+   pages actually POST files to — it already sets its own CORS headers for
+   its `/upload` endpoint, so there's nothing to add there beyond step 4):
+   ```
+   cd worker
+   npx wrangler deploy
+   ```
+   This prints a `*.workers.dev` URL — copy it.
+6. **Paste that worker URL into `src/config.js`'s `UPLOAD_WORKER_URL`**
+   (or set it as a `UPLOAD_WORKER_URL` repo secret instead — the Pages
+   workflow already knows to read `SUPABASE_URL` / `SUPABASE_ANON_KEY` /
+   `UPLOAD_WORKER_URL` secrets and patch them into the build at deploy
+   time, so you don't have to commit the worker URL directly if you'd
+   rather not).
+7. Commit/push (if you edited `src/config.js` directly rather than using a
+   secret) — the next Pages deploy will pick it up.
+
+### 4. When you're done
+Tell me which of the three you completed (or which you'd rather I do
+myself where I can — I can apply Supabase schema changes and read config
+through the MCP connection, but I can't click the Pages/Auth toggles or
+hold your Cloudflare login for you). Once any of these are live I'll
+verify that piece end-to-end against the real thing — sync, upload,
+detection, analysis, playback — rather than only against the local build
+the way everything's been verified so far.
 
 ## My tasks — Easy / Medium / Hard
 
@@ -205,83 +264,416 @@ Everything below came out of actually looking at this with an eye toward
 seen it" — the standard you asked for, benchmarked against the kind of
 apps this one takes inspiration from.
 
+### Done this pass (round 5 — branch reconciliation + a stray CI hazard)
+Two concurrent sessions ended up working this same handoff independently
+(both landed on essentially the same multi-transition/mixing-into/fanned-
+edge fix around the same time — see "round 3" below); merging their
+history in found the later one's version already superseded the earlier
+one's everywhere they overlapped (a real perpendicular-offset edge instead
+of a curvature hack, a from-scratch card-based Next list instead of a
+nested picker), so the merge keeps that side wherever the two conflicted.
+Two independently-useful things came out of doing the merge carefully
+rather than just force-pushing over it:
+- Added `src/core.test.js` — real unit tests (Node's built-in test runner,
+  `npm test`, no new dependency) over `core.js`'s reachability, autoplay
+  picking, `advanceSession`, cascade delete, and the library list. The
+  `sample*ForTests` fixtures already in `core.js` existed for exactly this
+  and were previously unused — the comment above them said so.
+- Deleted `.github/workflows/jekyll-gh-pages.yml`. This wasn't something
+  either coding session wrote — it's GitHub's own default sample workflow,
+  which gets offered when Pages is enabled through the repo Settings UI,
+  and someone had accepted it. It builds this branch as a *Jekyll* site
+  (wrong for a Vite/React app) and deploys straight to Pages on every push
+  to `claude/eskimo-ui-mockup-uxdg8z` — a real hazard, since the actual
+  deploy workflow (`pages.yml`) already targets this same Pages
+  environment from `main`. Left in place, every dev-branch push would have
+  raced a broken Jekyll build against the real one.
+
+### Done this pass (round 4 — Perform live-experience redesign)
+A direct user request to simplify the live mental model, implemented in
+full: (1) the Playing card's old 2-way "How it ends" (Cut/Outro) toggle is
+now a 3-way **Transition / Cut / Outro** toggle that alone decides what
+the Next list offers — Transition mode shows only built transitions (each
+produced transition is its own card); Cut/Outro mode shows every other
+song in the library, auto-starting via its intro edge when one exists.
+The old per-row Cut/Transition toggle on Next rows is gone entirely — one
+mode, one place it's chosen, no more "which cut is this" confusion.
+(2) Clicking a Next card commits it immediately — no more stage-then-
+"Set X as Next"-button two-step. (3) Next is one flat scrollable list of
+larger cards, no nested sub-lists; a transition's destination song is
+shown underneath its label, with a real countdown/drain bar and numeric
+cue time; a cut/outro card leads with the destination song and its own
+numeric length. "Later" is now a hover-only preview (not a staged plan)
+of what picking a given card would lead to. (4) End Set is gone from the
+list — reachable only from a low-key "End set…" link on the Playing card
+or the graph's End node, both routing through a real `ConfirmModal`
+(`shared.jsx`) with its own Cut/Outro pick. (5) The Playing node on the
+graph canvas now shows live numeric elapsed/total time, matching what the
+side panel's Playing card already showed. (6) "Next song →" is now an
+icon-only skip button.
+Under the hood: `session.endingChoice` ('cut'|'outro') became
+`session.nextMode` ('transition'|'cut'|'outro'), persisting across a set
+instead of resetting every song (an outro auto-falls back to cut if the
+new Now Playing has none). `core.js` gained `transitionCandidates`/
+`cutCandidates` (the two candidate-list builders, shared between the real
+Next list and the hover preview) and `queueTailId` (replacing
+`computeReachability`, whose `tier1` output is no longer needed now that
+candidates are computed directly); `oneHopReachable` was removed as dead
+code once staging went away. The graph's node hover-card collapsed from a
+two-step Stage/Confirm + mode toggle to one "Set as next" button, calling
+the same commit path the side panel cards use. Autoplay's own
+Settings-page "Transition-only" toggle is intentionally untouched — it
+governs autoplay's unattended dead-end fallback, a different concern from
+the manual Next list's new mode toggle, even though the two are easy to
+conflate by name.
+Verified end-to-end with Playwright against the real dev server: multiple
+transition cards per song pair, immediate commit on click, mode switching
+changing the list contents, the End Set modal from both entry points
+(link and graph node), and the graph node's live numeric position.
+
+**Follow-up in the same pass**: a Next-list card's built audio (a
+transition's fragment, or a cut/outro candidate's intro) can now be
+previewed before committing — a small round play/pause button on the
+card, self-contained (`PreviewButton` in `SequencePane.jsx`), that stops
+its click from reaching the card underneath it so listening never doubles
+as a commit. Library already had this for every built edge via its own
+`<audio controls>` in the song drawer, so this closes the one place that
+didn't: Perform's Next list. Verified with Playwright (real WAV data
+URIs): clicking preview plays audio and leaves the queue untouched;
+present on both a transition card and an intro-carrying cut/outro card.
+
+### Done this pass (round 3 — multi-transition picker, mixing-into, finished + verified)
+Answers the user's three questions: (1) multiple produced transitions
+between the same two songs are now all usable, not just the first found;
+(2) the Playing card shows a Spotify-style "Mixing into" block (art, title,
+artist, crossfade %) once within `CROSSFADE_LOOKAHEAD_SEC` of a committed
+transition's real cue point; (3) every Next/Later row now has a countdown
+drain bar. Picking up round 2's in-progress handoff and finishing it:
+- Added the CSS that was missing for `.seq-transition-item` and friends
+  (`.seq-row-transitions`, `-dot`, `-label`, `-cue`, `.seq-row-more`,
+  `.seq-mixing-pct`) — indented rows with a muted dot, an accent-tinted
+  active state, and a link-style "See N more"/"Show less" toggle.
+- `GraphPane.jsx`: multiple transition edges between the same two nodes no
+  longer overlap into what looks like one line. A `pathOptions.curvature`
+  tweak on the default bezier turned out not to work — React Flow's
+  Right/Left handle positions keep both bezier control points at the same
+  y as their endpoint, so two nodes at the same height stay a dead-straight
+  overlapping line no matter the curvature value. Replaced with a custom
+  `fanned` edge type (`fannedBezierPath` in `GraphPane.jsx`) that adds a
+  real perpendicular offset to both control points — separates duplicate
+  edges regardless of the two nodes' relative layout.
+- Verified with a Playwright script driving the real dev server (seeded
+  `localStorage` directly with two songs and two transitions between them,
+  no demo data touches the shipped app): confirmed the multi-transition
+  picker, expand/collapse, the drain bars, the now-visibly-fanned graph
+  edges, and the "Mixing into" block appearing at the right crossfade %.
+  Screenshots aren't kept in the repo — this was a one-off manual
+  verification pass, easy to redo the same way for the next UI change.
+- Verification caught and fixed a real bug along the way: Later-list rows
+  crashed their countdown to `NaN:NaN` because `laterRows` (unlike
+  `nextRows`) never computed a `secondsLeft`/`basisSec` — `SequencePane.jsx`
+  now only renders the countdown span when `secondsLeft` is actually set.
+
 ### Easy
-- [ ] Replace native `window.confirm(...)` dialogs (song delete, edge
-      remove) with the app's own inline confirm pattern (already used for
-      "Clear all data" in Settings) — a browser-native dialog box breaks
-      the whole visual language the moment it appears.
-- [ ] Swap italic `.hint-text` styling for regular-weight muted text —
-      italics read as dated/Word-doc-like, not minimal.
-- [ ] Add a real favicon/tab title treatment (currently unset).
-- [ ] Basic keyboard shortcuts: `/` or `Cmd+K` focuses search, `Esc` clears
-      it, arrow keys step search results, `Space` toggles play/pause on
-      Playing. Small effort, outsized "this feels considered" payoff.
-- [ ] Toolbar buttons (`Focus active`, `Arrange for me`) have `title`
-      tooltips but no visible on-hover tooltip styling — add one
-      consistent tooltip treatment app-wide.
-- [ ] "Analyzing…" during Add Audio detection is plain italic text; a
-      small inline progress indicator would read as far more "real work is
-      happening" than static text, especially once detection is fetching
-      multiple reference tracks.
+- [x] ~~Replace native `window.confirm(...)` dialogs~~ — done: song delete
+      and edge remove in `Library.jsx` now use the same inline
+      confirm/cancel pattern as "Clear all data" in Settings.
+- [x] ~~Swap italic `.hint-text` styling~~ — done, and applied the same fix
+      to `.empty-note`, `.empty-note-sm`, and `.seq-empty` for consistency
+      (all four had the same italic-text issue).
+- [x] ~~Add a real favicon~~ — done: `src/assets/favicon.svg`, a small
+      monochrome mark echoing the app's own Playing (solid)/Next (outlined)
+      node treatment.
+- [x] ~~Basic keyboard shortcuts~~ — done in `PerformPage.jsx`: `/` or
+      `Cmd/Ctrl+K` focuses search, arrow keys step results while search is
+      active, `Space` toggles Playing — all skipped while typing in a text
+      field. Verified with a Playwright pass against the real dev server.
+- [x] ~~Toolbar button tooltips~~ — done: a `[data-tooltip]` CSS utility
+      (dark chip, small delay) now used app-wide, starting with `Focus
+      active`/`Arrange for me`. Placed below rather than above the trigger
+      since the toolbar sits at the very top of the page — above would
+      clip against the viewport edge (confirmed by screenshot, then fixed).
+- [x] ~~Inline progress indicator for Add Audio~~ — done: a small CSS
+      spinner (`.spinner`) next to the "Analyzing…" text.
 
 ### Medium
-- [ ] **Real cover art.** Album art is a decorative placeholder swatch
-      everywhere right now — letting a song store an actual uploaded
-      thumbnail (via the same R2 worker path) would be the single biggest
-      visual-polish lever left; this app's closest inspirations are all
-      very art-forward.
-- [ ] **One-level undo** (a toast with an "Undo" action) for song/edge
-      deletion instead of a blocking confirm — feels more forgiving and
-      modern than a dialog you have to stop and read.
-- [ ] **Guided first-run example.** The app is correctly seed-data-free by
-      design, but that means a brand-new producer friend opens it to
-      nothing — a one-click "load an example graph" into an obviously-
-      marked demo state (never mixed into their real library) would help
-      the exact audience you're handing this to.
-- [ ] Path breadcrumb in the Sequence pane can only be trimmed from the
-      end (by re-staging); removing one specific mid-path step without
-      clearing everything after it isn't possible yet.
-- [ ] Progress feedback for Add Audio detection when checking many
-      reference tracks (currently one static "Analyzing…" for the whole
-      batch, with no sense of how many candidates are left).
+- [x] ~~Real cover art.~~ — done: `AlbumArt` (`shared.jsx`) renders a real
+      `<img>` when a song has `coverUrl`, falling back to the same
+      placeholder swatch otherwise; wired through all 9 call sites (graph
+      nodes, Library rows, Sequence pane, queue bar, song picker). A new
+      `CoverPicker` component + `core.js`'s `uploadCoverIfPossible` let you
+      set one from Upload Song or Library's edit drawer — same worker path
+      as audio when R2 is configured, but unlike a full master a small
+      cover is cheap enough to fall back to a local data URL otherwise, so
+      this works with zero backend setup instead of staying a placeholder
+      until R2 is wired up. Verified end-to-end with Playwright: pick a
+      cover on Upload Song → shows in the preview → shows as a real image
+      in both Library and the graph node after saving.
+- [x] ~~One-level undo~~ — done: `App.jsx` now snapshots songs/edges/
+      session right before a delete, deletes immediately (no confirm), and
+      shows a `.toast` with an "Undo" action for 6s that restores the
+      snapshot wholesale. Library's delete/remove buttons act immediately
+      again — the inline confirm added earlier this pass is gone, since
+      the toast is the whole point of this item. Verified end-to-end with
+      Playwright (delete → row gone + toast shown → Undo → row and its
+      edges back, cascade-deleted edges included).
+- [x] ~~Guided first-run example.~~ — done: "Load an example graph" on
+      both empty states (Perform, Library) populates the small 5-song demo
+      graph (repurposed from `core.js`'s previously-unused
+      `sampleSongsForTests`/`sampleEdgesForTests`), and a persistent
+      `.demo-banner` ("You're viewing an example graph… Start your own")
+      shows the whole time it's active. Never mixes with a real library:
+      `App.jsx`'s `addSong` clears the example first the moment a real
+      song is uploaded, so nothing gets blended in regardless of when that
+      happens. Verified end-to-end with Playwright: empty state → load
+      example → 5 songs/7 pieces + banner → upload a real song → demo
+      wiped, banner gone, exactly the 1 real song remains.
+- [x] ~~Mid-path breadcrumb removal.~~ — done: `core.js`'s new
+      `removeQueueItem(queue, index, nowPlayingId, visibleEdges)` removes
+      one hop and recomputes the seam right after it against its new
+      predecessor (a built transition if one exists between them,
+      otherwise a cut) instead of losing the rest of the plan. The queue
+      bar's existing "✕" (rename in effect: "remove from here on", still
+      a full truncate) now sits next to a new "−" ("skip just this song"),
+      shown only when something is actually queued after that item — both
+      get the app's `[data-tooltip]` treatment, flipped above the chip via
+      a new `[data-tooltip-above]` modifier since the queue bar sits at
+      the bottom of the page. Verified with a standalone test of the pure
+      function (5 cases: mid removal with/without a direct edge to fall
+      back on, removing the last item, an out-of-range index, and removing
+      right before an End Set item) and end-to-end with Playwright driving
+      the real queue.
+- [x] ~~Progress feedback for Add Audio detection~~ — done:
+      `detectMatch` (`audioDetect.js`) takes an optional `onProgress(done,
+      total)` callback fired once per reference track actually checked;
+      `AddAudio.jsx` shows "Checking reference track N of M…" instead of
+      one static line for the whole batch. Verified by calling the real
+      `detectMatch` directly in a browser with synthetic WAV reference
+      tracks (a full UI drive got unreliable in this sandbox — its network
+      proxy struggles with the app's live Supabase/Google Fonts calls on
+      page load, unrelated to this change).
+- [x] ~~Round-5 Perform-page follow-ups~~ — done: the graph's End node is
+      no longer clickable (it was the one thing on the canvas a stray
+      click/drag could hit by accident) — the real trigger is now a
+      deliberately loud red "End set" button in the toolbar, top-right
+      near the playing/next/later legend, still gated by the same confirm
+      modal; the End node itself stays as a read-only "part of your plan"
+      / "not queued" indicator. The graph's per-node hover-card now offers
+      the same three-way Transition/Cut/Outro choice as the Playing
+      card's toggle, scoped to that one hovered song and independent of
+      whatever the Playing card is currently set to — each option commits
+      immediately and is disabled (with a tooltip explaining why) when
+      it's not actually reachable from here. The Outro toggle (Playing
+      card and hover-card both) now explains itself with a tooltip
+      ("No outro produced for this song") instead of just going grey with
+      no context. The Next list's countdown drain bar was real but
+      essentially invisible (a 7%-opacity black wash) — now an accent-
+      colored fill anyone can actually see draining. A transition
+      candidate whose cue point has passed (it can't cleanly start
+      anymore — its audio was built to begin exactly at that timecode)
+      now drops out of the Next list instead of sitting at a dead "0:00";
+      if that card had keyboard focus, focus follows to whatever now
+      sits in its old slot rather than vanishing into the document body.
+      Verified in a real browser: the toolbar button is present and red
+      and opens the confirm modal; the drain bar's computed background/
+      opacity confirm it now reads as a real progress fill; the hover-card
+      renders all three options with Outro correctly disabled when there's
+      no outro edge; both the Next-list card commit and the hover-card's
+      direct Cut commit land the right queue entry.
 
 ### Hard
-- [ ] **Real playback (Web Audio API)** — actual scheduled crossfades,
-      not just planning. This is the biggest remaining "does it actually
-      DJ" gap and touches audio engine, timing/scheduling, and the whole
-      Sequence pane's countdown semantics (which are currently a mocked
-      `durationSec`, not read from real audio).
-- [ ] **Range-fetch based detection.** `audioDetect.js` currently downloads
-      each candidate's *entire* reference file to correlate ~10 seconds of
-      it — fine for a small library, real cost at scale. The fix is HTTP
-      Range requests against R2 (R2 supports them) to fetch only the
-      head/tail bytes needed, which also means teaching
-      `worker/upload-worker.js` (or R2 directly, since public bucket reads
-      don't go through the worker) to pass Range headers through cleanly.
-- [ ] **Real audio duration + BPM/key from analysis** (Essentia.js,
-      WebAssembly, client-side) — replaces `mockDuration` and the
-      manually-entered BPM/key fields, and would make the Sequence pane's
-      countdown mechanic real instead of simulated.
-- [ ] **Dark mode** as a genuine second token set (not a filter/invert) —
-      noted as real work in the original design pass and still true; the
-      brutalist tag styling in particular needs its own dark treatment,
-      not just inverted grays.
-- [ ] **Accessibility pass**: keyboard navigation for a fundamentally
-      spatial, mouse-driven graph canvas is a real design problem, not a
-      quick fix — needs its own thought-through interaction model (e.g. a
-      list-based fallback view), not just tab-index patches.
-- [ ] **Code-split the bundle.** React Flow + dagre + Supabase pushed the
-      single JS chunk to ~685KB — lazy-loading the Perform tab's graph
-      dependencies separately from Library/Upload/Settings would cut
-      initial load meaningfully for a page most sessions won't start on.
+- [x] ~~Real playback (Web Audio API)~~ — done, as a new `src/audioEngine.js`
+      that layers underneath the existing session/queue model rather than
+      replacing it: the session still decides *that* a hop happens (a
+      committed transition's cue point, a manual skip, a dead end); the
+      engine only performs the real audio side of it. Now Playing's own
+      uploaded master actually plays through an `AudioBufferSourceNode`;
+      at a hop, any produced fragment involved (a transition's own
+      recorded clip, an outro leaving the old song, an intro starting the
+      new one) plays to its natural end first, then the destination's own
+      master becomes the new "main" deck — a transition's clip is what
+      carries the actual crossfade, splicing back into the destination at
+      its recorded `inSeconds`; a plain cut/outro always starts its
+      destination from 0. Pausing suspends the whole `AudioContext`
+      (freezes whatever's sounding, fragment or main deck) rather than
+      tracking play/pause per node, so resume always continues exactly
+      where it left off.
+      Graceful per-song degradation, not a hard requirement that every
+      song has audio: `engine.getMainElapsed(songId)` returns null
+      whenever that song isn't genuinely sounding right now, and the set
+      clock (`App.jsx`) falls back to a wall-clock estimate for that song
+      — real audio and "still just planned" can sit side by side in the
+      same set. The set-clock's timer and the manual skip button now both
+      go through one shared `performAdvance` (`audioEngine.js`) so they
+      can never disagree about what a hop actually does.
+      Fixed a real regression caught during verification, not just in the
+      new code: tightening the set-clock's tick to 200ms (for a smoother
+      real-audio countdown) meant every tick produced a new session object
+      faster than the save effect's 400ms debounce could ever fire —
+      autosave would have silently stopped working for the entire
+      duration of any playing set. Reverted to the original 1000ms
+      cadence (still computed from real elapsed time, not a fixed "-1 per
+      tick", so accuracy didn't regress) rather than touching the
+      debounce itself.
+      Verified in a real browser (not mocked) with synthetic WAV audio for
+      two songs plus a produced transition clip between them: Song A's
+      real `AudioContext` clock is confirmed running and advancing at
+      real wall-clock speed; committing the transition and waiting past
+      its cue point shows the transition clip playing through, then
+      Song B's own master becomes the real main deck at its `inSeconds`
+      cue; clicking Pause suspends the context and the real elapsed time
+      genuinely stops advancing (confirmed unchanged after a further
+      1.2s wait); clicking Play resumes it and elapsed continues forward
+      from exactly where it paused.
+- [x] ~~Range-fetch based detection.~~ — done, for the case it can be done
+      correctly: `audioDetect.js`'s new `fetchEdgesRanged(url)` gets a
+      plain-PCM WAV reference's exact duration (from its header, not a
+      decoded buffer) plus head/tail RMS envelopes via one small probe GET
+      and up to two small Range GETs — no worker changes needed, since
+      public bucket reads already bypass the worker straight to R2, which
+      answers Range requests natively (just needs `Range` in the bucket's
+      CORS `AllowedHeaders`, already covered by the `"*"` in the README's
+      recommended policy). Walks the WAV's actual RIFF chunks rather than
+      assuming a fixed 44-byte header, since a DAW export can carry extra
+      metadata chunks first. Deliberately scoped to WAV/PCM only — AIFF/
+      FLAC/MP3 references still get the old full-file `fetchAndDecode`
+      path, because safely reconstructing a decodable partial file from an
+      arbitrary byte range isn't tractable for those formats without a
+      real format parser; `detectMatch` falls back to it automatically
+      whenever the ranged path returns null (not a WAV, not PCM, or a
+      header that didn't fit the probe).
+      Verified against a local HTTP server with real Range support (206
+      Partial Content): the ranged head/tail envelopes and duration are
+      byte-identical to a full decode's, including for a WAV with an
+      injected `LIST` metadata chunk before its data (proves the chunk
+      walker); the full `detectMatch` pipeline correctly identifies both
+      sides of a constructed transition with the right cue timecodes;
+      exactly 3 small range requests are made (all 206s) totaling no more
+      than the file's own size, not one download per candidate; and a
+      non-PCM WAV (audioFormat ≠ 1) correctly returns null to trigger the
+      fallback.
+- [x] ~~Real audio duration + BPM/key from analysis~~ — done, as a small
+      dependency-free DSP module (`src/audioAnalyze.js`) rather than pulling
+      in Essentia.js/WASM: duration comes straight off the decoded
+      `AudioBuffer` (exact, not `mockDuration`'s guess); BPM comes from
+      autocorrelating a frame-energy onset-strength envelope over the lag
+      range for 70-190 BPM (a standard, cheap beat-tracking approach); key
+      comes from a 12-bin chroma vector — built with the Goertzel algorithm
+      (a targeted single-frequency DFT bin, far cheaper than a full FFT
+      when only ~56 note frequencies across ~30s of audio are needed) —
+      correlated against the Krumhansl-Kessler major/minor key profiles at
+      all 12 rotations.
+      Wired into Upload Song: dropping a file kicks off `analyzeAudio` in
+      the background (with its own "Analyzing…" spinner, same visual
+      language as Add Audio's), then fills BPM/Key only if the DJ hasn't
+      already typed something in — same "detected but editable" contract
+      as Add Audio's transition detection — and a "Detected Ns, N BPM, key
+      — edit above if it's off" summary line confirms what was found.
+      Verified two ways: (1) a synthetic WAV built from a 128 BPM click
+      track plus a sustained A-minor chord, fed straight to `analyzeAudio`
+      in a real browser (not jsdom — needs real `decodeAudioData`), came
+      back with exact duration, BPM within 1.2 of true, and the correct
+      key; (2) the same file dropped through the actual Upload Song form
+      in Playwright auto-filled BPM/Key from empty, showed the detected
+      summary, and the saved song in `localStorage` carried the real
+      duration/BPM/key end to end.
+- [x] ~~Dark mode~~ — done, as a genuine second token set, not a filter/
+      invert: `styles.css`'s `:root` still holds the light palette;
+      designed dark values override it via `@media (prefers-color-scheme:
+      dark)` (the default "System" behavior) and an explicit
+      `[data-theme]` attribute that always wins either direction — set by
+      a new Light/System/Dark toggle in Settings → Appearance, persisted
+      to `localStorage` via `src/theme.js` (a device preference, not
+      synced through the app's own JSON blob, same as the OS's own
+      dark-mode switch isn't part of your music library).
+      The real work (and why a blanket token flip would've broken things)
+      was sorting components into two groups: most of the app — page bg,
+      text, panels, borders, buttons, the brutalist tags (already just
+      `border/color: var(--ink)`, so they came along for free once --ink
+      itself got a real dark-mode value) — correctly want `--ink`/
+      `--paper`/`--panel`/etc. to flip together. But a few components are
+      already "inverted" by construction regardless of page theme — the
+      Playing card's fixed navy (`--state-playing`) with light text, the
+      toast/lib-select-bar/active-nav's ink-background chips — and reusing
+      the now-adaptive `--paper` for text on that fixed navy would have
+      gone dark-on-dark. Split those into a `--paper-fixed` token (always
+      light, for the Playing-card family) and a new `--accent-text` token
+      distinct from `--accent-ink` (the latter stays fixed-dark for text
+      *on* the light `--accent` swatch itself — btn-accent, pill.active —
+      while `--accent-text` adapts for accent-colored text sitting on the
+      page or on `--accent-bg`, like the demo banner and cover-picker
+      label). React Flow's edge strokes and canvas dot-grid are literal
+      SVG/canvas paint, not CSS, so they can't read custom properties —
+      `GraphPane.jsx` now picks a light/dark literal itself via the new
+      `useTheme()` hook, with real designed dark values rather than the
+      same light-tuned ones (which would've been jarringly bright against
+      a dark canvas).
+      Caught and fixed a real pre-existing contrast bug along the way,
+      unrelated to dark mode itself but found while auditing every
+      state-playing context: the Playing card's BPM/key tags were using a
+      dead `.seq-now .tag` selector (the real class is `.seq-now-card`),
+      so they'd silently fallen back to default `.tag` styling — dark ink
+      text/border directly on the dark navy card, always low-contrast even
+      in light mode. Fixed the selector.
+      Verified with Playwright across both the explicit `[data-theme]`
+      path and the pure OS-driven `prefers-color-scheme` path (no override
+      set): Perform (Playing card, tags, fanned graph edges, dot grid),
+      the End Set confirm modal, Library, and the undo toast all render
+      with real, legible, designed dark values — and a light-mode
+      screenshot taken after all these changes is pixel-equivalent to
+      before them, confirming zero regression to the default theme.
+- [x] ~~Accessibility pass~~ — done, scoped exactly to the suggestion
+      here: a real list-based fallback for the graph, not tab-index
+      patches on a spatial canvas that was never going to be keyboard-
+      navigable on its own terms. The round-4 redesign already put a flat,
+      list-based Next picker in the side panel as the primary way to
+      choose what plays next — this pass made it a genuinely accessible
+      one: `SequencePane.jsx`'s Next/Later cards are real `<button>`
+      elements now (were a `<div onClick>`, invisible to Tab and unusable
+      without a mouse), each with a computed `aria-label` describing what
+      it leads to; focusing one with the keyboard fires the same
+      `onMouseEnter` a mouse hover would, so Tabbing through the list
+      previews the Later list and highlights the graph exactly the way
+      hovering does — a keyboard-only pass gets the same information a
+      sighted mouse user does, not a degraded one.
+      Also: a site-wide `:focus-visible` ring (keyboard/AT navigation
+      only, never a mouse click) on every interactive element; the End Set
+      `ConfirmModal` (`shared.jsx`) is a real `role="dialog"` with
+      `aria-modal`/`aria-labelledby`, focuses its Cancel button on open
+      (the safer default action), and closes on Escape; every icon-only
+      button that had no visible text (skip, play/pause, the audio preview
+      toggle, search's prev/next match, the queue chip's skip/remove) got
+      a real `aria-label` — `data-tooltip` reads fine on hover but isn't
+      exposed to assistive tech at all; and the segmented Transition/Cut/
+      Outro and Cut/Intro toggles gained `aria-pressed` so a screen reader
+      announces which one is currently selected. The graph canvas itself
+      stays a visual planning surface — the design decision here is that
+      it doesn't need its own parallel a11y story once the thing it drives
+      (the Next list) is a fully keyboard-operable substitute.
+      Verified with Playwright, keyboard-only (no mouse events at all):
+      Tab from the skip button lands on a Next card with a real
+      `aria-label`, pressing Enter commits it exactly like a click would,
+      the visible focus ring renders correctly, and Escape closes the End
+      Set modal after it auto-focused Cancel.
+- [x] ~~Code-split the bundle.~~ — done: all five pages are `React.lazy`
+      in `App.jsx` now, each downloading only once its tab opens.
+      `ReactFlowProvider` moved from `App.jsx` into `PerformPage.jsx`
+      itself (wrapping a new inner component) so `@xyflow/react` doesn't
+      leak into the main chunk via App's own imports. Main chunk: 703KB →
+      374KB (210KB → 107KB gzip); Perform's own chunk (React Flow + dagre
+      + Fuse.js) is 307KB (98KB gzip), Library/Upload/Settings/Add Audio
+      are 2-8KB each. Supabase (~part of the main chunk) is left as-is —
+      it's read synchronously at boot (`isSyncConfigured`) for the
+      always-attempted sync, so deferring it would need a larger, riskier
+      restructure for a smaller win than Perform's split. Verified by
+      building (chunk sizes above) and navigating all five tabs with
+      Playwright — no runtime errors, every page still renders.
 - [x] ~~Autoplay / infinite set mode~~ — done round 2: `pickAutoplayNext`
       (random among built transitions, falls back to a random cut unless
       Transition-only is on) plus `graphEstimate.js`'s SCC-based closed-loop
       detection, both wired into the Sequence pane. Weighting the random
       pick against recently-repeated songs is still open if the plain
       random policy feels too repetitive in practice.
-- [ ] **"Flow" visual pass** — particles/light pulses along built edges for
-      an idle ambient view and a shareable graph "signature" export.
 
 ## Desktop packaging
 

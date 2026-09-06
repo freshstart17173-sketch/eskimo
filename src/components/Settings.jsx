@@ -1,10 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { isSyncConfigured, isUploadConfigured } from '../core.js';
 import { estimateSeamlessLength } from '../graphEstimate.js';
+import { useTheme } from '../theme.js';
 import { Field } from './shared.jsx';
 
 export default function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearAll, onRestore, onSetAutoplay, onSetTransitionOnly }) {
   const estimate = useMemo(() => estimateSeamlessLength(songs, edges), [songs, edges]);
+  const { theme, setTheme } = useTheme();
   const [confirmingReset, setConfirmingReset] = useState(false);
   const fileInputRef = useRef(null);
   const [importError, setImportError] = useState('');
@@ -63,6 +65,21 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
         <Field label="Venue / session name">
           <input className="input" value={venueName} onChange={(e) => setVenueName(e.target.value)} placeholder="e.g. Friday Warehouse" />
         </Field>
+      </div>
+
+      <div className="section-label" style={{ marginTop: 24 }}>Appearance</div>
+      <div className="form-card">
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-title">Theme</div>
+            <div className="settings-row-sub">A device preference, not part of your library — it isn't saved in a backup file.</div>
+          </div>
+          <div className="segmented">
+            <button className={'seq-toggle' + (theme === 'light' ? ' active' : '')} onClick={() => setTheme('light')}>Light</button>
+            <button className={'seq-toggle' + (theme === 'system' ? ' active' : '')} onClick={() => setTheme('system')}>System</button>
+            <button className={'seq-toggle' + (theme === 'dark' ? ' active' : '')} onClick={() => setTheme('dark')}>Dark</button>
+          </div>
+        </div>
       </div>
 
       <div className="section-label" style={{ marginTop: 24 }}>Backup</div>

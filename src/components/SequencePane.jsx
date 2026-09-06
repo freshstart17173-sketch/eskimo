@@ -1,91 +1,121 @@
-import React, { useState } from 'react';
-import { END, fmtTime, clamp } from '../core.js';
+import React, { useState, useRef, useEffect } from 'react';
+import { fmtTime, clamp } from '../core.js';
 import { Icon, ICONS, SongPicker, AlbumArt } from './shared.jsx';
 
-// One produced transition, shown indented under its song once there's more
-// than one to choose between. Selectable only while its song is staged.
-function TransitionOption({ edge, index, active, selectable, onSelect }) {
-  const label = edge.label || ('Transition ' + (index + 1));
+// A self-contained play/pause toggle over the row's own built audio (a
+// transition's fragment, or a cut/outro candidate's intro) — stops the
+// click from reaching the card underneath it, so previewing never
+// accidentally commits the pick the way clicking the card itself does.
+function PreviewButton({ url }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+  function toggle(e) {
+    e.stopPropagation();
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) el.pause();
+    else { el.currentTime = 0; el.play(); }
+  }
   return (
-    <div
-      className={'seq-transition-item' + (active ? ' active' : '') + (selectable ? ' selectable' : '')}
-      onClick={selectable ? (e) => { e.stopPropagation(); onSelect(edge.id); } : undefined}
-    >
-      <span className="seq-transition-dot" />
-      <span className="seq-transition-label">{label}</span>
-      {edge.outSeconds != null && <span className="seq-transition-cue mono-num">cue {fmtTime(edge.outSeconds)}</span>}
-    </div>
+    <button className="seq-card-preview" onClick={toggle} aria-label={playing ? 'Pause preview' : 'Preview'} data-tooltip={playing ? 'Pause preview' : 'Preview'} data-tooltip-above>
+      <Icon path={playing ? ICONS.pause : ICONS.play} filled={!playing} size={10} />
+      <audio ref={audioRef} src={url} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} style={{ display: 'none' }} />
+    </button>
   );
 }
 
-function Row({ row, isEnd, isStaged, showToggles, onClick, stagedMode, onSetMode, stagedEdgeId, onSetStagedEdgeId }) {
-  const [expanded, setExpanded] = useState(false);
-  const transitionEdges = row.transitionEdges || [];
-  const transitionExpired = row.secondsLeft === 0;
-  const drainPct = row.basisSec ? clamp(Math.round((row.secondsLeft / row.basisSec) * 100), 0, 100) : 0;
-
-  // Only worth indenting/labeling once there's an actual choice — a single
-  // transition already has its own countdown right on the row.
-  const hasChoice = transitionEdges.length > 1;
-  const shown = hasChoice ? (expanded ? transitionEdges : transitionEdges.slice(0, 1)) : [];
-  const hiddenCount = transitionEdges.length - shown.length;
-
-  return (
-    <div className={'seq-row' + (isStaged ? ' seq-row-staged' : '')} onClick={onClick}>
-      {!isEnd && <div className="seq-row-drain" style={{ width: drainPct + '%' }} />}
-      <div className="seq-row-main">
-        {!isEnd && <AlbumArt className="lib-art" style={{ width: 22, height: 22 }} />}
-        <div className="seq-row-text">
-          <div className="seq-row-title">{row.title}</div>
-          {!isEnd && <div className="seq-row-artist">{row.artist}</div>}
+// One candidate — either a produced transition (own card, cue countdown +
+// drain bar, destination shown underneath the label) or a cut/outro target
+// (destination is the headline, no cue since a hard cut has no urgency).
+// A single flat list of these, no nested sub-lists: clicking commits
+// immediately, there's no separate stage-then-confirm step anymore — a
+// built audio piece gets its own preview button instead, precisely so a
+// listen doesn't double as a commit.
+function Card({ row, onClick, onMouseEnter, onMouseLeave, onFocusRow, readOnly }) {
+  const drainPct = (row.kind === 'transition' && row.hasCue && row.basisSec)
+    ? clamp(Math.round((row.secondsLeft / row.basisSec) * 100), 0, 100) : 0;
+  const label = row.kind === 'transition'
+    ? (row.label || 'Transition') + ' into ' + row.destTitle
+    : row.destTitle + (row.hasIntro ? ', has an intro' : '');
+  const content = (
+    <>
+      {row.kind === 'transition' && <div className="seq-card-drain" style={{ width: drainPct + '%' }} />}
+      <div className="seq-card-main">
+        <AlbumArt className="seq-card-art" url={row.destCoverUrl} />
+        <div className="seq-card-text">
+          {row.kind === 'transition' ? (
+            <>
+              <div className="seq-card-label">{row.label || 'Transition'}</div>
+              <div className="seq-card-sub">{row.destTitle} <span className="seq-card-sub-artist">{row.destArtist}</span></div>
+            </>
+          ) : (
+            <>
+              <div className="seq-card-label">{row.destTitle}</div>
+              <div className="seq-card-sub">
+                {row.destArtist}
+                {row.hasIntro && <span className="tag tag-good seq-card-intro-tag">Intro</span>}
+              </div>
+            </>
+          )}
         </div>
-        {!isEnd && <span className="seq-row-countdown mono-num">{fmtTime(row.secondsLeft)}</span>}
+        {row.previewUrl && <PreviewButton url={row.previewUrl} />}
+        <div className="seq-card-nums">
+          {row.kind === 'transition' && row.hasCue && <span className="seq-card-cue mono-num">{fmtTime(row.secondsLeft)}</span>}
+          <span className="seq-card-length mono-num">{fmtTime(row.destDurationSec)}</span>
+        </div>
       </div>
-
-      {hasChoice && (
-        <div className="seq-row-transitions">
-          {shown.map((edge, i) => (
-            <TransitionOption
-              key={edge.id} edge={edge} index={i}
-              active={showToggles && stagedMode === 'transition' && stagedEdgeId === edge.id}
-              selectable={showToggles}
-              onSelect={(id) => { onSetMode('transition'); onSetStagedEdgeId(id); }}
-            />
-          ))}
-          {hiddenCount > 0 && (
-            <button className="seq-row-more" onClick={(e) => { e.stopPropagation(); setExpanded(true); }}>
-              See {hiddenCount} more
-            </button>
-          )}
-          {expanded && transitionEdges.length > 1 && (
-            <button className="seq-row-more" onClick={(e) => { e.stopPropagation(); setExpanded(false); }}>
-              Show less
-            </button>
-          )}
-        </div>
-      )}
-
-      {showToggles && !isEnd && (
-        <div className="seq-row-toggles segmented">
-          <button className={'seq-toggle' + (stagedMode === 'transition' ? ' active' : '')} disabled={transitionEdges.length === 0 || transitionExpired}
-            onClick={(e) => { e.stopPropagation(); onSetMode('transition'); }}>Transition</button>
-          <button className={'seq-toggle' + (stagedMode === 'cut' ? ' active' : '')}
-            onClick={(e) => { e.stopPropagation(); onSetMode('cut'); }}>Cut</button>
-        </div>
-      )}
-    </div>
+    </>
+  );
+  // Read-only (Later preview) cards are genuinely inert — no button
+  // semantics to fake. The real Next cards are actual <button>s (not a
+  // div+onClick) so Tab/Enter/Space work without any hand-rolled key
+  // handling, and focusing one mirrors hover — the same "what would this
+  // lead to" preview a mouse hover gives — so a keyboard-only pass over
+  // the list gets the same information a sighted mouse user does.
+  if (readOnly) return <div className="seq-card seq-card-readonly">{content}</div>;
+  return (
+    <button
+      type="button" className="seq-card" aria-label={label} onClick={onClick}
+      onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
+      onFocus={() => { onMouseEnter(); if (onFocusRow) onFocusRow(); }} onBlur={onMouseLeave}
+    >
+      {content}
+    </button>
   );
 }
 
 export default function SequencePane({
   songs, session, venueName, hasStarted, nowSong, cueBarPct, hasOutroForPlaying,
   mixingIntoSong, crossfadePct,
-  nextRows, laterRows, stagedId, stagedMode, stagedEdgeId,
-  onTogglePlaying, onResumeSet, onStartSet, onSetEndingChoice,
-  onStage, onCommitStaged, onSetStagedMode, onSetStagedEdgeId, onSkipNext,
+  nextRows, laterRows, setHoveredId,
+  onTogglePlaying, onResumeSet, onStartSet, onSetNextMode,
+  onCommitRow, onSkipNext, onRequestEndSet,
 }) {
   const [startPickId, setStartPickId] = useState(null);
   const [startStarting, setStartStarting] = useState('cut');
+
+  // When a transition's cue point passes unpicked, PerformPage drops it
+  // from nextRows outright (see the redesign note there) — if that card
+  // happened to have keyboard focus, the focus would otherwise just
+  // vanish into the document body. Track which row is focused and, if it
+  // disappears, land on whatever now sits in its old slot (transition mode
+  // sorts soonest-first, so that's genuinely "the next one").
+  const listRef = useRef(null);
+  const focusedKeyRef = useRef(null);
+  const prevRowsRef = useRef(nextRows);
+  useEffect(() => {
+    const prevRows = prevRowsRef.current;
+    prevRowsRef.current = nextRows;
+    const focusedKey = focusedKeyRef.current;
+    if (!focusedKey || session.nextMode !== 'transition') return;
+    if (nextRows.some(r => r.key === focusedKey)) return;
+    const prevIndex = prevRows.findIndex(r => r.key === focusedKey);
+    if (prevIndex === -1 || nextRows.length === 0) { focusedKeyRef.current = null; return; }
+    const targetIndex = Math.min(prevIndex, nextRows.length - 1);
+    focusedKeyRef.current = nextRows[targetIndex].key;
+    const el = listRef.current && listRef.current.querySelectorAll('.seq-card')[targetIndex];
+    if (el) el.focus();
+  }, [nextRows, session.nextMode]);
 
   return (
     <div className="sequence-pane">
@@ -99,8 +129,8 @@ export default function SequencePane({
             {startPickId && (
               <>
                 <div className="seq-row-toggles segmented" style={{ marginTop: 9 }}>
-                  <button className={'seq-toggle' + (startStarting === 'cut' ? ' active' : '')} onClick={() => setStartStarting('cut')}>Cut</button>
-                  <button className={'seq-toggle' + (startStarting === 'intro' ? ' active' : '')} onClick={() => setStartStarting('intro')}>Intro</button>
+                  <button className={'seq-toggle' + (startStarting === 'cut' ? ' active' : '')} aria-pressed={startStarting === 'cut'} onClick={() => setStartStarting('cut')}>Cut</button>
+                  <button className={'seq-toggle' + (startStarting === 'intro' ? ' active' : '')} aria-pressed={startStarting === 'intro'} onClick={() => setStartStarting('intro')}>Intro</button>
                 </div>
                 <button className="btn btn-primary" style={{ width: '100%', marginTop: 9 }} onClick={() => onStartSet(startPickId, startStarting)}>Start playing</button>
               </>
@@ -110,14 +140,17 @@ export default function SequencePane({
           <div className="seq-now-card">
             <div className="section-label section-label-dark">Playing</div>
             <div className="seq-now-row">
-              <button className="seq-play-btn" onClick={onTogglePlaying}>
+              <button className="seq-play-btn" onClick={onTogglePlaying} aria-label={session.isPlaying ? 'Pause' : 'Play'}>
                 <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={14} />
               </button>
-              <AlbumArt className="node-art" style={{ width: 34, height: 34 }} />
+              <AlbumArt className="node-art" style={{ width: 34, height: 34 }} url={nowSong.coverUrl} />
               <div className="seq-now-text">
                 <div className="seq-now-title">{nowSong.title}</div>
                 <div className="seq-now-artist">{nowSong.artist}</div>
               </div>
+              <button className="seq-skip-btn" onClick={onSkipNext} aria-label="Skip to next" data-tooltip="Skip to next" data-tooltip-above>
+                <Icon path={ICONS.skip} filled size={15} />
+              </button>
             </div>
             <div className="seq-now-tags">
               <span className="tag">{nowSong.bpm} BPM</span>
@@ -131,12 +164,11 @@ export default function SequencePane({
               <span className="mono-num">{fmtTime(nowSong.durationSec - session.timeLeft)}</span>
               <span className="mono-num">{fmtTime(nowSong.durationSec)}</span>
             </div>
-            <button className="btn playhead-next-btn" onClick={onSkipNext}>Next song →</button>
 
             {mixingIntoSong && (
               <div className="seq-mixing-row">
                 <span className="seq-mixing-label">Mixing into</span>
-                <AlbumArt className="node-art" style={{ width: 30, height: 30 }} />
+                <AlbumArt className="node-art" style={{ width: 30, height: 30 }} url={mixingIntoSong.coverUrl} />
                 <div className="seq-mixing-text">
                   <div className="seq-mixing-title">{mixingIntoSong.title}</div>
                   <div className="seq-mixing-artist">{mixingIntoSong.artist}</div>
@@ -145,13 +177,19 @@ export default function SequencePane({
               </div>
             )}
 
-            <div className="seq-ending-row">
-              <span className="seq-ending-label">How it ends</span>
-              <div className="seq-ending-toggle segmented">
-                <button className={'seq-ending-btn' + (session.endingChoice === 'cut' ? ' active' : '')} onClick={() => onSetEndingChoice('cut')}>Cut</button>
-                <button className={'seq-ending-btn' + (session.endingChoice === 'outro' ? ' active' : '')} disabled={!hasOutroForPlaying} onClick={() => onSetEndingChoice('outro')}>Outro</button>
+            <div className="seq-mode-row">
+              <span className="seq-mode-label">Next</span>
+              <div className="seq-mode-toggle segmented">
+                <button className={'seq-ending-btn' + (session.nextMode === 'transition' ? ' active' : '')} aria-pressed={session.nextMode === 'transition'} onClick={() => onSetNextMode('transition')}>Transition</button>
+                <button className={'seq-ending-btn' + (session.nextMode === 'cut' ? ' active' : '')} aria-pressed={session.nextMode === 'cut'} onClick={() => onSetNextMode('cut')}>Cut</button>
+                <button
+                  className={'seq-ending-btn' + (session.nextMode === 'outro' ? ' active' : '')} aria-pressed={session.nextMode === 'outro'}
+                  disabled={!hasOutroForPlaying} onClick={() => onSetNextMode('outro')}
+                  data-tooltip={!hasOutroForPlaying ? 'No outro produced for this song' : undefined} data-tooltip-above
+                >Outro</button>
               </div>
             </div>
+            <button className="seq-end-set-link" onClick={onRequestEndSet}>End set…</button>
           </div>
         )}
 
@@ -163,36 +201,32 @@ export default function SequencePane({
         )}
 
         {hasStarted && !session.setEnded && (
-          <>
-            <div>
-              <div className="seq-list-title">Next</div>
-              <div className="seq-list">
-                {nextRows.map(row => (
-                  <Row key={row.id} row={row} isEnd={row.id === END} isStaged={stagedId === row.id}
-                    showToggles={stagedId === row.id} onClick={() => onStage(row.id)}
-                    stagedMode={stagedMode} onSetMode={onSetStagedMode}
-                    stagedEdgeId={stagedEdgeId} onSetStagedEdgeId={onSetStagedEdgeId} />
-                ))}
-                {nextRows.length === 0 && <div className="seq-empty">nothing built out of this song yet</div>}
-              </div>
-              {stagedId && (
-                <button className="btn btn-accent btn-sm" style={{ width: '100%', marginTop: 8 }} onClick={onCommitStaged}>
-                  Set {songs[stagedId] ? songs[stagedId].title : 'End Set'} as Next
-                </button>
+          <div>
+            <div className="seq-list-title">Next</div>
+            <div className="seq-list" ref={listRef}>
+              {nextRows.map(row => (
+                <Card
+                  key={row.key} row={row} onClick={() => onCommitRow(row)}
+                  onMouseEnter={() => setHoveredId(row.destId)} onMouseLeave={() => setHoveredId(null)}
+                  onFocusRow={() => { focusedKeyRef.current = row.key; }}
+                />
+              ))}
+              {nextRows.length === 0 && (
+                <div className="seq-empty">
+                  {session.nextMode === 'transition' ? 'nothing built out of this song yet — try Cut or Outro' : 'nothing else to jump to'}
+                </div>
               )}
             </div>
 
-            <div>
-              <div className="seq-list-title">Later</div>
-              <div className="seq-list">
-                {laterRows.map(row => (
-                  <Row key={row.id} row={row} isEnd={false} isStaged={false} showToggles={false} onClick={() => {}} />
-                ))}
-                {!stagedId && <div className="seq-empty">pick something in Next to preview what follows it</div>}
-                {stagedId && laterRows.length === 0 && <div className="seq-empty">nothing built past that pick yet</div>}
+            {laterRows.length > 0 && (
+              <div className="seq-later-preview">
+                <div className="seq-list-title">If you pick that</div>
+                <div className="seq-list seq-list-compact">
+                  {laterRows.map(row => <Card key={row.key} row={row} readOnly />)}
+                </div>
               </div>
-            </div>
-          </>
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { libraryRows } from '../core.js';
-import { Icon, ICONS, Field, AlbumArt } from './shared.jsx';
+import { libraryRows, uploadCoverIfPossible } from '../core.js';
+import { Icon, ICONS, Field, AlbumArt, CoverPicker } from './shared.jsx';
 
 function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, selected, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
@@ -17,6 +17,10 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
     });
     setEditing(false);
   }
+  async function changeCover(file) {
+    const coverUrl = await uploadCoverIfPossible(file);
+    onUpdateSong(song.id, { coverUrl });
+  }
   function destText(e) {
     if (e.type === 'outro') return 'ends set';
     if (e.type === 'intro') return 'cold-open';
@@ -26,16 +30,12 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   function labelOf(e) { return e.type === 'outro' ? 'Outro' : e.type === 'intro' ? 'Intro' : 'Transition'; }
   const ownEdges = edges.filter(e => e.l === song.id || e.r === song.id);
 
-  function confirmDelete() {
-    if (window.confirm('Delete "' + song.title + '"? This also removes every transition/intro/outro that touches it.')) onDeleteSong(song.id);
-  }
-
   return (
     <div className={'lib-row' + (open ? ' lib-row-open' : '')}>
       <div className="lib-row-head">
         <input className="lib-checkbox" type="checkbox" checked={selected} onClick={(e) => e.stopPropagation()} onChange={onToggleSelect} title="Select for playlist queueing" />
         <span className="lib-chevron" onClick={onToggle}><Icon path={ICONS.chevron} size={13} /></span>
-        <AlbumArt className="lib-art" />
+        <AlbumArt className="lib-art" url={song.coverUrl} />
         <div className="lib-title-wrap" onClick={onToggle}>
           <span className="lib-title">{row.title}</span>
           <span className="lib-artist">{row.artist}</span>
@@ -49,6 +49,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
       </div>
       {open && (
         <div className="lib-body">
+          <CoverPicker url={song.coverUrl} onFile={changeCover} />
           {!editing ? (
             <div className="drawer-actions-row">
               <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>Edit details</button>
@@ -57,7 +58,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
               ) : (
                 <span className="hint-text" style={{ alignSelf: 'center' }}>no reference master uploaded</span>
               )}
-              <button className="btn btn-danger btn-sm" onClick={confirmDelete}>Delete song</button>
+              <button className="btn btn-danger btn-sm" onClick={() => onDeleteSong(song.id)}>Delete song</button>
             </div>
           ) : (
             <div className="lib-edit-row">
@@ -78,7 +79,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                     <span className="drawer-frag-label">{labelOf(e)}{e.label ? ' — ' + e.label : ''}</span>
                     <div className="drawer-frag-actions">
                       {e.audioUrl && <audio controls src={e.audioUrl} style={{ height: 26 }} />}
-                      <button className="btn btn-ghost btn-xs" onClick={() => { if (window.confirm('Remove this ' + labelOf(e).toLowerCase() + '?')) onDeleteEdge(e.id); }}>Remove</button>
+                      <button className="btn btn-ghost btn-xs" onClick={() => onDeleteEdge(e.id)}>Remove</button>
                     </div>
                   </div>
                   <div className="drawer-frag-dest">{destText(e)}</div>
@@ -93,7 +94,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   );
 }
 
-export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onQueueSongs }) {
+export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onQueueSongs, onLoadExample }) {
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]); // ordered — selection order is play order
@@ -116,7 +117,10 @@ export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDe
         <div className="empty-state">
           <div className="empty-state-title">No songs yet</div>
           <div className="empty-state-sub">Upload your first track to start building your library.</div>
-          <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+          <div className="empty-state-actions">
+            <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+            <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>
+          </div>
         </div>
       </div>
     );

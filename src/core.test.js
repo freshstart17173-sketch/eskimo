@@ -6,54 +6,57 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sampleSongsForTests, sampleEdgesForTests, emptySession, END,
-  getVisibleEdges, inOutCounts, oneHopReachable, computeReachability,
-  pickAutoplayNext, advanceSession, removeSongCascade, libraryRows,
+  getVisibleEdges, inOutCounts, transitionCandidates, cutCandidates, queueTailId,
+  pickAutoplayNext, advanceSession, removeSongCascade, removeQueueItem, libraryRows,
   transitionTriggerElapsed, CROSSFADE_LOOKAHEAD_SEC,
   mockDuration, pseudoCuePoints, pickDetectedSongs, hashString,
   clamp, fmtTime, fmtBytes,
 } from './core.js';
 
-// Sample graph: hd -[transition]-> cb -[transition]-> gs -[transition]-> lr (unverified)
-//                                    cb -[outro]     gs -[transition]-> wr
-//                                                    gs -[outro]
-//                intro -> hd
+// Sample graph: intro->hd -[e2]-> cb -[e4]-> gs -[e6]-> lr
+//                                    cb -[e5:outro]      gs -[e13]-> wr
+//                                                         gs -[e14:outro]
+// every edge in the fixture is verified=true.
 
 test('getVisibleEdges only keeps verified edges', () => {
-  const edges = sampleEdgesForTests();
+  const edges = [...sampleEdgesForTests(), { id: 'x', type: 'transition', l: 'lr', r: 'wr', verified: false }];
   const visible = getVisibleEdges(edges);
-  assert.equal(visible.length, edges.length - 1); // e6 (gs->lr) is unverified
-  assert.ok(!visible.some(e => e.id === 'e6'));
+  assert.equal(visible.length, sampleEdgesForTests().length);
+  assert.ok(!visible.some(e => e.id === 'x'));
 });
 
 test('inOutCounts counts only verified, direction-appropriate edges', () => {
   const edges = sampleEdgesForTests();
   const gs = inOutCounts(edges, 'gs');
-  // in: cb->gs (verified transition). out: gs->lr excluded (unverified), gs->wr
-  // (verified transition) + gs's outro both count — outCount only excludes intro type.
+  // in: cb->gs (e4). out: gs->lr (e6) + gs->wr (e13) + gs's own outro (e14) —
+  // outCount only excludes intro-typed edges, so an outro still counts as an out.
   assert.equal(gs.inCount, 1);
-  assert.equal(gs.outCount, 2);
+  assert.equal(gs.outCount, 3);
 });
 
-test('oneHopReachable follows only built transitions, honoring the exclude set', () => {
+test('transitionCandidates returns the built-transition edges out of a song, honoring the exclude set', () => {
   const visible = getVisibleEdges(sampleEdgesForTests());
-  const fromCb = oneHopReachable(visible, 'cb', new Set());
-  assert.deepEqual([...fromCb], ['gs']);
-  const excluded = oneHopReachable(visible, 'cb', new Set(['gs']));
-  assert.equal(excluded.size, 0);
+  const fromGs = transitionCandidates(visible, 'gs', new Set());
+  assert.deepEqual(fromGs.map(e => e.r).sort(), ['lr', 'wr']);
+
+  const excluded = transitionCandidates(visible, 'gs', new Set(['wr']));
+  assert.deepEqual(excluded.map(e => e.r), ['lr']);
 });
 
-test('computeReachability tier1 follows the queue tail, not always Now Playing', () => {
+test('cutCandidates offers every song not already excluded', () => {
   const songs = sampleSongsForTests();
-  const visible = getVisibleEdges(sampleEdgesForTests());
-  const fresh = computeReachability(songs, visible, 'hd', []);
-  assert.equal(fresh.fromId, 'hd');
-  assert.ok(fresh.tier1.has('cb'));
-  assert.ok(fresh.tier1.has(END)); // End Set is always offered once started
+  const all = cutCandidates(songs, new Set());
+  assert.deepEqual(all.sort(), Object.keys(songs).sort());
 
-  const withQueue = computeReachability(songs, visible, 'hd', [{ id: 'cb', mode: 'transition' }]);
-  assert.equal(withQueue.fromId, 'cb'); // reachability now radiates from the queue's tail
-  assert.ok(withQueue.tier1.has('gs'));
-  assert.ok(!withQueue.tier1.has('hd')); // never loops back onto Now Playing
+  const withoutHd = cutCandidates(songs, new Set(['hd']));
+  assert.ok(!withoutHd.includes('hd'));
+  assert.equal(withoutHd.length, Object.keys(songs).length - 1);
+});
+
+test('queueTailId follows the queue tail, or Now Playing when nothing is queued, or null past an End Set', () => {
+  assert.equal(queueTailId('hd', []), 'hd');
+  assert.equal(queueTailId('hd', [{ id: 'cb', mode: 'transition' }]), 'cb');
+  assert.equal(queueTailId('hd', [{ id: 'cb', mode: 'transition' }, { id: END }]), null);
 });
 
 test('pickAutoplayNext prefers a built transition, and honors transitionOnly at a dead end', () => {
@@ -70,14 +73,13 @@ test('pickAutoplayNext prefers a built transition, and honors transitionOnly at 
   assert.ok(loose && loose.mode === 'cut');
 });
 
-test('advanceSession promotes the queue head and resets the ending choice', () => {
+test('advanceSession promotes the queue head', () => {
   const songs = sampleSongsForTests();
   const session = { ...emptySession(), nowPlayingId: 'hd', queue: [{ id: 'cb', mode: 'transition' }], timeLeft: 0, isPlaying: true };
   const next = advanceSession(session, songs, getVisibleEdges(sampleEdgesForTests()));
   assert.equal(next.nowPlayingId, 'cb');
   assert.equal(next.queue.length, 0);
   assert.equal(next.timeLeft, songs.cb.durationSec);
-  assert.equal(next.endingChoice, 'cut');
 });
 
 test('advanceSession ends the set on reaching End Set', () => {
@@ -119,6 +121,32 @@ test('transitionTriggerElapsed uses a committed transition\'s real cue point ove
   assert.ok(CROSSFADE_LOOKAHEAD_SEC > 0);
 });
 
+test('removeQueueItem drops one hop and recomputes its successor against the new predecessor', () => {
+  const visible = getVisibleEdges(sampleEdgesForTests());
+  // hd -(cb, via e2)-> cb -(gs, via e4)-> gs -(wr, via e13)-> wr
+  const queue = [
+    { id: 'cb', mode: 'transition', edgeId: 'e2' },
+    { id: 'gs', mode: 'transition', edgeId: 'e4' },
+    { id: 'wr', mode: 'transition', edgeId: 'e13' },
+  ];
+  // remove the middle hop (gs) — wr's new predecessor is cb, which has no
+  // built transition to wr, so it falls back to a cut rather than keeping
+  // a transition edgeId that no longer makes sense.
+  const result = removeQueueItem(queue, 1, 'hd', visible);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].id, 'cb');
+  assert.deepEqual(result[1], { id: 'wr', mode: 'cut', ending: 'cut', starting: 'cut' });
+
+  // removing the first hop re-derives it against Now Playing itself
+  const result2 = removeQueueItem(queue, 0, 'hd', visible);
+  assert.equal(result2[0].id, 'gs');
+  assert.deepEqual(result2[0], { id: 'gs', mode: 'cut', ending: 'cut', starting: 'cut' }); // hd has no built transition to gs
+
+  // removing the last hop leaves the rest untouched, nothing to recompute
+  const result3 = removeQueueItem(queue, 2, 'hd', visible);
+  assert.deepEqual(result3, queue.slice(0, 2));
+});
+
 test('removeSongCascade drops the song and every edge touching it, leaving the rest intact', () => {
   const songs = sampleSongsForTests();
   const edges = sampleEdgesForTests();
@@ -145,7 +173,7 @@ test('libraryRows filters by search text and sorts by the requested key/directio
   assert.equal(filtered.length, 2); // Horizon Drift, Late Return
 
   const wr = libraryRows(songs, edges, '', 'title', 'asc').find(r => r.id === 'wr');
-  assert.equal(wr.isDeadEnd, true); // Wire & Rust has no built outgoing transition
+  assert.equal(wr.isDeadEnd, true); // Wire & Rust has no built outgoing edge at all
 });
 
 test('deterministic helpers are actually deterministic (same input -> same output every call)', () => {
