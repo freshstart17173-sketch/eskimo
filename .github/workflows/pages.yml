@@ -9,7 +9,14 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # This repo doesn't have a `main` branch yet — everything so far lives
+    # on `claude/*` branches, which is why every run before this one
+    # executed zero jobs despite Pages being enabled (the push event just
+    # never matched). Listed explicitly so pushes to either the current
+    # default branch or this one actually deploy; add `main` back here
+    # once the repo adopts one, since that's the more conventional name
+    # for this trigger to watch long-term.
+    branches: [main, claude/eskimo-ui-mockup-uxdg8z, claude/codebase-onboarding-tasks-ng8pny]
   workflow_dispatch:
 
 permissions:
