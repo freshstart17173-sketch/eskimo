@@ -453,10 +453,39 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       with real, legible, designed dark values — and a light-mode
       screenshot taken after all these changes is pixel-equivalent to
       before them, confirming zero regression to the default theme.
-- [ ] **Accessibility pass**: keyboard navigation for a fundamentally
-      spatial, mouse-driven graph canvas is a real design problem, not a
-      quick fix — needs its own thought-through interaction model (e.g. a
-      list-based fallback view), not just tab-index patches.
+- [x] ~~Accessibility pass~~ — done, scoped exactly to the suggestion
+      here: a real list-based fallback for the graph, not tab-index
+      patches on a spatial canvas that was never going to be keyboard-
+      navigable on its own terms. The round-4 redesign already put a flat,
+      list-based Next picker in the side panel as the primary way to
+      choose what plays next — this pass made it a genuinely accessible
+      one: `SequencePane.jsx`'s Next/Later cards are real `<button>`
+      elements now (were a `<div onClick>`, invisible to Tab and unusable
+      without a mouse), each with a computed `aria-label` describing what
+      it leads to; focusing one with the keyboard fires the same
+      `onMouseEnter` a mouse hover would, so Tabbing through the list
+      previews the Later list and highlights the graph exactly the way
+      hovering does — a keyboard-only pass gets the same information a
+      sighted mouse user does, not a degraded one.
+      Also: a site-wide `:focus-visible` ring (keyboard/AT navigation
+      only, never a mouse click) on every interactive element; the End Set
+      `ConfirmModal` (`shared.jsx`) is a real `role="dialog"` with
+      `aria-modal`/`aria-labelledby`, focuses its Cancel button on open
+      (the safer default action), and closes on Escape; every icon-only
+      button that had no visible text (skip, play/pause, the audio preview
+      toggle, search's prev/next match, the queue chip's skip/remove) got
+      a real `aria-label` — `data-tooltip` reads fine on hover but isn't
+      exposed to assistive tech at all; and the segmented Transition/Cut/
+      Outro and Cut/Intro toggles gained `aria-pressed` so a screen reader
+      announces which one is currently selected. The graph canvas itself
+      stays a visual planning surface — the design decision here is that
+      it doesn't need its own parallel a11y story once the thing it drives
+      (the Next list) is a fully keyboard-operable substitute.
+      Verified with Playwright, keyboard-only (no mouse events at all):
+      Tab from the skip button lands on a Next card with a real
+      `aria-label`, pressing Enter commits it exactly like a click would,
+      the visible focus ring renders correctly, and Escape closes the End
+      Set modal after it auto-focused Cancel.
 - [x] ~~Code-split the bundle.~~ — done: all five pages are `React.lazy`
       in `App.jsx` now, each downloading only once its tab opens.
       `ReactFlowProvider` moved from `App.jsx` into `PerformPage.jsx`

@@ -99,6 +99,10 @@ body {
 button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
 input { font: inherit; color: inherit; }
 a { color: var(--accent); }
+/* One visible focus ring for every interactive element a keyboard user can
+   land on — :focus-visible so a mouse click doesn't leave a ring behind,
+   only actual keyboard/AT navigation does. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .mono-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 

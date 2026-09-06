@@ -17,7 +17,7 @@ function PreviewButton({ url }) {
     else { el.currentTime = 0; el.play(); }
   }
   return (
-    <button className="seq-card-preview" onClick={toggle} data-tooltip={playing ? 'Pause preview' : 'Preview'} data-tooltip-above>
+    <button className="seq-card-preview" onClick={toggle} aria-label={playing ? 'Pause preview' : 'Preview'} data-tooltip={playing ? 'Pause preview' : 'Preview'} data-tooltip-above>
       <Icon path={playing ? ICONS.pause : ICONS.play} filled={!playing} size={10} />
       <audio ref={audioRef} src={url} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} style={{ display: 'none' }} />
     </button>
@@ -34,12 +34,11 @@ function PreviewButton({ url }) {
 function Card({ row, onClick, onMouseEnter, onMouseLeave, readOnly }) {
   const drainPct = (row.kind === 'transition' && row.hasCue && row.basisSec)
     ? clamp(Math.round((row.secondsLeft / row.basisSec) * 100), 0, 100) : 0;
-  return (
-    <div
-      className={'seq-card' + (readOnly ? ' seq-card-readonly' : '')}
-      onClick={readOnly ? undefined : onClick}
-      onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
-    >
+  const label = row.kind === 'transition'
+    ? (row.label || 'Transition') + ' into ' + row.destTitle
+    : row.destTitle + (row.hasIntro ? ', has an intro' : '');
+  const content = (
+    <>
       {row.kind === 'transition' && <div className="seq-card-drain" style={{ width: drainPct + '%' }} />}
       <div className="seq-card-main">
         <AlbumArt className="seq-card-art" url={row.destCoverUrl} />
@@ -65,7 +64,19 @@ function Card({ row, onClick, onMouseEnter, onMouseLeave, readOnly }) {
           <span className="seq-card-length mono-num">{fmtTime(row.destDurationSec)}</span>
         </div>
       </div>
-    </div>
+    </>
+  );
+  // Read-only (Later preview) cards are genuinely inert — no button
+  // semantics to fake. The real Next cards are actual <button>s (not a
+  // div+onClick) so Tab/Enter/Space work without any hand-rolled key
+  // handling, and focusing one mirrors hover — the same "what would this
+  // lead to" preview a mouse hover gives — so a keyboard-only pass over
+  // the list gets the same information a sighted mouse user does.
+  if (readOnly) return <div className="seq-card seq-card-readonly">{content}</div>;
+  return (
+    <button type="button" className="seq-card" aria-label={label} onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onFocus={onMouseEnter} onBlur={onMouseLeave}>
+      {content}
+    </button>
   );
 }
 
@@ -91,8 +102,8 @@ export default function SequencePane({
             {startPickId && (
               <>
                 <div className="seq-row-toggles segmented" style={{ marginTop: 9 }}>
-                  <button className={'seq-toggle' + (startStarting === 'cut' ? ' active' : '')} onClick={() => setStartStarting('cut')}>Cut</button>
-                  <button className={'seq-toggle' + (startStarting === 'intro' ? ' active' : '')} onClick={() => setStartStarting('intro')}>Intro</button>
+                  <button className={'seq-toggle' + (startStarting === 'cut' ? ' active' : '')} aria-pressed={startStarting === 'cut'} onClick={() => setStartStarting('cut')}>Cut</button>
+                  <button className={'seq-toggle' + (startStarting === 'intro' ? ' active' : '')} aria-pressed={startStarting === 'intro'} onClick={() => setStartStarting('intro')}>Intro</button>
                 </div>
                 <button className="btn btn-primary" style={{ width: '100%', marginTop: 9 }} onClick={() => onStartSet(startPickId, startStarting)}>Start playing</button>
               </>
@@ -102,7 +113,7 @@ export default function SequencePane({
           <div className="seq-now-card">
             <div className="section-label section-label-dark">Playing</div>
             <div className="seq-now-row">
-              <button className="seq-play-btn" onClick={onTogglePlaying}>
+              <button className="seq-play-btn" onClick={onTogglePlaying} aria-label={session.isPlaying ? 'Pause' : 'Play'}>
                 <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={14} />
               </button>
               <AlbumArt className="node-art" style={{ width: 34, height: 34 }} url={nowSong.coverUrl} />
@@ -110,7 +121,7 @@ export default function SequencePane({
                 <div className="seq-now-title">{nowSong.title}</div>
                 <div className="seq-now-artist">{nowSong.artist}</div>
               </div>
-              <button className="seq-skip-btn" onClick={onSkipNext} data-tooltip="Skip to next" data-tooltip-above>
+              <button className="seq-skip-btn" onClick={onSkipNext} aria-label="Skip to next" data-tooltip="Skip to next" data-tooltip-above>
                 <Icon path={ICONS.skip} filled size={15} />
               </button>
             </div>
@@ -142,9 +153,9 @@ export default function SequencePane({
             <div className="seq-mode-row">
               <span className="seq-mode-label">Next</span>
               <div className="seq-mode-toggle segmented">
-                <button className={'seq-ending-btn' + (session.nextMode === 'transition' ? ' active' : '')} onClick={() => onSetNextMode('transition')}>Transition</button>
-                <button className={'seq-ending-btn' + (session.nextMode === 'cut' ? ' active' : '')} onClick={() => onSetNextMode('cut')}>Cut</button>
-                <button className={'seq-ending-btn' + (session.nextMode === 'outro' ? ' active' : '')} disabled={!hasOutroForPlaying} onClick={() => onSetNextMode('outro')}>Outro</button>
+                <button className={'seq-ending-btn' + (session.nextMode === 'transition' ? ' active' : '')} aria-pressed={session.nextMode === 'transition'} onClick={() => onSetNextMode('transition')}>Transition</button>
+                <button className={'seq-ending-btn' + (session.nextMode === 'cut' ? ' active' : '')} aria-pressed={session.nextMode === 'cut'} onClick={() => onSetNextMode('cut')}>Cut</button>
+                <button className={'seq-ending-btn' + (session.nextMode === 'outro' ? ' active' : '')} aria-pressed={session.nextMode === 'outro'} disabled={!hasOutroForPlaying} onClick={() => onSetNextMode('outro')}>Outro</button>
               </div>
             </div>
             <button className="seq-end-set-link" onClick={onRequestEndSet}>End set…</button>

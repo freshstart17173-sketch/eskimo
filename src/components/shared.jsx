@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { fmtBytes } from '../core.js';
 
 export function Icon({ path, size = 15, strokeWidth = 1.6, filled = false }) {
@@ -106,14 +106,25 @@ export function CoverPicker({ url, onFile, size = 48 }) {
 // A real confirm dialog — centered, backdrop-blocking, deliberately harder
 // to trigger by accident than an inline row in a scrolling list. Used for
 // anything that should require an actual second step to happen (End Set).
+// Escape cancels and the Cancel button gets initial focus (the safer
+// default action) — a keyboard user landing here can always back out
+// without hunting for a mouse-only close target.
 export function ConfirmModal({ title, children, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger, onConfirm, onCancel }) {
+  const cancelRef = useRef(null);
+  const titleId = useId();
+  useEffect(() => {
+    cancelRef.current && cancelRef.current.focus();
+    function onKeyDown(e) { if (e.key === 'Escape') onCancel(); }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
   return (
     <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title">{title}</div>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-title" id={titleId}>{title}</div>
         {children}
         <div className="modal-actions">
-          <button className="btn btn-ghost btn-sm" onClick={onCancel}>{cancelLabel}</button>
+          <button ref={cancelRef} className="btn btn-ghost btn-sm" onClick={onCancel}>{cancelLabel}</button>
           <button className={'btn btn-sm ' + (danger ? 'btn-danger' : 'btn-primary')} onClick={onConfirm}>{confirmLabel}</button>
         </div>
       </div>

@@ -52,9 +52,9 @@ export default function QueueBar({ songs, nowPlayingId, queue, autoHistory, onRe
               {q.id === END ? 'End Set' : (songs[q.id] ? songs[q.id].title : '(deleted)')}
               <div className="queue-chip-actions">
                 {q.id !== END && i < queue.length - 1 && (
-                  <button className="queue-chip-remove" data-tooltip="Skip just this song" data-tooltip-above onClick={() => onRemoveQueueItemOnly(i)}>−</button>
+                  <button className="queue-chip-remove" aria-label="Skip just this song" data-tooltip="Skip just this song" data-tooltip-above onClick={() => onRemoveQueueItemOnly(i)}>−</button>
                 )}
-                <button className="queue-chip-remove" data-tooltip="Remove from here on" data-tooltip-above onClick={() => onRemoveQueueItem(i)}>✕</button>
+                <button className="queue-chip-remove" aria-label="Remove from here on" data-tooltip="Remove from here on" data-tooltip-above onClick={() => onRemoveQueueItem(i)}>✕</button>
               </div>
             </div>
           </React.Fragment>
