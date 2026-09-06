@@ -38,21 +38,29 @@ export function SongNode({ data }) {
         <div className="hover-card" onMouseEnter={onEnter} onMouseLeave={onLeave}>
           <div className="hover-card-title">{song.title}</div>
           <div className="hover-card-artist">{song.artist}</div>
-          <button className="hover-toggle hover-toggle-commit" onClick={hoverCard.onCommit}>{hoverCard.label}</button>
+          <div className="hover-card-ending-row segmented">
+            <button className="hover-ending-btn" disabled={!hoverCard.transition} onClick={hoverCard.transition && hoverCard.transition.onCommit}>Transition</button>
+            <button className="hover-ending-btn" disabled={!hoverCard.cut} onClick={hoverCard.cut && hoverCard.cut.onCommit}>Cut</button>
+            <button className="hover-ending-btn" disabled={!hoverCard.outro} onClick={hoverCard.outro && hoverCard.outro.onCommit} data-tooltip={!hoverCard.outro ? 'No outro produced for this song' : undefined}>Outro</button>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
+// Purely informational on the canvas — shows where End Set sits in the plan
+// (highlighted next/later like any other hop) but isn't itself clickable:
+// the real trigger lives in the toolbar, deliberately apart from the graph
+// so panning/clicking around the canvas can't end the set by accident.
 export function EndNode({ data }) {
-  const { state, queued, onClick } = data;
+  const { state, queued } = data;
   const cls = ['end-node', state && 'state-' + state].filter(Boolean).join(' ');
   return (
-    <div className={cls} onClick={onClick}>
+    <div className={cls}>
       <Handle type="target" position={Position.Left} />
       <div className="end-node-title"><Icon path={<rect x="5" y="5" width="14" height="14" />} filled size={11} /> End Set</div>
-      <div className="end-node-hint">{queued ? 'part of your plan' : 'stop here'}</div>
+      <div className="end-node-hint">{queued ? 'part of your plan' : 'not queued'}</div>
     </div>
   );
 }

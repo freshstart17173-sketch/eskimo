@@ -45,7 +45,7 @@ const edgeTypes = { fanned: FannedEdge };
 export default function GraphPane({
   songs, positions, transitionEdges, stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
-  onDragSongPosition, hoverCardFor, onRequestEndSet, endQueued,
+  onDragSongPosition, hoverCardFor, endQueued,
   nowPlayingId, nowElapsedSec, nowDurationSec,
 }) {
   const { isDark } = useTheme();
@@ -81,7 +81,7 @@ export default function GraphPane({
     const pos = positions[END] || { x: 1250, y: 20 };
     return {
       id: END, type: 'end', position: pos, draggable: true,
-      data: { state: stateFor(END), queued: endQueued, onClick: onRequestEndSet },
+      data: { state: stateFor(END), queued: endQueued },
       style: { width: END_W },
     };
   }

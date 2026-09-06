@@ -101,13 +101,16 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     if (!isTransitionMode) return rows.sort((a, b) => a.destTitle.localeCompare(b.destTitle));
     // Real per-edge cue timing: candidates with time left on their own
     // built cue float to the top, soonest first; a transition with no cue
-    // point yet never expires, so it sinks below the timed ones.
+    // point yet never expires, so it sinks below the timed ones. Once a
+    // cue point has actually passed, that produced transition can't
+    // cleanly start anymore (its audio was built to begin exactly there) —
+    // drop it rather than leaving a dead "0:00" card sitting in the list.
     return rows.map(r => {
       const hasCue = r.outSeconds != null;
       const secondsLeft = hasCue ? Math.max(0, r.outSeconds - elapsed) : session.timeLeft;
       const basisSec = hasCue ? r.outSeconds : (nowSong ? nowSong.durationSec : 210);
       return { ...r, hasCue, secondsLeft, basisSec };
-    }).sort((a, b) => {
+    }).filter(r => !(r.hasCue && r.outSeconds - elapsed <= 0)).sort((a, b) => {
       if (a.hasCue && b.hasCue) return a.secondsLeft - b.secondsLeft;
       if (a.hasCue) return -1;
       if (b.hasCue) return 1;
@@ -132,24 +135,21 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   function commitTransition(edgeId, destId) {
     setSession(prev => ({ ...prev, queue: [...prev.queue, { id: destId, mode: 'transition', edgeId }] }));
   }
-  function commitCutOrOutro(destId) {
+  // `ending` defaults to the Playing card's current toggle (the ordinary
+  // Next-list path) but the graph's hover-card passes one explicitly, since
+  // it lets you pick cut vs. outro for a hovered song directly, regardless
+  // of whatever the Playing card's toggle currently shows.
+  function commitCutOrOutro(destId, ending) {
     const introEdge = findEdge(e => e.type === 'intro' && e.r === destId);
+    const resolvedEnding = ending || (session.nextMode === 'outro' ? 'outro' : 'cut');
     setSession(prev => ({
       ...prev,
-      queue: [...prev.queue, { id: destId, mode: 'cut', ending: prev.nextMode === 'outro' ? 'outro' : 'cut', starting: introEdge ? 'intro' : 'cut' }],
+      queue: [...prev.queue, { id: destId, mode: 'cut', ending: resolvedEnding, starting: introEdge ? 'intro' : 'cut' }],
     }));
   }
   function commitRow(row) {
     if (row.kind === 'transition') commitTransition(row.edgeId, row.destId);
     else commitCutOrOutro(row.destId);
-  }
-  function commitForId(id) {
-    if (isTransitionMode) {
-      const edge = transitionCandidates(visibleEdges, fromId, usedIds).find(e => e.r === id);
-      if (edge) commitTransition(edge.id, id);
-    } else if (nextCandidateIds.has(id)) {
-      commitCutOrOutro(id);
-    }
   }
 
   function setNextMode(mode) { setSession(prev => ({ ...prev, nextMode: mode })); }
@@ -302,15 +302,23 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchActive, matches, matchIndex, hasStarted]);
 
-  // ---------------- graph hover-card: one click, commits immediately ----------------
+  // ---------------- graph hover-card: same three-way ending choice the
+  // Playing card offers, but scoped to this one hovered song — a click
+  // commits immediately, no separate stage step, and each option shows up
+  // (or doesn't) based on whether it's actually reachable from here,
+  // independent of whatever the Playing card's own toggle is set to. ----
   const hoverCardFor = useCallback((id) => {
-    if (!hasStarted || hoveredId !== id || !nextCandidateIds.has(id)) return null;
+    if (!hasStarted || hoveredId !== id || usedIds.has(id)) return null;
+    const transitionEdge = transitionCandidates(visibleEdges, fromId, usedIds).find(e => e.r === id);
+    const canCut = cutCandidates(songs, usedIds).includes(id);
+    if (!transitionEdge && !canCut) return null;
     return {
-      label: isTransitionMode ? 'Set as next — transition' : session.nextMode === 'outro' ? 'Set as next — outro' : 'Set as next — cut',
-      onCommit: () => commitForId(id),
+      transition: transitionEdge ? { onCommit: () => commitTransition(transitionEdge.id, id) } : null,
+      cut: canCut ? { onCommit: () => commitCutOrOutro(id, 'cut') } : null,
+      outro: (canCut && hasOutroForPlaying) ? { onCommit: () => commitCutOrOutro(id, 'outro') } : null,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasStarted, hoveredId, nextCandidateIds, isTransitionMode, session.nextMode, fromId, usedIds, visibleEdges]);
+  }, [hasStarted, hoveredId, usedIds, fromId, visibleEdges, songs, hasOutroForPlaying]);
 
   const cueBarPct = nowSong && nowSong.durationSec ? Math.round((1 - session.timeLeft / nowSong.durationSec) * 100) : 0;
 
@@ -390,6 +398,12 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <span><i className="swatch swatch-next" />next</span>
           <span><i className="swatch swatch-later" />later</span>
         </div>
+
+        {hasStarted && (
+          <button className="toolbar-end-set-btn" onClick={requestEndSet} data-tooltip="Stop the set after this">
+            <Icon path={ICONS.stop} filled size={12} /> End set
+          </button>
+        )}
       </div>
 
       <div className="perform-layout">
@@ -399,7 +413,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition} hoverCardFor={hoverCardFor}
-            onRequestEndSet={requestEndSet} endQueued={queueIds.includes(END)}
+            endQueued={queueIds.includes(END)}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
           />
           <QueueBar songs={songs} nowPlayingId={session.nowPlayingId} queue={session.queue} autoHistory={session.autoHistory} onRemoveQueueItem={removeQueueFrom} onRemoveQueueItemOnly={removeQueueOne} />

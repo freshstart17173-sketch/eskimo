@@ -26,6 +26,7 @@ export const ICONS = {
   hand: <><path d="M8 13V5a1.5 1.5 0 0 1 3 0v6"></path><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"></path><path d="M14 11V6a1.5 1.5 0 0 1 3 0v8"></path><path d="M8 12l-1.5-1.5a1.5 1.5 0 0 0-2.3 1.9L7 17a6 6 0 0 0 5.5 3.3h1a6 6 0 0 0 6-6v-3"></path></>,
   search: <><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="20" y1="20" x2="15.5" y2="15.5"></line></>,
   skip: <><polygon points="5,4 15,12 5,20" fill="currentColor"></polygon><rect x="17" y="4" width="2.5" height="16" fill="currentColor"></rect></>,
+  stop: <rect x="5" y="5" width="14" height="14" fill="currentColor"></rect>,
 };
 
 // A real cover thumbnail when a song has one (url), otherwise the same

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { fmtTime, clamp } from '../core.js';
 import { Icon, ICONS, SongPicker, AlbumArt } from './shared.jsx';
 
@@ -31,7 +31,7 @@ function PreviewButton({ url }) {
 // immediately, there's no separate stage-then-confirm step anymore — a
 // built audio piece gets its own preview button instead, precisely so a
 // listen doesn't double as a commit.
-function Card({ row, onClick, onMouseEnter, onMouseLeave, readOnly }) {
+function Card({ row, onClick, onMouseEnter, onMouseLeave, onFocusRow, readOnly }) {
   const drainPct = (row.kind === 'transition' && row.hasCue && row.basisSec)
     ? clamp(Math.round((row.secondsLeft / row.basisSec) * 100), 0, 100) : 0;
   const label = row.kind === 'transition'
@@ -74,7 +74,11 @@ function Card({ row, onClick, onMouseEnter, onMouseLeave, readOnly }) {
   // the list gets the same information a sighted mouse user does.
   if (readOnly) return <div className="seq-card seq-card-readonly">{content}</div>;
   return (
-    <button type="button" className="seq-card" aria-label={label} onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onFocus={onMouseEnter} onBlur={onMouseLeave}>
+    <button
+      type="button" className="seq-card" aria-label={label} onClick={onClick}
+      onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
+      onFocus={() => { onMouseEnter(); if (onFocusRow) onFocusRow(); }} onBlur={onMouseLeave}
+    >
       {content}
     </button>
   );
@@ -89,6 +93,29 @@ export default function SequencePane({
 }) {
   const [startPickId, setStartPickId] = useState(null);
   const [startStarting, setStartStarting] = useState('cut');
+
+  // When a transition's cue point passes unpicked, PerformPage drops it
+  // from nextRows outright (see the redesign note there) — if that card
+  // happened to have keyboard focus, the focus would otherwise just
+  // vanish into the document body. Track which row is focused and, if it
+  // disappears, land on whatever now sits in its old slot (transition mode
+  // sorts soonest-first, so that's genuinely "the next one").
+  const listRef = useRef(null);
+  const focusedKeyRef = useRef(null);
+  const prevRowsRef = useRef(nextRows);
+  useEffect(() => {
+    const prevRows = prevRowsRef.current;
+    prevRowsRef.current = nextRows;
+    const focusedKey = focusedKeyRef.current;
+    if (!focusedKey || session.nextMode !== 'transition') return;
+    if (nextRows.some(r => r.key === focusedKey)) return;
+    const prevIndex = prevRows.findIndex(r => r.key === focusedKey);
+    if (prevIndex === -1 || nextRows.length === 0) { focusedKeyRef.current = null; return; }
+    const targetIndex = Math.min(prevIndex, nextRows.length - 1);
+    focusedKeyRef.current = nextRows[targetIndex].key;
+    const el = listRef.current && listRef.current.querySelectorAll('.seq-card')[targetIndex];
+    if (el) el.focus();
+  }, [nextRows, session.nextMode]);
 
   return (
     <div className="sequence-pane">
@@ -155,7 +182,11 @@ export default function SequencePane({
               <div className="seq-mode-toggle segmented">
                 <button className={'seq-ending-btn' + (session.nextMode === 'transition' ? ' active' : '')} aria-pressed={session.nextMode === 'transition'} onClick={() => onSetNextMode('transition')}>Transition</button>
                 <button className={'seq-ending-btn' + (session.nextMode === 'cut' ? ' active' : '')} aria-pressed={session.nextMode === 'cut'} onClick={() => onSetNextMode('cut')}>Cut</button>
-                <button className={'seq-ending-btn' + (session.nextMode === 'outro' ? ' active' : '')} aria-pressed={session.nextMode === 'outro'} disabled={!hasOutroForPlaying} onClick={() => onSetNextMode('outro')}>Outro</button>
+                <button
+                  className={'seq-ending-btn' + (session.nextMode === 'outro' ? ' active' : '')} aria-pressed={session.nextMode === 'outro'}
+                  disabled={!hasOutroForPlaying} onClick={() => onSetNextMode('outro')}
+                  data-tooltip={!hasOutroForPlaying ? 'No outro produced for this song' : undefined} data-tooltip-above
+                >Outro</button>
               </div>
             </div>
             <button className="seq-end-set-link" onClick={onRequestEndSet}>End set…</button>
@@ -172,11 +203,12 @@ export default function SequencePane({
         {hasStarted && !session.setEnded && (
           <div>
             <div className="seq-list-title">Next</div>
-            <div className="seq-list">
+            <div className="seq-list" ref={listRef}>
               {nextRows.map(row => (
                 <Card
                   key={row.key} row={row} onClick={() => onCommitRow(row)}
                   onMouseEnter={() => setHoveredId(row.destId)} onMouseLeave={() => setHoveredId(null)}
+                  onFocusRow={() => { focusedKeyRef.current = row.key; }}
                 />
               ))}
               {nextRows.length === 0 && (

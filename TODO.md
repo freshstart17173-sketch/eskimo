@@ -370,6 +370,34 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       tracks (a full UI drive got unreliable in this sandbox — its network
       proxy struggles with the app's live Supabase/Google Fonts calls on
       page load, unrelated to this change).
+- [x] ~~Round-5 Perform-page follow-ups~~ — done: the graph's End node is
+      no longer clickable (it was the one thing on the canvas a stray
+      click/drag could hit by accident) — the real trigger is now a
+      deliberately loud red "End set" button in the toolbar, top-right
+      near the playing/next/later legend, still gated by the same confirm
+      modal; the End node itself stays as a read-only "part of your plan"
+      / "not queued" indicator. The graph's per-node hover-card now offers
+      the same three-way Transition/Cut/Outro choice as the Playing
+      card's toggle, scoped to that one hovered song and independent of
+      whatever the Playing card is currently set to — each option commits
+      immediately and is disabled (with a tooltip explaining why) when
+      it's not actually reachable from here. The Outro toggle (Playing
+      card and hover-card both) now explains itself with a tooltip
+      ("No outro produced for this song") instead of just going grey with
+      no context. The Next list's countdown drain bar was real but
+      essentially invisible (a 7%-opacity black wash) — now an accent-
+      colored fill anyone can actually see draining. A transition
+      candidate whose cue point has passed (it can't cleanly start
+      anymore — its audio was built to begin exactly at that timecode)
+      now drops out of the Next list instead of sitting at a dead "0:00";
+      if that card had keyboard focus, focus follows to whatever now
+      sits in its old slot rather than vanishing into the document body.
+      Verified in a real browser: the toolbar button is present and red
+      and opens the confirm modal; the drain bar's computed background/
+      opacity confirm it now reads as a real progress fill; the hover-card
+      renders all three options with Outro correctly disabled when there's
+      no outro edge; both the Next-list card commit and the hover-card's
+      direct Cut commit land the right queue entry.
 
 ### Hard
 - [x] ~~Real playback (Web Audio API)~~ — done, as a new `src/audioEngine.js`
