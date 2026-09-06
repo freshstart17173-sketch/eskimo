@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
-  END, clamp, getVisibleEdges, inOutCounts, oneHopReachable, computeReachability, advanceSession,
+  END, clamp, getVisibleEdges, inOutCounts, oneHopReachable, computeReachability, advanceSession, removeQueueItem,
 } from '../core.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
 import GraphPane from './GraphPane.jsx';
@@ -107,6 +107,12 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
   function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, endingChoice: 'cut', autoHistory: [] })); }
   function setEndingChoice(choice) { setSession(prev => ({ ...prev, endingChoice: choice })); }
   function removeQueueFrom(index) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, index) })); }
+  // Skip just one queued song, keeping the plan after it — the hop into
+  // whatever was next gets recomputed against its new predecessor (see
+  // removeQueueItem in core.js) instead of losing the whole rest of the plan.
+  function removeQueueOne(index) {
+    setSession(prev => ({ ...prev, queue: removeQueueItem(prev.queue, index, prev.nowPlayingId, visibleEdges) }));
+  }
   // the manual "Next song" button — same rule the set-clock's timer uses (advanceSession, core.js)
   function skipNow() { setSession(prev => advanceSession(prev, songs, visibleEdges)); }
 
@@ -351,7 +357,7 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
             onDragSongPosition={onDragSongPosition} hoverCardFor={hoverCardFor}
             onStageEnd={() => hasStarted && stage(END)} endQueued={queueIds.includes(END)}
           />
-          <QueueBar songs={songs} nowPlayingId={session.nowPlayingId} queue={session.queue} autoHistory={session.autoHistory} onRemoveQueueItem={removeQueueFrom} />
+          <QueueBar songs={songs} nowPlayingId={session.nowPlayingId} queue={session.queue} autoHistory={session.autoHistory} onRemoveQueueItem={removeQueueFrom} onRemoveQueueItemOnly={removeQueueOne} />
         </div>
 
         <SequencePane

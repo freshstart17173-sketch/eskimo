@@ -382,6 +382,11 @@ a { color: var(--accent); }
 [data-tooltip]:hover::after, [data-tooltip]:focus-visible::after {
   opacity: 1; transform: translateX(-50%) translateY(0);
 }
+/* Flips the tooltip to the other side — for anything living near the
+   opposite edge of the viewport from the default (the queue bar sits at
+   the very bottom, where "below" would clip). */
+[data-tooltip-above]::after { top: auto; bottom: calc(100% + 7px); transform: translateX(-50%) translateY(3px); }
+[data-tooltip-above]:hover::after, [data-tooltip-above]:focus-visible::after { transform: translateX(-50%) translateY(0); }
 
 .legend { display: flex; align-items: center; gap: 9px; font-size: 10.5px; color: var(--faint); }
 .legend span { display: inline-flex; align-items: center; }
@@ -551,9 +556,12 @@ a { color: var(--accent); }
 .queue-chip-playing { background: var(--state-playing); color: var(--paper); }
 .queue-chip-autoplay { border-style: dashed; border-color: var(--line); color: var(--muted); font-weight: 500; }
 .queue-chip-art { width: 18px; height: 18px; border-radius: 2px; flex: none; }
-.queue-chip-remove { opacity: .5; font-size: 11px; }
+.queue-chip-actions { display: flex; align-items: center; gap: 2px; }
+.queue-chip-remove { opacity: .5; font-size: 11px; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; border-radius: 2px; }
+.queue-chip-remove:hover { opacity: 1; background: rgba(19, 19, 19, .08); }
+.queue-chip-playing .queue-chip-remove:hover { background: rgba(252, 252, 252, .15); }
 .queue-arrow { color: var(--faint); font-size: 12px; flex: none; }
-.queue-bar-empty { font-size: 11.5px; color: var(--faint); font-style: italic; }
+.queue-bar-empty { font-size: 11.5px; color: var(--faint); }
 
 .autoplay-card { border-radius: var(--radius); background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .autoplay-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

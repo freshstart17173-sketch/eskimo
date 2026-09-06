@@ -291,9 +291,21 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       happens. Verified end-to-end with Playwright: empty state → load
       example → 5 songs/7 pieces + banner → upload a real song → demo
       wiped, banner gone, exactly the 1 real song remains.
-- [ ] Path breadcrumb in the Sequence pane can only be trimmed from the
-      end (by re-staging); removing one specific mid-path step without
-      clearing everything after it isn't possible yet.
+- [x] ~~Mid-path breadcrumb removal.~~ — done: `core.js`'s new
+      `removeQueueItem(queue, index, nowPlayingId, visibleEdges)` removes
+      one hop and recomputes the seam right after it against its new
+      predecessor (a built transition if one exists between them,
+      otherwise a cut) instead of losing the rest of the plan. The queue
+      bar's existing "✕" (rename in effect: "remove from here on", still
+      a full truncate) now sits next to a new "−" ("skip just this song"),
+      shown only when something is actually queued after that item — both
+      get the app's `[data-tooltip]` treatment, flipped above the chip via
+      a new `[data-tooltip-above]` modifier since the queue bar sits at
+      the bottom of the page. Verified with a standalone test of the pure
+      function (5 cases: mid removal with/without a direct edge to fall
+      back on, removing the last item, an out-of-range index, and removing
+      right before an End Set item) and end-to-end with Playwright driving
+      the real queue.
 - [x] ~~Progress feedback for Add Audio detection~~ — done:
       `detectMatch` (`audioDetect.js`) takes an optional `onProgress(done,
       total)` callback fired once per reference track actually checked;

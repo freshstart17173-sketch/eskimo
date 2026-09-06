@@ -318,6 +318,29 @@ export function advanceSession(prev, songs, visibleEdges) {
   return { ...prev, isPlaying: false, setEnded: true, timeLeft: 0 };
 }
 
+// Removing one specific hop from the middle of the queue, keeping whatever
+// was planned after it — the queue bar's "remove from here on" already
+// truncates the tail, but that's not the same as skipping a single planned
+// song without losing the rest of the plan. The hop right after the
+// removed one no longer starts from the same song, so it's recomputed
+// against the new predecessor: a built transition if one exists between
+// them, otherwise a cut (matching what choosing that pair manually would
+// produce). Whatever was queued for that hop's own destination edge choice
+// is not preserved — there's no UI yet to reconsider it, so it defaults
+// like a fresh pick would.
+export function removeQueueItem(queue, index, nowPlayingId, visibleEdges) {
+  if (index < 0 || index >= queue.length) return queue;
+  const prevId = index === 0 ? nowPlayingId : queue[index - 1].id;
+  const rest = [...queue.slice(0, index), ...queue.slice(index + 1)];
+  const nextItem = rest[index];
+  if (!nextItem || nextItem.id === END) return rest;
+  const transitionEdge = visibleEdges.find(e => e.type === 'transition' && e.l === prevId && e.r === nextItem.id);
+  rest[index] = transitionEdge
+    ? { id: nextItem.id, mode: 'transition', edgeId: transitionEdge.id }
+    : { id: nextItem.id, mode: 'cut', ending: 'cut', starting: 'cut' };
+  return rest;
+}
+
 // Removing a song must not leave dangling edges pointing at it.
 export function removeSongCascade(songs, edges, songId) {
   const nextSongs = { ...songs };
