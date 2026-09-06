@@ -4,7 +4,7 @@ import { estimateSeamlessLength } from '../graphEstimate.js';
 import { useTheme } from '../theme.js';
 import { Field } from './shared.jsx';
 
-export default function SettingsPage({ venueName, setVenueName, songs, edges, session, onClearAll, onRestore, onSetAutoplay, onSetTransitionOnly }) {
+export default function SettingsPage({ venueName, setVenueName, songs, edges, session, playlists, onClearAll, onRestore, onSetAutoplay, onSetTransitionOnly }) {
   const estimate = useMemo(() => estimateSeamlessLength(songs, edges), [songs, edges]);
   const { theme, setTheme } = useTheme();
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -12,7 +12,7 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
   const [importError, setImportError] = useState('');
 
   function downloadBackup() {
-    const data = { songs, edges, session, venueName };
+    const data = { songs, edges, session, venueName, playlists };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

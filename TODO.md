@@ -250,27 +250,54 @@ pan/zoom the graph there — it's a navigation aid, not an editor.
 
 ### Build order for this pass
 
-1. **Data model** — `activePlaylist`/`playlists` in `core.js`, persistence,
-   pure helpers (socket eligibility, connection resolution, the
-   auto-commit-from-wiring tick logic).
-2. **Graph visuals, read-only first** — the three arrow tiers (grey
+1. [x] ~~**Data model**~~ — done: `session.activePlaylist` (the live,
+   always-editable wiring — `{ id, name, nodes: { [songId]: { startMode,
+   startEdgeId, endMode, endEdgeId, nextSongId } } }`) and top-level
+   `playlists` (saved snapshots of the same shape) added to `core.js`,
+   persisted locally + pushed remotely, round-tripped through the backup
+   download/restore file, and cleaned up on song deletion
+   (`removeSongFromPlaylist`, applied to both the live wiring and every
+   saved playlist so a deleted song can never leave a dangling reference).
+   Pure helpers added: `emptyActivePlaylist`, `wireConnection`,
+   `unwireOutput`, `playlistNextHop`, and the socket-eligibility helpers
+   (`introEdgeFor`/`outroEdgeFor`/`transitionEdgesTo`/
+   `transitionEdgesBetween`/`leftSocketTypes`/`rightSocketTypes`).
+1b. [x] ~~**Wire it into real playback**~~ — done ahead of the graph UI
+   that will actually let you build wiring, because it's the part that's
+   easy to get subtly wrong and everything else is easier to verify once
+   it's solid: `audioEngine.js`'s `performAdvance` now falls back to
+   `playlistNextHop(activePlaylist, nowPlayingId)` whenever nothing's
+   manually queued, *before* autoplay's random pick — using the exact
+   same session-entry shape (`{id, mode:'transition', edgeId}` /
+   `{id, mode:'cut', ending, starting}`) a manual Next-list click already
+   produces, so `advanceSession`, the real `audioEngine.js` handoff, and
+   the Sequence pane all keep working completely unchanged. Also fixed a
+   real bug caught in the first verification pass: `App.jsx`'s tick
+   computed its cue-point trigger from `queue[0]` only, so a wired-but-
+   unqueued hop would silently wait for the full song length instead of
+   its transition's actual built cue point — now computed from
+   `queue[0] || playlistNextHop(...)`, the same "effective head" both the
+   trigger check and the handoff use.
+   Verified in a real browser: a two-song wired transition hands off at
+   its real cue point (not the full song length) with nothing manually
+   queued and autoplay off; a three-song closed loop (transition → a
+   plain wired None hop with no produced edge at all → transition closing
+   back to the first song) cycles indefinitely — confirmed over multiple
+   hops — with zero manual clicks and zero reliance on autoplay's
+   randomness, which is the entire point ("you can walk away from it").
+2. [ ] **Graph visuals, read-only first** — the three arrow tiers (grey
    dotted always-on, replacing today's tiered coloring), typed sockets
    rendered (hidden when ineligible) but not yet interactive. Get this
    looking right before wiring up interaction.
-3. **Socket interaction** — click-to-toggle None/Intro/Outro, drag-to-
+3. [ ] **Socket interaction** — click-to-toggle None/Intro/Outro, drag-to-
    connect Transition sockets (with the multi-candidate popup), the
    hover-✕ disconnect, the connected-socket label + reopen behavior.
-4. **Wire it into real playback** — the tick loop auto-commits from
-   `activePlaylist` when nothing's manually queued; verify a built loop
-   actually autoplays forever without manual clicks, same rigor as every
-   other Hard-tier item in this file (real browser, real synthetic audio,
-   not just visual).
-5. **Countdown bars everywhere** transitions/outros show up.
-6. **Save/Load playlist** — toolbar button, persisted `playlists` array,
-   confirm-before-replace on load.
-7. **Readonly filmstrip** replacing `QueueBar`.
-8. **Zoom level-of-detail.**
-9. Only after all of the above is solid: revisit whether the Sequence
+4. [ ] **Countdown bars everywhere** transitions/outros show up.
+5. [ ] **Save/Load playlist** — toolbar button, persisted `playlists`
+   array, confirm-before-replace on load.
+6. [ ] **Readonly filmstrip** replacing `QueueBar`.
+7. [ ] **Zoom level-of-detail.**
+8. Only after all of the above is solid: revisit whether the Sequence
    pane's Playing card / Next list can be retired, as its own explicit
    decision — not assumed here.
 

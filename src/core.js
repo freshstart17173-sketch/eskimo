@@ -49,6 +49,77 @@ export function emptySession() {
     autoplay: false, // when true and nothing's manually queued, pickAutoplayNext chooses
     transitionOnly: false, // true = a dead end stops the set instead of cutting to a random song
     autoHistory: [], // songs autoplay has actually played, most recent last — for the bottom queue bar
+    activePlaylist: emptyActivePlaylist(), // the graph's live, always-editable wiring — see TODO.md
+  };
+}
+
+// The graph-as-playlist-editor's live wiring (TODO.md has the full spec).
+// A sparse map keyed by songId — most songs in a library won't participate.
+// One direction of truth: a connection is always written from its source's
+// `nextSongId`/`endMode`/`endEdgeId`, and the destination's `startMode`/
+// `startEdgeId` are kept in sync by the same write, never set independently.
+export function emptyActivePlaylist() { return { id: null, name: '', nodes: {} }; }
+
+function playlistNode(playlist, songId) {
+  return playlist.nodes[songId] || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null };
+}
+
+// Wires one full connection — a Transition drag (endEdgeId names the
+// produced edge, toId is just edge.r) and a None/Outro/Intro drag (toId is
+// whatever node the DJ dropped on, endEdgeId is the outro edge if any, the
+// destination's startEdgeId is its intro edge if any) both resolve through
+// this same function, always updating both ends together so the playlist
+// can never end up with a dangling half-wire only one side knows about.
+export function wireConnection(playlist, fromId, toId, endMode, endEdgeId, startMode, startEdgeId) {
+  const nodes = { ...playlist.nodes };
+  nodes[fromId] = { ...playlistNode(playlist, fromId), endMode, endEdgeId: endEdgeId || null, nextSongId: toId };
+  nodes[toId] = { ...playlistNode(playlist, toId), startMode, startEdgeId: startEdgeId || null };
+  return { ...playlist, nodes };
+}
+
+// Disconnects songId's outgoing wire, clearing whatever it pointed to back
+// to 'none' rather than leaving that node silently claiming a connection
+// that's no longer there.
+export function unwireOutput(playlist, songId) {
+  const node = playlistNode(playlist, songId);
+  if (!node.nextSongId) return playlist;
+  const nodes = { ...playlist.nodes };
+  const destId = node.nextSongId;
+  nodes[songId] = { ...node, endMode: 'none', endEdgeId: null, nextSongId: null };
+  if (nodes[destId]) nodes[destId] = { ...nodes[destId], startMode: 'none', startEdgeId: null };
+  return { ...playlist, nodes };
+}
+
+// Drops every reference to songId — both its own entry and any other
+// node's connection pointing at it — so deleting a song can never leave a
+// playlist quietly wired to something that no longer exists.
+export function removeSongFromPlaylist(playlist, songId) {
+  const nodes = {};
+  for (const id of Object.keys(playlist.nodes)) {
+    if (id === songId) continue;
+    const node = playlist.nodes[id];
+    nodes[id] = node.nextSongId === songId ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null } : node;
+  }
+  return { ...playlist, nodes };
+}
+
+// The tick loop's deterministic auto-continue: what activePlaylist says
+// happens after `songId`, expressed as the exact same shape a manual
+// Next-list commit already produces — so App.jsx's tick can push it
+// through the same commitTransition/commitCutOrOutro path, and the real
+// audio engine never needs to know whether a hop came from a click or a
+// wired connection.
+export function playlistNextHop(playlist, songId) {
+  const node = playlist.nodes[songId];
+  if (!node || !node.nextSongId) return null;
+  if (node.endMode === 'transition' && node.endEdgeId) {
+    return { id: node.nextSongId, mode: 'transition', edgeId: node.endEdgeId };
+  }
+  const destNode = playlist.nodes[node.nextSongId];
+  return {
+    id: node.nextSongId, mode: 'cut',
+    ending: node.endMode === 'outro' ? 'outro' : 'cut',
+    starting: (destNode && destNode.startMode === 'intro') ? 'intro' : 'cut',
   };
 }
 
@@ -187,7 +258,7 @@ export async function uploadCoverIfPossible(file) {
 
 // The one and only "no saved state yet" starting point — a genuinely empty
 // library. Nothing is seeded; the person adds their own songs and audio.
-export function freshState() { return { songs: {}, edges: [], session: emptySession(), venueName: '' }; }
+export function freshState() { return { songs: {}, edges: [], session: emptySession(), venueName: '', playlists: [] }; }
 
 // ---------------------------------------------------------------------------
 // Small generic helpers
@@ -263,6 +334,31 @@ export function transitionCandidates(visibleEdges, fromId, excludeIds) {
 }
 export function cutCandidates(songs, excludeIds) {
   return Object.keys(songs).filter(id => !excludeIds.has(id));
+}
+
+// ---------------------------------------------------------------------------
+// Graph socket helpers (the playlist editor — see TODO.md). A socket only
+// renders when it's actually possible for that song — an Outro socket on a
+// song with no produced outro just doesn't exist, rather than sitting there
+// permanently disabled.
+// ---------------------------------------------------------------------------
+export function introEdgeFor(visibleEdges, songId) { return visibleEdges.find(e => e.type === 'intro' && e.r === songId) || null; }
+export function outroEdgeFor(visibleEdges, songId) { return visibleEdges.find(e => e.type === 'outro' && e.l === songId) || null; }
+export function transitionEdgesTo(visibleEdges, songId) { return visibleEdges.filter(e => e.type === 'transition' && e.r === songId); }
+export function transitionEdgesBetween(visibleEdges, fromId, toId) {
+  return visibleEdges.filter(e => e.type === 'transition' && e.l === fromId && e.r === toId);
+}
+export function leftSocketTypes(visibleEdges, songId) {
+  const types = ['none'];
+  if (introEdgeFor(visibleEdges, songId)) types.push('intro');
+  if (transitionEdgesTo(visibleEdges, songId).length) types.push('transition');
+  return types;
+}
+export function rightSocketTypes(visibleEdges, songId) {
+  const types = ['none'];
+  if (outroEdgeFor(visibleEdges, songId)) types.push('outro');
+  if (transitionCandidates(visibleEdges, songId, new Set()).length) types.push('transition');
+  return types;
 }
 
 // Autoplay's picking policy: prefer a random *built* transition out of the

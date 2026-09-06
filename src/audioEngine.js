@@ -20,7 +20,7 @@
 // every currently scheduled node, whichever deck or fragment is
 // sounding) rather than tracking play/pause per node.
 
-import { END, advanceSession } from './core.js';
+import { END, advanceSession, playlistNextHop } from './core.js';
 
 const bufferCache = new Map();
 
@@ -197,9 +197,17 @@ export const engine = new AudioEngine();
 // the matching real-audio handoff, so the two call sites can never disagree
 // about what a hop actually does.
 export function performAdvance(prevSession, songs, edges) {
-  const hop = prevSession.queue[0] || null;
   const nowPlayingId = prevSession.nowPlayingId;
-  const next = advanceSession(prevSession, songs, edges);
+  const explicitHop = prevSession.queue[0] || null;
+  // No manual queue entry — fall back to the graph's own wiring (the
+  // playlist editor, see TODO.md) before resorting to autoplay's random
+  // pick, so a fully wired loop keeps itself going forever without ever
+  // needing randomness. A manual commit always wins when both exist.
+  const wiredHop = !explicitHop ? playlistNextHop(prevSession.activePlaylist, nowPlayingId) : null;
+  const hop = explicitHop || wiredHop;
+  const next = wiredHop
+    ? advanceSession({ ...prevSession, queue: [wiredHop] }, songs, edges)
+    : advanceSession(prevSession, songs, edges);
 
   if (hop) {
     if (hop.id === END) {

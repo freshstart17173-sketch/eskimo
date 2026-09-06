@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
-import { Store, freshState, emptySession, removeSongCascade, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed } from './core.js';
 import { engine, performAdvance } from './audioEngine.js';
 import Sidebar from './components/Sidebar.jsx';
 
@@ -25,6 +25,7 @@ export default function App() {
   const [session, setSession] = useState(INITIAL.session);
   const [venueName, setVenueName] = useState(INITIAL.venueName);
   const [isDemo, setIsDemo] = useState(!!INITIAL.isDemo);
+  const [playlists, setPlaylists] = useState(INITIAL.playlists || []);
 
   const [tab, setTab] = useState('perform');
 
@@ -36,6 +37,7 @@ export default function App() {
         if (remote.edges) setEdges(remote.edges);
         if (remote.session) setSession({ ...emptySession(), ...remote.session });
         if (typeof remote.venueName === 'string') setVenueName(remote.venueName);
+        if (Array.isArray(remote.playlists)) setPlaylists(remote.playlists);
       }
     });
   }, []);
@@ -45,12 +47,12 @@ export default function App() {
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      const data = { songs, edges, session, venueName, isDemo };
+      const data = { songs, edges, session, venueName, isDemo, playlists };
       Store.save(data);
       Store.pushRemote(data);
     }, 400);
     return () => clearTimeout(saveTimer.current);
-  }, [songs, edges, session, venueName, isDemo]);
+  }, [songs, edges, session, venueName, isDemo, playlists]);
 
   // ---- the set clock: ticks Now Playing's countdown, then hands off via
   // performAdvance (audioEngine.js) — the same function a manual "Next
@@ -85,7 +87,12 @@ export default function App() {
         const duration = nowSong ? nowSong.durationSec : 210;
         const engineElapsed = engine.getMainElapsed(prev.nowPlayingId);
         const elapsed = engineElapsed != null ? engineElapsed : Math.max(0, (duration - prev.timeLeft) + dtSec);
-        const triggerAt = transitionTriggerElapsed(prev.queue[0], edges, duration);
+        // A wired-but-not-manually-queued hop needs to trigger at its own
+        // cue point too, same as an explicit commit — otherwise a graph
+        // connection would silently wait for the full song length instead
+        // of the transition's actual built cue point.
+        const effectiveHead = prev.queue[0] || playlistNextHop(prev.activePlaylist, prev.nowPlayingId);
+        const triggerAt = transitionTriggerElapsed(effectiveHead, edges, duration);
         if (elapsed >= triggerAt || elapsed >= duration - 0.05) return performAdvance(prev, songs, getVisibleEdges(edges));
         return { ...prev, timeLeft: Math.max(0, duration - elapsed) };
       });
@@ -127,10 +134,14 @@ export default function App() {
     setSongs(result.songs);
     setEdges(result.edges);
     setSession(prev => {
-      if (prev.nowPlayingId !== songId && !prev.queue.some(q => q.id === songId)) return prev;
+      const activePlaylist = removeSongFromPlaylist(prev.activePlaylist, songId);
+      if (prev.nowPlayingId !== songId && !prev.queue.some(q => q.id === songId)) return { ...prev, activePlaylist };
       if (prev.nowPlayingId === songId) engine.stopAll();
-      return { ...prev, queue: prev.queue.filter(q => q.id !== songId), isPlaying: prev.nowPlayingId === songId ? false : prev.isPlaying, setEnded: prev.nowPlayingId === songId ? true : prev.setEnded };
+      return { ...prev, activePlaylist, queue: prev.queue.filter(q => q.id !== songId), isPlaying: prev.nowPlayingId === songId ? false : prev.isPlaying, setEnded: prev.nowPlayingId === songId ? true : prev.setEnded };
     });
+    // A saved playlist referencing a now-deleted song would otherwise sit
+    // there silently broken until someone tried to load it.
+    setPlaylists(prev => prev.map(p => removeSongFromPlaylist(p, songId)));
     showUndoToast('Deleted "' + (song ? song.title : 'that song') + '"', snapshot);
   }, [edges, songs, session, showUndoToast]);
 
@@ -151,6 +162,7 @@ export default function App() {
     Store.clear();
     const fresh = freshState();
     setSongs(fresh.songs); setEdges(fresh.edges); setSession(fresh.session); setVenueName(fresh.venueName);
+    setPlaylists(fresh.playlists);
     setIsDemo(false);
     setTab('perform');
   }, []);
@@ -259,9 +271,9 @@ export default function App() {
           {tab === 'settings' && (
             <SettingsPage
               venueName={venueName} setVenueName={setVenueName}
-              songs={songs} edges={edges} session={session}
+              songs={songs} edges={edges} session={session} playlists={playlists}
               onClearAll={clearAllData}
-              onRestore={(data) => { setSongs(data.songs); setEdges(data.edges); setSession(data.session); setVenueName(data.venueName); }}
+              onRestore={(data) => { setSongs(data.songs); setEdges(data.edges); setSession(data.session); setVenueName(data.venueName); setPlaylists(Array.isArray(data.playlists) ? data.playlists : []); }}
               onSetAutoplay={setAutoplay} onSetTransitionOnly={setTransitionOnly}
             />
           )}
