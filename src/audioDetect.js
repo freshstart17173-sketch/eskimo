@@ -13,9 +13,15 @@
 //
 // Needs real reference audio to compare against — with no songs uploaded
 // with audio yet, there is nothing to detect against, so callers should
-// fall back to pickDetectedSongs (core.js) until that's true. See TODO.md
-// for the current cost/perf tradeoff (this fetches each candidate's whole
-// file today; range-requesting just the head/tail is the noted follow-up).
+// fall back to pickDetectedSongs (core.js) until that's true.
+//
+// Cost note: for a plain-PCM WAV master, fetchEdgesRanged below gets
+// everything this needs — an exact duration plus head/tail envelopes —
+// from a HEAD-sized probe and two small byte-range GETs, not the whole
+// file (R2 and most CDNs answer Range requests natively; see TODO.md for
+// the CORS header this needs on the bucket). Anything that isn't a WAV
+// this can parse falls back to downloading the whole file, same as
+// before — correctness over a cleverness that doesn't generalize.
 
 const EDGE_SECONDS = 10; // how much of each clip's head/tail we compare
 const WINDOW_SEC = 0.05; // ~50ms RMS windows — coarse but resistant to bit-level noise
@@ -43,6 +49,113 @@ export async function fetchAndDecode(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error('fetch failed: ' + res.status);
   return decodeArrayBuffer(await res.arrayBuffer());
+}
+
+// ---------------------------------------------------------------------------
+// Range-fetch fast path (WAV/PCM only — see the header comment above for why
+// AIFF/FLAC/MP3 fall back to the full-file fetch instead of trying to fake
+// their way through this).
+// ---------------------------------------------------------------------------
+
+function readAscii(view, offset, len) {
+  let s = '';
+  for (let i = 0; i < len; i++) s += String.fromCharCode(view.getUint8(offset + i));
+  return s;
+}
+
+// Walks a WAV's RIFF chunks to find 'fmt ' and 'data' rather than assuming
+// the classic "always at byte 44" layout — a DAW export can carry extra
+// metadata chunks (LIST, fact, …) before the actual samples.
+function parseWavHeader(bytes) {
+  if (bytes.length < 12) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (readAscii(dv, 0, 4) !== 'RIFF' || readAscii(dv, 8, 4) !== 'WAVE') return null;
+  let offset = 12, fmt = null, dataOffset = null, dataSize = null;
+  while (offset + 8 <= bytes.length) {
+    const chunkId = readAscii(dv, offset, 4);
+    const chunkSize = dv.getUint32(offset + 4, true);
+    if (chunkId === 'fmt ') {
+      fmt = {
+        audioFormat: dv.getUint16(offset + 8, true),
+        numChannels: dv.getUint16(offset + 10, true),
+        sampleRate: dv.getUint32(offset + 12, true),
+        byteRate: dv.getUint32(offset + 16, true),
+        blockAlign: dv.getUint16(offset + 20, true),
+        bitsPerSample: dv.getUint16(offset + 22, true),
+      };
+    } else if (chunkId === 'data') {
+      dataOffset = offset + 8;
+      dataSize = chunkSize;
+      break;
+    }
+    offset += 8 + chunkSize + (chunkSize % 2); // chunks are word-aligned
+  }
+  if (!fmt || dataOffset == null || !fmt.byteRate) return null;
+  return { ...fmt, dataOffset, dataSize };
+}
+
+// Wraps a slice of raw PCM bytes in a fresh, internally-consistent 44-byte
+// WAV header (sized to exactly that slice) so decodeAudioData sees a valid
+// standalone file instead of a bare fragment — never relies on a browser
+// tolerating a header whose declared chunk sizes don't match the buffer.
+function wavBlobFrom(fmt, pcmBytes) {
+  const header = new ArrayBuffer(44);
+  const dv = new DataView(header);
+  const writeAscii = (off, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)); };
+  writeAscii(0, 'RIFF'); dv.setUint32(4, 36 + pcmBytes.byteLength, true); writeAscii(8, 'WAVE');
+  writeAscii(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, fmt.audioFormat, true);
+  dv.setUint16(22, fmt.numChannels, true); dv.setUint32(24, fmt.sampleRate, true);
+  dv.setUint32(28, fmt.byteRate, true); dv.setUint16(32, fmt.blockAlign, true); dv.setUint16(34, fmt.bitsPerSample, true);
+  writeAscii(36, 'data'); dv.setUint32(40, pcmBytes.byteLength, true);
+  return new Blob([header, pcmBytes]);
+}
+
+async function rangeGet(url, start, end) {
+  const res = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
+  if (!res.ok) throw new Error('range fetch failed: ' + res.status);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// Gets exactly what detection needs from a WAV reference — an exact
+// duration (from the header, not a decoded buffer) plus head/tail RMS
+// envelopes — via one small probe GET and up to two small range GETs,
+// instead of downloading the whole file. Returns null (caller falls back
+// to fetchAndDecode) for anything this can't safely fast-path: not a WAV,
+// not plain PCM, a header that didn't fit the probe, or a server that
+// doesn't answer Range requests (some do return 200 with the full body
+// instead of erroring, which still works here, just without the savings).
+export async function fetchEdgesRanged(url, edgeSeconds = EDGE_SECONDS) {
+  let probe;
+  try { probe = await rangeGet(url, 0, 65535); } catch (e) { return null; }
+  const fmt = parseWavHeader(probe);
+  if (!fmt || fmt.audioFormat !== 1) return null; // 1 = PCM; anything else isn't safe to hand-reconstruct
+
+  const duration = fmt.dataSize / fmt.byteRate;
+  const edgeBytes = Math.min(fmt.dataSize, Math.floor((edgeSeconds * fmt.byteRate) / fmt.blockAlign) * fmt.blockAlign);
+  const dataEnd = fmt.dataOffset + fmt.dataSize;
+
+  // The probe already carries the start of the data chunk — top up only
+  // the remainder past it instead of re-requesting bytes it already has.
+  const headPcmEnd = fmt.dataOffset + edgeBytes;
+  let headPcm;
+  if (probe.length >= headPcmEnd) {
+    headPcm = probe.slice(fmt.dataOffset, headPcmEnd);
+  } else {
+    const already = probe.slice(fmt.dataOffset, probe.length);
+    const rest = await rangeGet(url, probe.length, headPcmEnd - 1);
+    headPcm = new Uint8Array(already.length + rest.length);
+    headPcm.set(already, 0);
+    headPcm.set(rest, already.length);
+  }
+
+  const tailStart = Math.max(fmt.dataOffset, dataEnd - edgeBytes);
+  const tailPcm = await rangeGet(url, tailStart, dataEnd - 1);
+
+  const [headBuffer, tailBuffer] = await Promise.all([
+    decodeArrayBuffer(await wavBlobFrom(fmt, headPcm).arrayBuffer()),
+    decodeArrayBuffer(await wavBlobFrom(fmt, tailPcm).arrayBuffer()),
+  ]);
+  return { headEnv: headEnvelope(headBuffer, edgeSeconds), tailEnv: tailEnvelope(tailBuffer, edgeSeconds), duration };
 }
 
 // Mono-mixed RMS envelope over fixed-size windows.
@@ -132,17 +245,24 @@ export async function detectMatch(file, candidateSongs, onProgress) {
 
   for (let i = 0; i < withAudio.length; i++) {
     const song = withAudio[i];
-    let ref;
-    try { ref = await fetchAndDecode(song.audioUrl); } catch (e) { console.warn('Eskimo Studio: could not fetch reference audio for', song.id, e); if (onProgress) onProgress(i + 1, withAudio.length); continue; }
+    let leftEnv, rightEnv, refDuration;
+    const ranged = await fetchEdgesRanged(song.audioUrl).catch(() => null);
+    if (ranged) {
+      leftEnv = ranged.tailEnv; rightEnv = ranged.headEnv; refDuration = ranged.duration;
+    } else {
+      let ref;
+      try { ref = await fetchAndDecode(song.audioUrl); } catch (e) { console.warn('Eskimo Studio: could not fetch reference audio for', song.id, e); if (onProgress) onProgress(i + 1, withAudio.length); continue; }
+      leftEnv = tailEnvelope(ref); rightEnv = headEnvelope(ref); refDuration = ref.duration;
+    }
 
     // the dropped file's leading edge should match a candidate's trailing
     // edge — that candidate is the "left side" (what it plays out of)
-    const left = bestCorrelation(droppedHead, tailEnvelope(ref));
-    if (left.score > bestLeftScore) { bestLeftScore = left.score; bestLeft = song.id; bestLeftLag = left.lag; bestLeftRefDuration = ref.duration; }
+    const left = bestCorrelation(droppedHead, leftEnv);
+    if (left.score > bestLeftScore) { bestLeftScore = left.score; bestLeft = song.id; bestLeftLag = left.lag; bestLeftRefDuration = refDuration; }
 
     // the dropped file's trailing edge should match a candidate's leading
     // edge — that candidate is the "right side" (what it plays into)
-    const right = bestCorrelation(droppedTail, headEnvelope(ref));
+    const right = bestCorrelation(droppedTail, rightEnv);
     if (right.score > bestRightScore) { bestRightScore = right.score; bestRight = song.id; bestRightLag = right.lag; }
     if (onProgress) onProgress(i + 1, withAudio.length);
   }

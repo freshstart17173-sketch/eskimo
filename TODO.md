@@ -377,13 +377,33 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       DJ" gap and touches audio engine, timing/scheduling, and the whole
       Sequence pane's countdown semantics (which are currently a mocked
       `durationSec`, not read from real audio).
-- [ ] **Range-fetch based detection.** `audioDetect.js` currently downloads
-      each candidate's *entire* reference file to correlate ~10 seconds of
-      it — fine for a small library, real cost at scale. The fix is HTTP
-      Range requests against R2 (R2 supports them) to fetch only the
-      head/tail bytes needed, which also means teaching
-      `worker/upload-worker.js` (or R2 directly, since public bucket reads
-      don't go through the worker) to pass Range headers through cleanly.
+- [x] ~~Range-fetch based detection.~~ — done, for the case it can be done
+      correctly: `audioDetect.js`'s new `fetchEdgesRanged(url)` gets a
+      plain-PCM WAV reference's exact duration (from its header, not a
+      decoded buffer) plus head/tail RMS envelopes via one small probe GET
+      and up to two small Range GETs — no worker changes needed, since
+      public bucket reads already bypass the worker straight to R2, which
+      answers Range requests natively (just needs `Range` in the bucket's
+      CORS `AllowedHeaders`, already covered by the `"*"` in the README's
+      recommended policy). Walks the WAV's actual RIFF chunks rather than
+      assuming a fixed 44-byte header, since a DAW export can carry extra
+      metadata chunks first. Deliberately scoped to WAV/PCM only — AIFF/
+      FLAC/MP3 references still get the old full-file `fetchAndDecode`
+      path, because safely reconstructing a decodable partial file from an
+      arbitrary byte range isn't tractable for those formats without a
+      real format parser; `detectMatch` falls back to it automatically
+      whenever the ranged path returns null (not a WAV, not PCM, or a
+      header that didn't fit the probe).
+      Verified against a local HTTP server with real Range support (206
+      Partial Content): the ranged head/tail envelopes and duration are
+      byte-identical to a full decode's, including for a WAV with an
+      injected `LIST` metadata chunk before its data (proves the chunk
+      walker); the full `detectMatch` pipeline correctly identifies both
+      sides of a constructed transition with the right cue timecodes;
+      exactly 3 small range requests are made (all 206s) totaling no more
+      than the file's own size, not one download per candidate; and a
+      non-PCM WAV (audioFormat ≠ 1) correctly returns null to trigger the
+      fallback.
 - [ ] **Real audio duration + BPM/key from analysis** (Essentia.js,
       WebAssembly, client-side) — replaces `mockDuration` and the
       manually-entered BPM/key fields, and would make the Sequence pane's
