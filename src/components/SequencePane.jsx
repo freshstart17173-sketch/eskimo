@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { fmtTime, clamp } from '../core.js';
-import { Icon, ICONS, SongPicker, AlbumArt, useResolvedAudioUrl } from './shared.jsx';
+import { Icon, ICONS, SongPicker, AlbumArt, useResolvedAudioUrl, usePalette } from './shared.jsx';
 
 // A self-contained play/pause toggle over the row's own built audio (a
 // transition's fragment, or a cut/outro candidate's intro) — stops the
@@ -148,6 +148,11 @@ export default function SequencePane({
   onCommitRow, onSkipNext, onSeek,
 }) {
   const [startStarting, setStartStarting] = useState('cut');
+  // Color match (see dominantColor.js) — same idea as the graph's playing
+  // node, computed independently here since this panel doesn't share
+  // GraphPane's NowPlayingContext; the underlying color is cached by URL so
+  // decoding it twice is cheap.
+  const palette = usePalette(nowSong ? nowSong.coverUrl : null);
 
   // When a transition's cue point passes unpicked, PerformPage drops it
   // from nextRows outright (see the redesign note there) — if that card
@@ -192,7 +197,7 @@ export default function SequencePane({
             )}
           </div>
         ) : (
-          <div className="seq-now-card">
+          <div className="seq-now-card" style={palette ? { background: palette.playing } : undefined}>
             <div className="section-label section-label-dark">Playing</div>
             <div className="seq-now-row">
               <button className="seq-play-btn" onClick={onTogglePlaying} aria-label={session.isPlaying ? 'Pause' : 'Play'}>

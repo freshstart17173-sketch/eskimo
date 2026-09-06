@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { fmtBytes } from '../core.js';
 import { resolveAudioUrl, isLocalAudioMarker } from '../localAudioStore.js';
+import { extractDominantColor, derivePalette } from '../dominantColor.js';
 
 // `song.audioUrl`/`edge.audioUrl` may be a `local:` marker (audio stored in
 // IndexedDB, no backend configured — see localAudioStore.js) rather than a
@@ -22,6 +23,23 @@ export function useResolvedAudioUrl(url) {
     return () => { cancelled = true; };
   }, [url]);
   return resolved;
+}
+
+// The color-match feature: a song with cover art gets a playing/next/later
+// palette derived from that art instead of the app's fixed accent blue
+// (see dominantColor.js) — null (the fixed blue stays in charge, styles.css
+// already handles that as the default) until a cover exists and its color
+// has actually been decoded.
+export function usePalette(coverUrl) {
+  const resolvedUrl = useResolvedAudioUrl(coverUrl);
+  const [palette, setPalette] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolvedUrl) { setPalette(null); return undefined; }
+    extractDominantColor(resolvedUrl).then((rgb) => { if (!cancelled) setPalette(derivePalette(rgb)); });
+    return () => { cancelled = true; };
+  }, [resolvedUrl]);
+  return palette;
 }
 
 export function Icon({ path, size = 15, strokeWidth = 1.6, filled = false }) {

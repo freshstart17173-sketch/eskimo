@@ -45,7 +45,7 @@ function LiveWaveform() {
 // comment above its node-rebuild effect for why: routing a per-second tick
 // through `setNodes` was flickering the disconnect button on every active
 // edge in the whole graph, not just ones touching the playing node.
-export const NowPlayingContext = createContext({ nowPlayingId: null, elapsed: 0, duration: 0 });
+export const NowPlayingContext = createContext({ nowPlayingId: null, elapsed: 0, duration: 0, palette: null });
 
 // Hover and search-dim state reach SongNode the same way — through context,
 // never through React Flow's own node `data`. Both used to live in `data`
@@ -241,13 +241,25 @@ export function SongNode({ data }) {
   const state = baseState || (laterCandidateIds && laterCandidateIds.has(song.id) ? 'later' : null);
   const position = (playing && nowPlaying.nowPlayingId === song.id) ? nowPlaying : null;
   const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
+  // Color match: the playing song's own cover art picks the tone here (see
+  // dominantColor.js) instead of the fixed accent blue those state-* classes
+  // paint by default — "next"/"later" get muted versions of that same
+  // color, exactly the relationship the static palette already has between
+  // --state-playing/-next/-later, just recolored per song. No cover (or no
+  // decoded color yet) leaves the CSS classes' fixed blue in charge.
+  const palette = nowPlaying.palette;
+  const dynamicStyle = !palette ? undefined
+    : state === 'playing' ? { background: palette.playing, borderColor: palette.playing }
+    : state === 'next' ? { background: palette.nextBg, borderColor: palette.next }
+    : state === 'later' ? { background: palette.laterBg, borderColor: palette.later }
+    : undefined;
   const onToggle = (side, type) => onToggleSocket(song.id, side, type);
   // Only the song actually playing has a live elapsed clock to count down
   // against — a wired-but-not-yet-playing outro/transition just shows its
   // dropdown with no ring, since "time left" means nothing until it starts.
   const rightRemainingSec = (position && rightCueSeconds != null) ? (rightCueSeconds - position.elapsed) : null;
   return (
-    <div className={cls} onMouseEnter={onEnter} onMouseLeave={onLeave} onClick={onSelect}>
+    <div className={cls} style={dynamicStyle} onMouseEnter={onEnter} onMouseLeave={onLeave} onClick={onSelect}>
       <div className="node-title-row">
         <div>
           <div className="node-title">{song.title}</div>

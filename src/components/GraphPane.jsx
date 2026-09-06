@@ -4,6 +4,7 @@ import { END, START } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphLayout.js';
 import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext } from './GraphNodes.jsx';
 import { useTheme } from '../theme.js';
+import { usePalette } from './shared.jsx';
 
 // Which edge (if any) the pointer is currently over, plus the setter — read
 // by ActiveEdge to show its hover-✕ only then, rather than the button being
@@ -335,9 +336,16 @@ export default function GraphPane({
     onDragSongPosition(node.id, node.position.x, node.position.y);
   }, [onDragSongPosition]);
 
+  // The color-match feature (see dominantColor.js): derived once here, off
+  // the playing song's own cover, and read by every node through context —
+  // a next/later node needs the *playing* song's palette to mute toward,
+  // not its own, and the playing node itself would otherwise decode the
+  // same cover a second time for no reason.
+  const nowSongForPalette = nowPlayingId ? songs[nowPlayingId] : null;
+  const palette = usePalette(nowSongForPalette ? nowSongForPalette.coverUrl : null);
   const nowPlayingValue = useMemo(
-    () => ({ nowPlayingId, elapsed: nowElapsedSec, duration: nowDurationSec }),
-    [nowPlayingId, nowElapsedSec, nowDurationSec]
+    () => ({ nowPlayingId, elapsed: nowElapsedSec, duration: nowDurationSec, palette }),
+    [nowPlayingId, nowElapsedSec, nowDurationSec, palette]
   );
   // laterCandidateIds rides along in the same context as hoveredId (it's
   // itself hover-derived — see the long comment on `stateFor` in
