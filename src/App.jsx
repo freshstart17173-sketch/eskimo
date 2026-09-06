@@ -71,7 +71,33 @@ export default function App() {
   const setAutoplay = useCallback((on) => setSession(prev => ({ ...prev, autoplay: on })), []);
   const setTransitionOnly = useCallback((on) => setSession(prev => ({ ...prev, transitionOnly: on })), []);
 
+  // One-level undo for song/edge deletion: delete happens immediately, no
+  // blocking confirm — a toast holds a snapshot of everything from just
+  // before the delete and restores it wholesale if clicked in time.
+  const [undoToast, setUndoToast] = useState(null); // { message, snapshot: { songs, edges, session } } | null
+  const undoTimerRef = useRef(null);
+  useEffect(() => () => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); }, []);
+
+  const showUndoToast = useCallback((message, snapshot) => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndoToast({ message, snapshot });
+    undoTimerRef.current = setTimeout(() => setUndoToast(null), 6000);
+  }, []);
+
+  const undoDelete = useCallback(() => {
+    setUndoToast(current => {
+      if (!current) return current;
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      setSongs(current.snapshot.songs);
+      setEdges(current.snapshot.edges);
+      setSession(current.snapshot.session);
+      return null;
+    });
+  }, []);
+
   const deleteSong = useCallback((songId) => {
+    const snapshot = { songs, edges, session };
+    const song = songs[songId];
     const result = removeSongCascade(songs, edges, songId);
     setSongs(result.songs);
     setEdges(result.edges);
@@ -79,15 +105,20 @@ export default function App() {
       if (prev.nowPlayingId !== songId && !prev.queue.some(q => q.id === songId)) return prev;
       return { ...prev, queue: prev.queue.filter(q => q.id !== songId), isPlaying: prev.nowPlayingId === songId ? false : prev.isPlaying, setEnded: prev.nowPlayingId === songId ? true : prev.setEnded };
     });
-  }, [edges, songs]);
+    showUndoToast('Deleted "' + (song ? song.title : 'that song') + '"', snapshot);
+  }, [edges, songs, session, showUndoToast]);
 
   const updateSong = useCallback((songId, patch) => {
     setSongs(prev => (prev[songId] ? { ...prev, [songId]: { ...prev[songId], ...patch } } : prev));
   }, []);
 
   const deleteEdge = useCallback((edgeId) => {
+    const snapshot = { songs, edges, session };
+    const edge = edges.find(e => e.id === edgeId);
+    const label = edge ? ({ outro: 'Outro', intro: 'Intro' }[edge.type] || 'Transition') : 'Audio piece';
     setEdges(prev => prev.filter(e => e.id !== edgeId));
-  }, []);
+    showUndoToast(label + ' removed', snapshot);
+  }, [edges, songs, session, showUndoToast]);
 
   const clearAllData = useCallback(() => {
     Store.clear();
@@ -169,6 +200,13 @@ export default function App() {
           />
         )}
       </div>
+
+      {undoToast && (
+        <div className="toast">
+          <span className="toast-message">{undoToast.message}</span>
+          <button className="btn btn-ghost btn-sm" onClick={undoDelete}>Undo</button>
+        </div>
+      )}
     </div>
   );
 }

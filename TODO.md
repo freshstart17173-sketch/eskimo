@@ -265,9 +265,14 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       thumbnail (via the same R2 worker path) would be the single biggest
       visual-polish lever left; this app's closest inspirations are all
       very art-forward.
-- [ ] **One-level undo** (a toast with an "Undo" action) for song/edge
-      deletion instead of a blocking confirm — feels more forgiving and
-      modern than a dialog you have to stop and read.
+- [x] ~~One-level undo~~ — done: `App.jsx` now snapshots songs/edges/
+      session right before a delete, deletes immediately (no confirm), and
+      shows a `.toast` with an "Undo" action for 6s that restores the
+      snapshot wholesale. Library's delete/remove buttons act immediately
+      again — the inline confirm added earlier this pass is gone, since
+      the toast is the whole point of this item. Verified end-to-end with
+      Playwright (delete → row gone + toast shown → Undo → row and its
+      edges back, cascade-deleted edges included).
 - [ ] **Guided first-run example.** The app is correctly seed-data-free by
       design, but that means a brand-new producer friend opens it to
       nothing — a one-click "load an example graph" into an obviously-

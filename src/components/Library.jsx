@@ -8,8 +8,6 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   const [draftArtist, setDraftArtist] = useState(song.artist);
   const [draftBpm, setDraftBpm] = useState(String(song.bpm));
   const [draftKey, setDraftKey] = useState(song.key);
-  const [confirmingDeleteSong, setConfirmingDeleteSong] = useState(false);
-  const [confirmingDeleteEdgeId, setConfirmingDeleteEdgeId] = useState(null);
 
   function saveEdits() {
     const bpmNum = Number(draftBpm);
@@ -55,15 +53,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
               ) : (
                 <span className="hint-text" style={{ alignSelf: 'center' }}>no reference master uploaded</span>
               )}
-              {!confirmingDeleteSong ? (
-                <button className="btn btn-danger btn-sm" onClick={() => setConfirmingDeleteSong(true)}>Delete song</button>
-              ) : (
-                <>
-                  <span className="hint-text" style={{ alignSelf: 'center' }}>removes every transition/intro/outro touching it</span>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setConfirmingDeleteSong(false)}>Cancel</button>
-                  <button className="btn btn-danger btn-sm" onClick={() => onDeleteSong(song.id)}>Confirm delete</button>
-                </>
-              )}
+              <button className="btn btn-danger btn-sm" onClick={() => onDeleteSong(song.id)}>Delete song</button>
             </div>
           ) : (
             <div className="lib-edit-row">
@@ -84,14 +74,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                     <span className="drawer-frag-label">{labelOf(e)}</span>
                     <div className="drawer-frag-actions">
                       {e.audioUrl && <audio controls src={e.audioUrl} style={{ height: 26 }} />}
-                      {confirmingDeleteEdgeId !== e.id ? (
-                        <button className="btn btn-ghost btn-xs" onClick={() => setConfirmingDeleteEdgeId(e.id)}>Remove</button>
-                      ) : (
-                        <>
-                          <button className="btn btn-ghost btn-xs" onClick={() => setConfirmingDeleteEdgeId(null)}>Cancel</button>
-                          <button className="btn btn-danger btn-xs" onClick={() => { onDeleteEdge(e.id); setConfirmingDeleteEdgeId(null); }}>Confirm</button>
-                        </>
-                      )}
+                      <button className="btn btn-ghost btn-xs" onClick={() => onDeleteEdge(e.id)}>Remove</button>
                     </div>
                   </div>
                   <div className="drawer-frag-dest">{destText(e)}</div>
