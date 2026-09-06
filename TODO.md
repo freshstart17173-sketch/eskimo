@@ -48,7 +48,7 @@ these three, used consistently in code, UI copy, and this document:
 - **Later** — a hover-only preview (not a staged plan) of what picking a
   given Next candidate would lead to — a one-move lookahead, not an open
   chain, and nothing is committed by it.
-- **Cut** — a hard edge with no fragment.
+- **Cut** — a hard edge with no fragment. **Renamed to "None" everywhere** as of the graph-editor rework below (label and code both) — "cut" reads as a DJ term for something that isn't really a DJ move here, it's just "nothing built."
 
 ## Graph model — decided, don't revisit
 
@@ -58,6 +58,221 @@ dagre automatically now (in Auto-arrange mode) — in Manual mode edges are
 still React Flow's default smooth bezier, just following straight-line
 node placement, since dagre isn't computing bends for a layout you're
 controlling by hand.
+
+## In progress — the graph becomes a playlist editor (replaces manual Next-list clicking as the primary way to plan ahead)
+
+This is a large rework, spec'd out in detail with the user before writing
+any code, because it touches the graph's core interaction model. Recorded
+here in full so a fresh session (human or agent) can pick up mid-build
+without re-deriving any of it. Read this whole section before touching
+`GraphPane.jsx`/`GraphNodes.jsx`/`PerformPage.jsx`.
+
+**The goal, in one sentence:** instead of clicking through the Sequence
+pane's Next list one hop at a time, you build a playlist — even a closed
+loop — directly on the graph by dragging connections between songs, and it
+plays for real, live, the same way manual clicking always has. The two
+aren't separate modes; there's no "build" screen vs. "play" screen. The
+Sequence pane's Playing card / Next list stays as a manual fallback for
+now — it isn't being removed yet, just no longer the primary way to plan
+ahead. It only gets removed later, once this is proven to work flawlessly
+and the two stay in sync (an explicit, separate future decision, not part
+of this build).
+
+### Data model
+
+Two new pieces, alongside `songs`/`edges`/`session` in the persisted blob:
+
+- **`session.activePlaylist`** — the live, always-editable wiring, edited
+  directly on the graph regardless of whether anything's currently
+  playing. Shape: a sparse map keyed by songId, since most songs in a
+  large library won't participate in it at all:
+  ```js
+  activePlaylist: {
+    id: null,              // set once saved; null = unsaved scratch wiring
+    name: '',
+    nodes: {
+      [songId]: {
+        startMode: 'none' | 'intro' | 'transition',
+        startEdgeId: null | edgeId,   // which intro edge, when startMode is 'intro'
+        endMode: 'none' | 'outro' | 'transition',
+        endEdgeId: null | edgeId,     // which outro/transition edge, when endMode isn't 'none'
+      }
+    }
+  }
+  ```
+  A song's *incoming* connection is never stored redundantly on that song
+  — it's discovered by finding whichever other node's `endEdgeId` points
+  at it (via the edge's own `l`/`r`). One direction of truth only.
+- **`playlists`** — top-level array of saved snapshots, same shape as one
+  `activePlaylist` plus its `id`/`name` filled in. "Save playlist" (a
+  toolbar button) copies the current `activePlaylist` into a new entry
+  here. Loading one replaces `activePlaylist` wholesale (a real replace,
+  so it should confirm first — same "don't lose work silently" instinct
+  as everything else destructive in this app).
+
+**Critically, this does NOT replace `session.queue`/`nowPlayingId` or the
+real audio engine — it feeds them.** When Now Playing has no manually
+queued hop and its song has a wired `endMode` in `activePlaylist`, the
+set-clock's tick (`App.jsx`) auto-commits that hop via the *same*
+`commitTransition`/`commitCutOrOutro` functions a Next-list click already
+calls — same session-queue entry shape, same `performAdvance`, same real
+`audioEngine.js` playback. Autoplay's existing random-pick behavior only
+still matters for songs that *aren't* wired — this graph wiring is meant
+to make that random fallback increasingly unnecessary as more of the
+library gets connected up. A closed loop (every song's output wired to
+another's input, cycling back around) means the tick always finds a wired
+hop, forever — that's what "you can walk away from it" means; nothing
+about walking away is a separate mechanism from the ordinary tick loop
+that already exists.
+
+### Node anatomy: sockets, not a single hover-card
+
+Each song node gets up to **six small sockets**, stacked on its left/right
+edges — an input side and an output side, each with up to three typed
+sockets. A socket only renders when it's actually possible for that song
+(no outro produced → no Outro socket, full stop):
+
+- **Left (input):** None · Intro · Transition
+- **Right (output):** None · Outro · Transition
+
+**Compatibility:** Transition only mates with Transition. The rest (None/
+Intro on the left, None/Outro on the right) freely mix — Outro→Intro,
+Outro→None, None→Intro, None→None are all valid.
+
+**Click vs. drag on a socket does two different things** (this is exactly
+what React Flow's `Handle` already distinguishes natively — pointerdown +
+move-past-threshold is a drag, pointerdown + up in place is a click; nodes
+already render `Handle` elements today, just invisible/inert
+(`nodesConnectable={false}`), so this is turning on and styling something
+already there, not fighting the library):
+- **Click** a None/Intro/Outro socket → toggles it directly (no popup —
+  it's a plain 2-state choice, and clicking again toggles back to None).
+- **Drag** from a Transition output socket to another node's Transition
+  input socket → wires a real produced transition. If more than one
+  produced transition exists between that pair, a small searchable list
+  pops up at the drop point (same drain-bar-countdown list design as the
+  old Next list) to pick which one — search matters here since a song can
+  have many built transitions. If none exists between that pair, the drag
+  just snaps back — dragging *selects* a produced transition, it never
+  fabricates one.
+- Dragging a **new** connection onto a socket that already has something
+  wired silently replaces it (no confirm, no rejection) — same instinct as
+  Blender letting a new cable bump the old one off a socket.
+- **Reopening an already-wired Transition's label** (see below) shows that
+  same searchable list, scoped to this song's *other* transition
+  candidates. Reopening a wired None/Outro/Intro just re-toggles directly
+  — no list, nothing to search, only two states exist.
+
+**v1 restricts each socket to at most one active connection.** Dragging a
+second wire out of an already-wired output replaces the first rather than
+adding a parallel path. Multiple simultaneous outputs (real branching,
+autoplay actually choosing between live options) is explicitly a later
+feature this data model shouldn't preclude, but v1 doesn't build it.
+
+**Disconnecting a wire:** hovering an active wire reveals a small "✕"
+badge at its midpoint — you must hit that small target specifically.
+Clicking the bare wire path itself does *nothing*. (Originally proposed as
+"click the wire to remove it" and correctly rejected as a real hazard — a
+stray click destroying part of a built playlist is exactly the kind of
+accident this app has been deliberately designed against everywhere else:
+End Set, deletes with undo toasts, the red-button treatment. Same
+instinct applies here.)
+
+**The label on a connected socket:** once wired, the node grows slightly
+to show a small label near that socket — the transition's name, or
+"Outro"/"Intro". Clicking it reopens the picker per the rule above.
+
+### Three distinct arrow states — not two
+
+- **Grey dotted** — a produced transition exists between this pair but
+  isn't wired into the current playlist. Drawn for *every* produced
+  transition edge, always, unconditionally — this replaces today's
+  tiered next/later/base accent-colored edges entirely. Thin, sparse dash,
+  not interactive itself (you never grab an existing grey line — you
+  always drag a fresh connection between sockets; if a produced edge
+  matches, its grey line is the one that lights up).
+- **Black dotted** — an *active* non-transition sequence link (any of
+  Outro→Intro, Outro→None, None→Intro, None→None). Shows "these two play
+  back to back" without implying a produced crossfade exists. Tighter
+  dash, slightly thicker than the grey one.
+- **Black solid** — an active *transition* connection. Thickest, solid.
+  Animates (marching-ants dash, same mechanism the old "next" tier edge
+  already used) specifically during the real crossfade window — tied to
+  the actual `audioEngine.js` elapsed time, the same window
+  `mixingIntoSong`/`CROSSFADE_LOOKAHEAD_SEC` already compute today, not
+  just "this is queued next."
+
+All three need an arrowhead (direction has to read at a glance) and need
+to stay visually distinct at a zoomed-out scale — dash rhythm and stroke
+weight carry the difference, not color alone, since color's off the table
+here (next point).
+
+**No per-song or per-cover color anywhere in this system.** Actively
+considered and rejected: extracting a dominant color from cover art for
+the active wire and for "one hop away" nodes doesn't read cleanly (an
+all-black or muddy cover breaks the whole mental model). Active
+connections are just solid `--ink` (flips correctly with the theme, same
+as the rest of the app's flat design). "One hop away" candidates get a
+plain muted/lower-opacity treatment instead of their own hue.
+**`--accent` (the blue) is removed, but only inside Perform/graph-scoped
+CSS** — the rest of the app (search focus ring, other pages) keeps it.
+
+### Zoom level-of-detail
+
+Below a fixed zoom threshold, node cards drop to a simplified rendering —
+just cover art, song name, and (if it's the one actually sounding) the
+Now Playing highlight, plus the arrows between nodes. Tags, sockets, and
+labels disappear entirely rather than fading; a hard cutoff, not a
+continuous fade (confirmed — simpler, predictable, matches how most node
+editors including Blender do it). Read the current zoom via React Flow's
+viewport/zoom hook, not CSS media queries (it's the canvas's own zoom, not
+the browser's).
+
+### Visible countdown timers, not just numbers
+
+Every transition and outro anywhere in this system — sockets, their
+reopened candidate lists, the readonly filmstrip below — shows a real
+progress bar counting down to its cue point, not just a number. This
+already exists in one place (the old Next list's drain bar); it needs to
+exist everywhere a transition/outro is shown, computed off the same real
+per-edge cue math (`outSeconds` vs. actual elapsed time) already in
+`nextRows`, not a new metric.
+
+### The bottom bar: readonly filmstrip, not an editable queue
+
+The `QueueBar` component and `session.queue`'s manual add/remove UI go
+away as a user-facing editing surface. In its place: a readonly strip
+*derived* from `activePlaylist` — starting at Now Playing, walk forward
+through whatever's actively wired, show that chain of chips. Since it's
+derived rather than independently maintained, it can never drift out of
+sync with the graph. Clicking a chip calls the existing `focusOn(id)` to
+pan/zoom the graph there — it's a navigation aid, not an editor.
+
+### Build order for this pass
+
+1. **Data model** — `activePlaylist`/`playlists` in `core.js`, persistence,
+   pure helpers (socket eligibility, connection resolution, the
+   auto-commit-from-wiring tick logic).
+2. **Graph visuals, read-only first** — the three arrow tiers (grey
+   dotted always-on, replacing today's tiered coloring), typed sockets
+   rendered (hidden when ineligible) but not yet interactive. Get this
+   looking right before wiring up interaction.
+3. **Socket interaction** — click-to-toggle None/Intro/Outro, drag-to-
+   connect Transition sockets (with the multi-candidate popup), the
+   hover-✕ disconnect, the connected-socket label + reopen behavior.
+4. **Wire it into real playback** — the tick loop auto-commits from
+   `activePlaylist` when nothing's manually queued; verify a built loop
+   actually autoplays forever without manual clicks, same rigor as every
+   other Hard-tier item in this file (real browser, real synthetic audio,
+   not just visual).
+5. **Countdown bars everywhere** transitions/outros show up.
+6. **Save/Load playlist** — toolbar button, persisted `playlists` array,
+   confirm-before-replace on load.
+7. **Readonly filmstrip** replacing `QueueBar`.
+8. **Zoom level-of-detail.**
+9. Only after all of the above is solid: revisit whether the Sequence
+   pane's Playing card / Next list can be retired, as its own explicit
+   decision — not assumed here.
 
 ## Done this pass (round 2 — polish, autoplay, real cue timing)
 
