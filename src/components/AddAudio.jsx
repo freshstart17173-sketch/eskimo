@@ -113,7 +113,7 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong, goUpload, o
       {referenceableSongs.length === 0 && (
         <div className="hint-text" style={{ marginBottom: 12 }}>
           No songs have a reference master uploaded yet, so detection below is placeholder matching, not real analysis —
-          upload masters on Upload Song (and configure audio storage, see TODO.md) to turn on real detection.
+          upload masters on Upload Song to turn on real detection.
         </div>
       )}
 
@@ -190,7 +190,11 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong, goUpload, o
         )}
 
         {error && <div className="error-note">{error}</div>}
-        {detected && <button className="btn btn-primary btn-self-start" onClick={saveEdge} disabled={uploading}>{uploading ? 'Uploading…' : 'Sounds right — save ' + typeLabel}</button>}
+        {detected && (
+          <button className="btn btn-primary btn-self-start" onClick={saveEdge} disabled={uploading}>
+            {uploading ? (<><span className="spinner" /> Uploading…</>) : 'Sounds right — save ' + typeLabel}
+          </button>
+        )}
 
         {saved && (
           <div className="success-note">

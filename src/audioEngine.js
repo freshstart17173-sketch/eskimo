@@ -21,6 +21,7 @@
 // sounding) rather than tracking play/pause per node.
 
 import { END, advanceSession, playlistNextHop } from './core.js';
+import { resolveAudioUrl } from './localAudioStore.js';
 
 const bufferCache = new Map();
 
@@ -41,11 +42,17 @@ class AudioEngine {
     return this.ctx;
   }
 
+  // `url` may be a real http(s) URL (the Cloudflare-worker-configured path)
+  // or a `local:` marker for audio stored in IndexedDB with no backend at
+  // all (see localAudioStore.js) — cached by the *marker/URL as given*, so
+  // resolving it to its (memoized) `blob:` URL first doesn't create a
+  // second cache entry for the same audio.
   async loadBuffer(url) {
     if (!url) return null;
     if (bufferCache.has(url)) return bufferCache.get(url);
     const ctx = this.ensureContext();
-    const promise = fetch(url)
+    const promise = resolveAudioUrl(url)
+      .then((realUrl) => { if (!realUrl) throw new Error('no audio at ' + url); return fetch(realUrl); })
       .then((res) => { if (!res.ok) throw new Error('fetch failed: ' + res.status); return res.arrayBuffer(); })
       .then((ab) => new Promise((resolve, reject) => ctx.decodeAudioData(ab, resolve, reject)))
       .catch((e) => { bufferCache.delete(url); throw e; });
@@ -101,6 +108,24 @@ class AudioEngine {
       source.start(startCtxTime);
       this._current = { source, gain, buffer, kind: 'clip', startCtxTime, offsetSec: 0, resolve };
     });
+  }
+
+  // Scrubbing the playhead: restarts the same already-loaded main-deck
+  // buffer at a new offset instead of re-fetching/re-decoding it. Returns
+  // false (a no-op for the caller) when `songId` isn't actually the main
+  // deck sounding right now — mid-fragment (a transition/outro clip
+  // playing), or a song with no uploaded master at all, so there's nothing
+  // real to seek; the caller's own wall-clock `timeLeft` is what moves in
+  // that case instead, same as normal playback for a silent song already
+  // works today.
+  seekMain(songId, offsetSec) {
+    const c = this._current;
+    if (!c || c.kind !== 'main' || c.songId !== songId) return false;
+    const ctx = this.ensureContext();
+    const clamped = Math.max(0, Math.min(offsetSec, c.buffer.duration));
+    try { c.source.onended = null; c.source.stop(); c.source.disconnect(); } catch (e) { /* already stopped */ }
+    this._startMain(c.buffer, songId, clamped);
+    return true;
   }
 
   // Real elapsed seconds into `songId`'s own master, straight off the

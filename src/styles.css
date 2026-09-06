@@ -304,6 +304,10 @@ a { color: var(--accent); }
 .dropzone-file-name { font-weight: 600; color: var(--ink); font-size: 12.5px; }
 .dropzone-file-size { color: var(--muted); font-size: 11px; font-family: var(--font-mono); }
 .analyzing-hint { margin: 4px 0 8px; display: flex; align-items: center; gap: 7px; }
+/* A button showing its own spinner (upload in progress, not just the
+   dropped file's analysis) needs the same flex layout as .analyzing-hint,
+   scoped so it doesn't change every other plain-text button's box. */
+.btn:has(.spinner) { display: inline-flex; align-items: center; gap: 6px; }
 .spinner {
   flex: none; width: 12px; height: 12px; border-radius: 50%;
   border: 2px solid var(--line-soft); border-top-color: var(--accent);
@@ -372,9 +376,21 @@ a { color: var(--accent); }
 .seq-now-card .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper-fixed); }
 /* a regular playhead — elapsed/total, not a countdown — plus the missing
    manual "skip to next" action right where you'd look for it */
-.playhead-track { position: relative; height: 4px; border-radius: 2px; background: rgba(252, 252, 252, .18); margin-top: 10px; }
-.playhead-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent); }
-.playhead-scrubber { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--paper); transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--accent); }
+.playhead-track {
+  position: relative; height: 4px; border-radius: 2px; background: rgba(252, 252, 252, .18);
+  margin-top: 10px; cursor: pointer; touch-action: none;
+}
+/* A taller invisible hit area than the visible 4px bar — real fingers/mice
+   aren't that precise, and the bar reads fine as thin so long as it isn't
+   also the whole clickable target. Doesn't affect the bar's own measured
+   width (what the drag math reads off `getBoundingClientRect`), only its
+   painted/hit-tested vertical extent. */
+.playhead-track::before { content: ''; position: absolute; left: 0; right: 0; top: -8px; bottom: -8px; }
+.playhead-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.playhead-scrubber {
+  position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--paper);
+  transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--accent); pointer-events: none;
+}
 .playhead-times { display: flex; justify-content: space-between; font-size: 10px; color: rgba(252, 252, 252, .55); margin-top: 6px; }
 .seq-skip-btn {
   width: 30px; height: 30px; flex: none; border-radius: var(--radius);
@@ -658,7 +674,13 @@ a { color: var(--accent); }
 .node-socket-clickable { cursor: pointer; }
 .node-socket-clickable:hover { box-shadow: 0 0 0 4px var(--socket-ring); }
 .node-socket-draggable { cursor: crosshair; }
-.node-socket-draggable:hover { box-shadow: 0 0 0 4px var(--socket-ring); transform: translateY(-50%) scale(1.2); }
+/* No `scale()` here on purpose — see the note on `.connectingto.valid`
+   below: growing the handle via `transform` changes its measured
+   `getBoundingClientRect`, which is exactly the box React Flow reads to
+   track where this handle actually is while a connection drag is live.
+   The ring (box-shadow, which doesn't affect layout/measurement at all)
+   still gives the same "you're over something" feedback. */
+.node-socket-draggable:hover { box-shadow: 0 0 0 4px var(--socket-ring); }
 .graph-pane .react-flow__handle.node-socket:not(.node-socket-available) {
   background: var(--line); border-color: var(--line); pointer-events: none; cursor: default;
 }
@@ -672,11 +694,26 @@ a { color: var(--accent); }
    closest compatible handle within `connectionRadius` with `.valid` (and
    the pane itself with `.connecting`) — without this, a drag landing near
    a real target looked identical to one landing in empty space, so there
-   was no felt "snap." */
+   was no felt "snap."
+   Deliberately a bigger ring only, never `transform: scale(...)` — a real
+   bug traced here directly: React Flow re-measures a handle's absolute
+   position (via its own bounding-box observer) whenever that handle's
+   rendered box changes, and a CSS `scale()` transform on hover/valid does
+   change the box `getBoundingClientRect` reports even though it doesn't
+   affect layout. That remeasurement was happening *mid-drag*, exactly as
+   the pointer closed in on a target, shifting React Flow's own internal
+   record of where the handle is right when the final drop position was
+   being evaluated — confirmed with an instrumented build that the
+   recorded handle position visibly jumped between frames right as
+   `scale()` kicked in, and that a same connection drawn as a single
+   teleport (no intermediate hover) landed fine while the same drag
+   traced through real intermediate points intermittently failed to
+   register at all. This is what made "drag a socket connection" read as
+   broken. Growing only the ring (box-shadow) keeps the handle's actual
+   box motionless throughout the whole gesture. */
 .graph-pane .react-flow__handle.connectingto.valid {
-  transform: translateY(-50%) scale(1.5); box-shadow: 0 0 0 5px var(--socket-ring);
+  box-shadow: 0 0 0 5px var(--socket-ring);
 }
-.node-socket-row-right .react-flow__handle.connectingto.valid { transform: translateY(-50%) scale(1.5); }
 
 .node-card {
   width: 208px; border-radius: var(--radius); padding: 9px;
@@ -684,12 +721,17 @@ a { color: var(--accent); }
   user-select: none; transition: box-shadow .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
   position: relative; transform: scale(1); transform-origin: center;
 }
-.node-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); transform: scale(1.015); }
+/* No `transform: scale(...)` on hover — see the long note above
+   `.connectingto.valid` on why: it changes the card's (and every socket
+   nested inside it) measured bounding box, which React Flow reads live
+   while a connection is being dragged. A card the pointer merely passes
+   over on its way to a real target doesn't need to grow for that to
+   register — the shadow lift alone reads as "hovered" fine. */
+.node-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); }
 .node-card.state-playing {
   background: var(--state-playing); color: var(--paper-fixed); border-color: var(--state-playing);
   animation: pulseRing 2.4s ease-in-out infinite; transform: scale(1.08); z-index: 5;
 }
-.node-card.state-playing:hover { transform: scale(1.095); }
 .node-card.state-next { background: var(--state-next-bg); border-color: var(--state-next); }
 .node-card.state-later { background: var(--state-later-bg); border-color: var(--state-later); }
 .node-card.node-hovered { box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }

@@ -86,7 +86,9 @@ export default function UploadSongPage({ onAddSong, onViewSong, existingCount })
           )}
         </Field>
         {error && <div className="error-note">{error}</div>}
-        <button className="btn btn-primary btn-self-start" onClick={save} disabled={uploading}>{uploading ? 'Uploading…' : 'Add to library'}</button>
+        <button className="btn btn-primary btn-self-start" onClick={save} disabled={uploading}>
+          {uploading ? (<><span className="spinner" /> Uploading…</>) : 'Add to library'}
+        </button>
         {saved && (
           <div className="success-note">
             <span>Added "{saved.title}" to the library.</span>

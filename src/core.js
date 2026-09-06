@@ -4,6 +4,7 @@
 // =====================================================================================
 import { createClient } from '@supabase/supabase-js';
 import { APP_CONFIG } from './config.js';
+import { putLocalAudio } from './localAudioStore.js';
 
 export const END = '__end__';
 // Purely a visual bookend on the graph canvas (see GraphNodes.jsx's
@@ -235,8 +236,21 @@ export const isSyncConfigured = supaConfigured;
 export const isUploadConfigured = !!APP_CONFIG.UPLOAD_WORKER_URL;
 
 export async function uploadAudioIfConfigured(file) {
+  if (!file || !file.name) return { name: file && file.name, size: file && file.size, audioUrl: null };
   const workerUrl = APP_CONFIG.UPLOAD_WORKER_URL;
-  if (!workerUrl || !file || !file.name) return { name: file && file.name, size: file && file.size, audioUrl: null };
+  // No Cloudflare/R2 worker configured — store the real bytes locally
+  // (IndexedDB, see localAudioStore.js) instead of only keeping the file's
+  // name/size, so playback, previews, and detection all actually work with
+  // zero backend setup, not just once a worker is deployed.
+  if (!workerUrl) {
+    try {
+      const marker = await putLocalAudio(file);
+      return { name: file.name, size: file.size, audioUrl: marker };
+    } catch (e) {
+      console.warn('Eskimo Studio: local audio storage failed, keeping metadata only', e);
+      return { name: file.name, size: file.size, audioUrl: null };
+    }
+  }
   try {
     const res = await fetch(workerUrl + '/upload?filename=' + encodeURIComponent(file.name), {
       method: 'POST',

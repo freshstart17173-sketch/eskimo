@@ -1,12 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { fmtTime, clamp } from '../core.js';
-import { Icon, ICONS, SongPicker, AlbumArt } from './shared.jsx';
+import { Icon, ICONS, SongPicker, AlbumArt, useResolvedAudioUrl } from './shared.jsx';
 
 // A self-contained play/pause toggle over the row's own built audio (a
 // transition's fragment, or a cut/outro candidate's intro) — stops the
 // click from reaching the card underneath it, so previewing never
 // accidentally commits the pick the way clicking the card itself does.
+// `url` may be a `local:` marker (IndexedDB, no backend configured — see
+// localAudioStore.js) rather than a real URL; resolving it is async, so
+// the button plays a moment after the resolve rather than on the very
+// first click for locally-stored audio.
 function PreviewButton({ url }) {
+  const resolvedUrl = useResolvedAudioUrl(url);
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   function toggle(e) {
@@ -19,7 +24,7 @@ function PreviewButton({ url }) {
   return (
     <button className="seq-card-preview" onClick={toggle} aria-label={playing ? 'Pause preview' : 'Preview'} data-tooltip={playing ? 'Pause preview' : 'Preview'} data-tooltip-above>
       <Icon path={playing ? ICONS.pause : ICONS.play} filled={!playing} size={10} />
-      <audio ref={audioRef} src={url} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} style={{ display: 'none' }} />
+      <audio ref={audioRef} src={resolvedUrl || undefined} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} style={{ display: 'none' }} />
     </button>
   );
 }
@@ -84,14 +89,64 @@ function Card({ row, onClick, onMouseEnter, onMouseLeave, onFocusRow, readOnly }
   );
 }
 
+// Click-anywhere-or-drag scrubbing on the progress bar — it used to be
+// purely decorative (a width/left percentage with no listeners at all).
+// Dragging updates the shown position locally on every move (so it tracks
+// the cursor smoothly) but only commits the actual seek — restarting the
+// real audio deck, via `onSeek` — on release, the same "preview while
+// dragging, commit on drop" pattern most scrubbers use, rather than
+// restarting the audio buffer on every pixel of movement.
+function Playhead({ pct, onSeek }) {
+  const trackRef = useRef(null);
+  const [dragPct, setDragPct] = useState(null);
+  const draggingRef = useRef(false);
+  const moveRef = useRef(null);
+  const upRef = useRef(null);
+
+  function pctFromEvent(e) {
+    const rect = trackRef.current.getBoundingClientRect();
+    if (!rect.width) return 0;
+    return clamp(((e.clientX - rect.left) / rect.width) * 100, 0, 100);
+  }
+  function onPointerDown(e) {
+    e.preventDefault();
+    draggingRef.current = true;
+    setDragPct(pctFromEvent(e));
+    moveRef.current = (ev) => { if (draggingRef.current) setDragPct(pctFromEvent(ev)); };
+    upRef.current = (ev) => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      const p = pctFromEvent(ev);
+      window.removeEventListener('pointermove', moveRef.current);
+      window.removeEventListener('pointerup', upRef.current);
+      setDragPct(null);
+      onSeek(p / 100);
+    };
+    window.addEventListener('pointermove', moveRef.current);
+    window.addEventListener('pointerup', upRef.current);
+  }
+  useEffect(() => () => {
+    if (moveRef.current) window.removeEventListener('pointermove', moveRef.current);
+    if (upRef.current) window.removeEventListener('pointerup', upRef.current);
+  }, []);
+
+  const shownPct = dragPct != null ? dragPct : pct;
+  return (
+    <div className="playhead-track" ref={trackRef} onPointerDown={onPointerDown}>
+      <div className="playhead-fill" style={{ width: shownPct + '%' }} />
+      <div className="playhead-scrubber" style={{ left: shownPct + '%' }} />
+    </div>
+  );
+}
+
 export default function SequencePane({
   songs, session, venueName, hasStarted, nowSong, cueBarPct, hasOutroForPlaying,
   mixingIntoSong, crossfadePct,
   nextRows, laterRows, setHoveredId,
+  startPickId, onSetStartPick,
   onTogglePlaying, onResumeSet, onStartSet, onSetNextMode,
-  onCommitRow, onSkipNext, onRequestEndSet,
+  onCommitRow, onSkipNext, onRequestEndSet, onSeek,
 }) {
-  const [startPickId, setStartPickId] = useState(null);
   const [startStarting, setStartStarting] = useState('cut');
 
   // When a transition's cue point passes unpicked, PerformPage drops it
@@ -125,7 +180,7 @@ export default function SequencePane({
         {!hasStarted ? (
           <div className="seq-start-card">
             <div className="section-label">Start the set</div>
-            <SongPicker songs={songs} value={startPickId} onChange={setStartPickId} placeholder="Search songs…" />
+            <SongPicker songs={songs} value={startPickId} onChange={onSetStartPick} placeholder="Search songs…" />
             {startPickId && (
               <>
                 <div className="seq-row-toggles segmented" style={{ marginTop: 9 }}>
@@ -156,10 +211,7 @@ export default function SequencePane({
               <span className="tag">{nowSong.bpm} BPM</span>
               <span className="tag">{nowSong.key}</span>
             </div>
-            <div className="playhead-track">
-              <div className="playhead-fill" style={{ width: cueBarPct + '%' }} />
-              <div className="playhead-scrubber" style={{ left: cueBarPct + '%' }} />
-            </div>
+            <Playhead pct={cueBarPct} onSeek={onSeek} />
             <div className="playhead-times">
               <span className="mono-num">{fmtTime(nowSong.durationSec - session.timeLeft)}</span>
               <span className="mono-num">{fmtTime(nowSong.durationSec)}</span>

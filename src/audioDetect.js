@@ -23,6 +23,8 @@
 // this can parse falls back to downloading the whole file, same as
 // before — correctness over a cleverness that doesn't generalize.
 
+import { resolveAudioUrl } from './localAudioStore.js';
+
 const EDGE_SECONDS = 10; // how much of each clip's head/tail we compare
 const WINDOW_SEC = 0.05; // ~50ms RMS windows — coarse but resistant to bit-level noise
 const MATCH_THRESHOLD = 0.55; // normalized cross-correlation floor to call it a match
@@ -246,12 +248,18 @@ export async function detectMatch(file, candidateSongs, onProgress) {
   for (let i = 0; i < withAudio.length; i++) {
     const song = withAudio[i];
     let leftEnv, rightEnv, refDuration;
-    const ranged = await fetchEdgesRanged(song.audioUrl).catch(() => null);
+    // song.audioUrl may be a `local:` marker (IndexedDB, no backend
+    // configured) rather than a real fetchable URL — resolve it to its
+    // (memoized) `blob:` URL first so both fetch paths below work
+    // identically regardless of which storage a reference track used.
+    const resolvedUrl = await resolveAudioUrl(song.audioUrl).catch(() => null);
+    if (!resolvedUrl) { if (onProgress) onProgress(i + 1, withAudio.length); continue; }
+    const ranged = await fetchEdgesRanged(resolvedUrl).catch(() => null);
     if (ranged) {
       leftEnv = ranged.tailEnv; rightEnv = ranged.headEnv; refDuration = ranged.duration;
     } else {
       let ref;
-      try { ref = await fetchAndDecode(song.audioUrl); } catch (e) { console.warn('Eskimo Studio: could not fetch reference audio for', song.id, e); if (onProgress) onProgress(i + 1, withAudio.length); continue; }
+      try { ref = await fetchAndDecode(resolvedUrl); } catch (e) { console.warn('Eskimo Studio: could not fetch reference audio for', song.id, e); if (onProgress) onProgress(i + 1, withAudio.length); continue; }
       leftEnv = tailEnvelope(ref); rightEnv = headEnvelope(ref); refDuration = ref.duration;
     }
 

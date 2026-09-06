@@ -1,6 +1,23 @@
 import React, { useMemo, useState } from 'react';
 import { libraryRows, uploadCoverIfPossible } from '../core.js';
-import { Icon, ICONS, Field, AlbumArt, CoverPicker } from './shared.jsx';
+import { Icon, ICONS, Field, AlbumArt, CoverPicker, useResolvedAudioUrl } from './shared.jsx';
+
+// `audioUrl` may be a `local:` marker (IndexedDB, no backend configured —
+// see localAudioStore.js) rather than a real URL, and resolving it is
+// async — split into their own components so each row's hook call is
+// independent of how many rows there are (a hook can't safely live inside
+// a `.map()` callback in the parent's own render body).
+function DownloadReferenceLink({ song }) {
+  const resolvedUrl = useResolvedAudioUrl(song.audioUrl);
+  if (!song.audioUrl) return <span className="hint-text" style={{ alignSelf: 'center' }}>no reference master uploaded</span>;
+  if (!resolvedUrl) return <span className="hint-text" style={{ alignSelf: 'center' }}>loading reference…</span>;
+  return <a className="btn btn-ghost btn-sm" href={resolvedUrl} download target="_blank" rel="noreferrer">Download reference</a>;
+}
+function EdgeAudioPreview({ edge }) {
+  const resolvedUrl = useResolvedAudioUrl(edge.audioUrl);
+  if (!edge.audioUrl) return null;
+  return resolvedUrl ? <audio controls src={resolvedUrl} style={{ height: 26 }} /> : null;
+}
 
 function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, selected, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
@@ -53,11 +70,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
           {!editing ? (
             <div className="drawer-actions-row">
               <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>Edit details</button>
-              {song.audioUrl ? (
-                <a className="btn btn-ghost btn-sm" href={song.audioUrl} download target="_blank" rel="noreferrer">Download reference</a>
-              ) : (
-                <span className="hint-text" style={{ alignSelf: 'center' }}>no reference master uploaded</span>
-              )}
+              <DownloadReferenceLink song={song} />
               <button className="btn btn-danger btn-sm" onClick={() => onDeleteSong(song.id)}>Delete song</button>
             </div>
           ) : (
@@ -78,7 +91,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                   <div className="drawer-frag-row">
                     <span className="drawer-frag-label">{labelOf(e)}</span>
                     <div className="drawer-frag-actions">
-                      {e.audioUrl && <audio controls src={e.audioUrl} style={{ height: 26 }} />}
+                      <EdgeAudioPreview edge={e} />
                       <button className="btn btn-ghost btn-xs" onClick={() => onDeleteEdge(e.id)}>Remove</button>
                     </div>
                   </div>

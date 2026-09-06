@@ -1,5 +1,23 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { fmtBytes } from '../core.js';
+import { resolveAudioUrl } from '../localAudioStore.js';
+
+// `song.audioUrl`/`edge.audioUrl` may be a `local:` marker (audio stored in
+// IndexedDB, no backend configured — see localAudioStore.js) rather than a
+// real fetchable URL. Anywhere one of those gets handed straight to an
+// `<audio src>` or a download `<a href>` needs to resolve it to a live
+// `blob:` URL first — this hook does that once per marker/URL and re-runs
+// if it changes (e.g. a song's audio gets replaced).
+export function useResolvedAudioUrl(url) {
+  const [resolved, setResolved] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!url) { setResolved(null); return undefined; }
+    resolveAudioUrl(url).then((real) => { if (!cancelled) setResolved(real); });
+    return () => { cancelled = true; };
+  }, [url]);
+  return resolved;
+}
 
 export function Icon({ path, size = 15, strokeWidth = 1.6, filled = false }) {
   return (

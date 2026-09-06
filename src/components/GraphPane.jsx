@@ -1,8 +1,8 @@
 import React, { useMemo, useCallback, useEffect, useState, createContext, useContext } from 'react';
-import { ReactFlow, Background, BackgroundVariant, MarkerType, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState } from '@xyflow/react';
+import { ReactFlow, Background, BackgroundVariant, MarkerType, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode } from '@xyflow/react';
 import { END, START } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphLayout.js';
-import { SongNode, EndNode, StartNode, NowPlayingContext } from './GraphNodes.jsx';
+import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext } from './GraphNodes.jsx';
 import { useTheme } from '../theme.js';
 
 // Which edge (if any) the pointer is currently over, plus the setter — read
@@ -139,7 +139,7 @@ export default function GraphPane({
   onConnect, isValidConnection, onDisconnectSong,
   stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
-  onDragSongPosition, endQueued, hasStarted,
+  onDragSongPosition, endQueued, hasStarted, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
 }) {
   const { isDark } = useTheme();
@@ -169,9 +169,8 @@ export default function GraphPane({
     return {
       id, type: 'song', position: pos, draggable: true,
       data: {
-        song: s, state, dimmed: searchActive && !matchIds.has(id),
-        hovered: hoveredId === id, inCount: io.inCount, outCount: io.outCount,
-        onEnter: () => setHoveredId(id), onLeave: () => setHoveredId(null),
+        song: s, state, inCount: io.inCount, outCount: io.outCount,
+        onEnter: () => setHoveredId(id), onLeave: () => setHoveredId(null), onSelect: () => onSelectSong(id),
         onToggleSocket, onSelectVariant, ...socketData, playing: state === 'playing',
       },
       style: SONG_STYLE,
@@ -194,25 +193,48 @@ export default function GraphPane({
     };
   }
 
-  // Recompute node render-data (position/state/hover/etc.) whenever the
-  // inputs that matter change — RF's own state (from useNodesState) still
-  // owns the live position during an in-progress drag. Deliberately NOT
-  // including nowElapsedSec here (or anywhere `setNodes` gets called): that
-  // ticks every second while a set plays, and calling React Flow's own
-  // `setNodes` re-syncs its *entire* internal node registry — which, for
-  // one tick, leaves every node's handle-bounds measurement stale until it
-  // recomputes. Every edge in the graph reads its endpoints from that same
-  // registry, so for that one tick *all* of them (not just ones touching
-  // the playing node) briefly render as if their endpoints don't exist —
-  // invisible for the line itself, but enough to unmount and remount the
-  // hover-✕ button living in each active edge's EdgeLabelRenderer portal,
-  // which is a visible flicker on every live set. The elapsed clock reaches
-  // SongNode through NowPlayingContext instead (below), entirely outside
-  // React Flow's node data, so ticking it never touches `setNodes` at all.
+  // Recompute node render-*data* (state/io-counts/sockets/etc.) whenever the
+  // inputs that matter change — but never touch `position` here. Position
+  // is RF's own live-owned field (via useNodesState): during an in-progress
+  // drag it holds the current drag position, and stomping it from a stale
+  // `positions[id]` on every one of these refreshes is exactly what caused
+  // the reported "dragging snaps between the drag and panning the grid" —
+  // this effect used to fire on every hover (hoveredId was a dependency),
+  // so dragging node A while the pointer passed over node B mid-gesture
+  // reset A's position back to wherever it was *before* the drag started.
+  // Preserving `n.position` from the previous node object fixes that: only
+  // RF's own onNodesChange (live drag) and the dedicated position-sync
+  // effect below (real layout changes) ever set position now.
+  //
+  // Also deliberately NOT depending on hoveredId/matchIds/searchActive
+  // anymore — those reach SongNode via HoveredNodeContext/SearchDimContext
+  // instead (see GraphNodes.jsx), specifically so a hover or a search
+  // keystroke never triggers this at all. Calling React Flow's `setNodes`
+  // re-syncs its *entire* internal node registry — every node's measured
+  // handle bounds go stale until it recomputes — and a Playwright probe
+  // confirmed this was making node bounding boxes genuinely unstable across
+  // frames while hoveredId still lived here, not just a cosmetic flicker:
+  // it was also what made socket drag-connections fail to complete, since
+  // a connection-in-progress gets read from the same registry being
+  // resynced out from under it. nowElapsedSec was already kept out of this
+  // list for the same reason (see NowPlayingContext); hoveredId/matchIds/
+  // searchActive needed the same treatment.
   useEffect(() => {
-    setNodes(prev => prev.map(n => (n.id === END ? endNodeFor() : n.id === START ? startNodeFor() : nodeFor(n.id))));
+    setNodes(prev => prev.map(n => {
+      const updated = n.id === END ? endNodeFor() : n.id === START ? startNodeFor() : nodeFor(n.id);
+      return { ...updated, position: n.position };
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs, positions, stateFor, ioById, hoveredId, matchIds, searchActive, socketDataById, endQueued, hasStarted, nowPlayingId]);
+  }, [songs, stateFor, ioById, socketDataById, endQueued, hasStarted, nowPlayingId, onSelectSong]);
+
+  // The one place `position` actually gets written from outside RF's own
+  // drag handling: a real layout change (auto-arrange, or a song's stored
+  // x/y changing after a drag commits). Kept separate from the data-only
+  // effect above so data refreshes (which fire far more often) never risk
+  // re-triggering a position write.
+  useEffect(() => {
+    setNodes(prev => prev.map(n => (positions[n.id] ? { ...n, position: positions[n.id] } : n)));
+  }, [positions]);
 
   // songs/edges structurally changing (added/removed) needs a full rebuild,
   // not just a patch, so newly added nodes actually appear.
@@ -291,6 +313,8 @@ export default function GraphPane({
     () => ({ nowPlayingId, elapsed: nowElapsedSec, duration: nowDurationSec }),
     [nowPlayingId, nowElapsedSec, nowDurationSec]
   );
+  const hoveredNodeValue = useMemo(() => ({ hoveredId }), [hoveredId]);
+  const searchDimValue = useMemo(() => ({ searchActive, matchIds }), [searchActive, matchIds]);
 
   const [hoveredEdgeId, setHoveredEdgeId] = useState(null);
   const hoveredEdgeValue = useMemo(() => ({ hoveredId: hoveredEdgeId, setHoveredId: setHoveredEdgeId }), [hoveredEdgeId]);
@@ -299,6 +323,8 @@ export default function GraphPane({
 
   return (
     <NowPlayingContext.Provider value={nowPlayingValue}>
+      <HoveredNodeContext.Provider value={hoveredNodeValue}>
+      <SearchDimContext.Provider value={searchDimValue}>
       <HoveredEdgeContext.Provider value={hoveredEdgeValue}>
         <ReactFlow
           nodes={nodes}
@@ -312,7 +338,8 @@ export default function GraphPane({
           onConnect={onConnect}
           isValidConnection={isValidConnection}
           nodesConnectable
-          connectionRadius={32}
+          connectionMode={ConnectionMode.Loose}
+          connectionRadius={40}
           elementsSelectable={false}
           minZoom={0.25}
           maxZoom={2.5}
@@ -325,6 +352,8 @@ export default function GraphPane({
           <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color={dotColor} />
         </ReactFlow>
       </HoveredEdgeContext.Provider>
+      </SearchDimContext.Provider>
+      </HoveredNodeContext.Provider>
     </NowPlayingContext.Provider>
   );
 }

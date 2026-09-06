@@ -30,11 +30,14 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [matchIndex, setMatchIndex] = useState(0);
-  const [layoutMode, setLayoutMode] = useState('manual'); // 'manual' | 'auto'
   const [hoveredId, setHoveredId] = useState(null);
   const searchInputRef = useRef(null);
   const [endSetModalOpen, setEndSetModalOpen] = useState(false);
   const [endSetEnding, setEndSetEnding] = useState('cut');
+  // Which song is picked in the "Start the set" card — lifted up from
+  // SequencePane (rather than living as that component's own state) so a
+  // click on the graph can select a song too, not just the search box.
+  const [startPickId, setStartPickId] = useState(null);
 
   const hasStarted = session.nowPlayingId !== null;
   const visibleEdges = useMemo(() => getVisibleEdges(edges), [edges]);
@@ -168,6 +171,13 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setEndSetModalOpen(false);
   }
 
+  // A click on a graph node (not a socket, not a drag) selects that song in
+  // the "Start the set" card so it shows the Cut/Intro choice and a "Start
+  // playing" button — before this, the only way to start with a specific
+  // song was to find it again through the search box, even though it was
+  // already right there on the canvas you just clicked.
+  const selectSong = useCallback((id) => { if (!hasStarted) setStartPickId(id); }, [hasStarted]);
+
   function startSet(songId, starting) {
     const song = songs[songId];
     const introEdge = starting === 'intro' ? findEdge(e => e.type === 'intro' && e.r === songId) : null;
@@ -176,6 +186,17 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       ...prev, nowPlayingId: songId, startMethod: starting,
       queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition',
     }));
+  }
+  // Dragging or clicking the playhead — `fraction` is 0-1 along the bar.
+  // Restarts the real audio deck at the new offset when Now Playing has
+  // one (engine.seekMain), and always updates the wall-clock `timeLeft`
+  // regardless, so a song with no uploaded master still scrubs correctly
+  // via its own fallback countdown.
+  function seekPlayhead(fraction) {
+    if (!nowSong) return;
+    const offsetSec = clamp(fraction, 0, 1) * nowSong.durationSec;
+    engine.seekMain(session.nowPlayingId, offsetSec);
+    setSession(prev => ({ ...prev, timeLeft: Math.max(0, nowSong.durationSec - offsetSec) }));
   }
   function togglePlaying() {
     setSession(prev => {
@@ -198,28 +219,49 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // the manual skip button — same rule the set-clock's timer uses (performAdvance, audioEngine.js)
   function skipNow() { setSession(prev => performAdvance(prev, songs, visibleEdges)); }
 
-  // ---------------- layout: manual (stored x/y) or auto (dagre) ----------------
-  const autoPositions = useMemo(() => layoutMode === 'auto' ? computeDagreLayout(songs, edges) : null, [layoutMode, songs, edges]);
-  // Dagre's computed positions land wherever its algorithm puts them, not
-  // wherever the camera already happens to be — refit so switching modes
-  // never leaves half the newly-arranged graph sitting outside the view.
-  useEffect(() => {
-    if (layoutMode === 'auto') rf.fitView({ duration: 450, padding: 0.25 });
-  }, [layoutMode, rf]);
+  // ---------------- layout: always manual (stored x/y) — "Arrange for me" is a one-shot action, not a mode ----------------
+  // This used to be a persistent toggle: while "on", every node's position
+  // came from a live dagre recompute, which silently fought any manual drag
+  // (the node would just snap back to its dagre-computed spot on the next
+  // render) — a real bug in its own right, reported directly ("auto arrange
+  // being a toggle when it should obviously be a button press"). Now it's
+  // exactly that: one press runs dagre once and writes the result straight
+  // into each song's stored x/y, same as a manual drag would, so the graph
+  // is immediately back to being freely, permanently draggable afterward.
   const positions = useMemo(() => {
     const p = {};
-    Object.keys(songs).forEach(id => { p[id] = autoPositions ? autoPositions[id] : { x: songs[id].x, y: songs[id].y }; });
-    p[END] = autoPositions ? autoPositions[END] : { x: 1250, y: 20 };
-    p[START] = autoPositions ? autoPositions[START] : { x: -170, y: 20 };
+    Object.keys(songs).forEach(id => { p[id] = { x: songs[id].x, y: songs[id].y }; });
+    p[END] = { x: 1250, y: 20 };
+    p[START] = { x: -170, y: 20 };
     return p;
-  }, [songs, autoPositions]);
+  }, [songs]);
+  function arrangeForMe() {
+    const layout = computeDagreLayout(songs, edges);
+    setSongs(prev => {
+      const next = { ...prev };
+      Object.keys(next).forEach(id => { if (layout[id]) next[id] = { ...next[id], x: layout[id].x, y: layout[id].y }; });
+      return next;
+    });
+    // Dagre's computed positions land wherever its algorithm puts them, not
+    // wherever the camera already happens to be — refit once the new
+    // positions have actually rendered so the arranged graph isn't left
+    // half outside the view. A short delay rather than an effect tied to
+    // `songs`, since dragging a single node also changes `songs` and
+    // shouldn't refit the whole camera.
+    setTimeout(() => rf.fitView({ duration: 450, padding: 0.25 }), 60);
+  }
 
   function onDragSongPosition(id, x, y) {
     setSongs(prev => (prev[id] ? { ...prev, [id]: { ...prev[id], x, y } } : prev));
   }
 
   // ---------------- the three graph highlight states: playing / next / later ----------------
-  const queueIds = session.queue.map(q => q.id);
+  // Memoized so its identity is stable across renders that don't actually
+  // change the queue (e.g. a hover or search keystroke) — `stateFor` below
+  // depends on it, and GraphPane's data-refresh effect depends on `stateFor`,
+  // so an unmemoized array here would re-trigger that effect on every
+  // render for no reason.
+  const queueIds = useMemo(() => session.queue.map(q => q.id), [session.queue]);
   const stateFor = useCallback((id) => {
     if (id === session.nowPlayingId) return 'playing';
     if (queueIds[0] === id) return 'next';
@@ -520,8 +562,8 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         <button className="toolbar-btn" onClick={focusActive} data-tooltip="Focus on the playing song">
           <Icon path={ICONS.target} size={13} /> Focus active
         </button>
-        <button className={'toolbar-btn' + (layoutMode === 'auto' ? ' active' : '')} onClick={() => setLayoutMode(m => (m === 'auto' ? 'manual' : 'auto'))} data-tooltip="Toggle auto-arrange">
-          <Icon path={ICONS.grid} size={13} /> {layoutMode === 'auto' ? 'Auto-arranged' : 'Arrange for me'}
+        <button className="toolbar-btn" onClick={arrangeForMe} data-tooltip="Auto-arrange the graph">
+          <Icon path={ICONS.grid} size={13} /> Arrange for me
         </button>
 
         <div className="legend toolbar-spacer">
@@ -545,7 +587,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             onConnect={handleConnect} isValidConnection={isValidConnection} onDisconnectSong={disconnectSong}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive}
-            onDragSongPosition={onDragSongPosition}
+            onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
             endQueued={queueIds.includes(END)} hasStarted={hasStarted}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
           />
@@ -557,8 +599,10 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           hasStarted={hasStarted} nowSong={nowSong} cueBarPct={cueBarPct} hasOutroForPlaying={hasOutroForPlaying}
           mixingIntoSong={mixingIntoSong} crossfadePct={crossfadePct}
           nextRows={nextRows} laterRows={laterRows} setHoveredId={setHoveredId}
+          startPickId={startPickId} onSetStartPick={setStartPickId}
           onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onStartSet={startSet} onSetNextMode={setNextMode}
           onCommitRow={commitRow} onSkipNext={skipNow} onRequestEndSet={requestEndSet}
+          onSeek={seekPlayhead}
         />
       </div>
 

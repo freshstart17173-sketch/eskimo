@@ -10,6 +10,21 @@ import { Icon, ICONS, AlbumArt } from './shared.jsx';
 // edge in the whole graph, not just ones touching the playing node.
 export const NowPlayingContext = createContext({ nowPlayingId: null, elapsed: 0, duration: 0 });
 
+// Hover and search-dim state reach SongNode the same way — through context,
+// never through React Flow's own node `data`. Both used to live in `data`
+// and be recomputed by GraphPane's node-rebuild effect on every mouse-enter/
+// keystroke; that effect calls React Flow's `setNodes`, which re-syncs its
+// *entire* internal node registry (every node's measured handle bounds get
+// invalidated and recomputed), which is what actually caused the reported
+// "hovering makes nodes jitter" — visible instability confirmed directly: a
+// Playwright hover probe found node bounding boxes genuinely non-stable
+// across frames while this was wired through `data`. Reading these two off
+// context instead means a hover or a keystroke only re-renders the specific
+// SongNode components that care, as an ordinary React re-render of their own
+// DOM — it never touches React Flow's node graph at all.
+export const HoveredNodeContext = createContext({ hoveredId: null });
+export const SearchDimContext = createContext({ searchActive: false, matchIds: null });
+
 // Fixed, per-type socket colors — Blender-node-style (a Geometry socket is
 // always teal, a Boolean always pink, regardless of which node it's on).
 // This is a different thing from the per-song cover-color scheme tried
@@ -173,11 +188,15 @@ function SocketDropdown({ typeLabel, options, selectedEdgeId, elapsed, onSelectV
 // selected ambiguity).
 export function SongNode({ data }) {
   const {
-    song, state, dimmed, hovered, inCount, outCount, onEnter, onLeave, playing,
+    song, state, inCount, outCount, onEnter, onLeave, playing, onSelect,
     leftAvailable, rightAvailable, leftActive, rightActive, leftEdgeId, rightEdgeId,
     leftOptions, rightOptions, rightCueSeconds, onToggleSocket, onSelectVariant,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
+  const { hoveredId } = useContext(HoveredNodeContext);
+  const { searchActive, matchIds } = useContext(SearchDimContext);
+  const hovered = hoveredId === song.id;
+  const dimmed = searchActive && matchIds && !matchIds.has(song.id);
   const position = (playing && nowPlaying.nowPlayingId === song.id) ? nowPlaying : null;
   const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
   const onToggle = (side, type) => onToggleSocket(song.id, side, type);
@@ -186,7 +205,7 @@ export function SongNode({ data }) {
   // dropdown with no ring, since "time left" means nothing until it starts.
   const rightRemainingSec = (position && rightCueSeconds != null) ? (rightCueSeconds - position.elapsed) : null;
   return (
-    <div className={cls} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <div className={cls} onMouseEnter={onEnter} onMouseLeave={onLeave} onClick={onSelect}>
       <div className="node-title-row">
         <div>
           <div className="node-title">{song.title}</div>
