@@ -198,6 +198,12 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 
   // ---------------- layout: manual (stored x/y) or auto (dagre) ----------------
   const autoPositions = useMemo(() => layoutMode === 'auto' ? computeDagreLayout(songs, edges) : null, [layoutMode, songs, edges]);
+  // Dagre's computed positions land wherever its algorithm puts them, not
+  // wherever the camera already happens to be — refit so switching modes
+  // never leaves half the newly-arranged graph sitting outside the view.
+  useEffect(() => {
+    if (layoutMode === 'auto') rf.fitView({ duration: 450, padding: 0.25 });
+  }, [layoutMode, rf]);
   const positions = useMemo(() => {
     const p = {};
     Object.keys(songs).forEach(id => { p[id] = autoPositions ? autoPositions[id] : { x: songs[id].x, y: songs[id].y }; });

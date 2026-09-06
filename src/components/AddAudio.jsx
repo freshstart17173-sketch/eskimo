@@ -3,7 +3,7 @@ import { uid, fmtTime, pseudoCuePoints, pickDetectedSongs, uploadAudioIfConfigur
 import { detectMatch } from '../audioDetect.js';
 import { Field, Dropzone, SongPicker } from './shared.jsx';
 
-export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
+export default function AddAudioPage({ songs, onAddEdge, onViewSong, goUpload, onLoadExample }) {
   const [file, setFile] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [progress, setProgress] = useState(null); // { done, total } | null
@@ -97,6 +97,10 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
         <div className="empty-state">
           <div className="empty-state-title">Add a song first</div>
           <div className="empty-state-sub">You'll need at least one song in the library before there's anything to connect.</div>
+          <div className="empty-state-actions">
+            <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+            <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>
+          </div>
         </div>
       </div>
     );

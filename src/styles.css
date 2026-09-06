@@ -221,7 +221,14 @@ a { color: var(--accent); }
 .btn-primary { background: var(--ink); color: var(--paper); }
 .btn-accent { background: var(--accent); color: var(--accent-ink); }
 .btn-ghost { background: var(--panel); color: var(--ink); }
-.btn-danger { background: transparent; color: var(--ink); border: 1px solid var(--ink); }
+/* A genuinely destructive/final action (delete, clear everything, end the
+   set) should look like one — this used to be an outline button barely
+   distinguishable from Cancel sitting right next to it, the opposite of
+   what "danger" is supposed to signal. Fixed, not adaptive, same red as
+   the toolbar's End Set button: this is the one color in the app that
+   should never blend into either theme. */
+.btn-danger { background: #d32f2f; color: #fff; }
+.btn-danger:hover { filter: brightness(1.1); }
 .btn-sm { font-size: 12px; padding: 5px 10px; }
 .btn-xs { font-size: 11px; padding: 3px 7px; }
 .btn-self-start { align-self: flex-start; }
@@ -259,7 +266,13 @@ a { color: var(--accent); }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
+/* The label/description column is the one allowed to actually shrink or
+   wrap — the control on the right (a segmented toggle, an on/off switch)
+   never should, or its own labels start clipping instead of the prose
+   next to it wrapping a line, as "Dark" briefly did here. */
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.settings-row > *:first-child { flex: 1 1 auto; min-width: 0; }
+.settings-row > *:last-child { flex: none; }
 .settings-row-title { font-size: 13px; font-weight: 600; }
 .settings-row-sub { font-size: 11.5px; color: var(--muted); max-width: 420px; }
 

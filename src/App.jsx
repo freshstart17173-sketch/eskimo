@@ -252,6 +252,8 @@ export default function App() {
               songs={songs}
               onAddEdge={(edge) => setEdges(prev => [...prev, edge])}
               onViewSong={() => setTab('library')}
+              goUpload={() => setTab('upload')}
+              onLoadExample={loadExample}
             />
           )}
           {tab === 'settings' && (

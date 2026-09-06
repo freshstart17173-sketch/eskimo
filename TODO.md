@@ -455,6 +455,51 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       renders all three options with Outro correctly disabled when there's
       no outro edge; both the Next-list card commit and the hover-card's
       direct Cut commit land the right queue entry.
+- [x] ~~Final UI/UX pass~~ — done: a systematic screenshot audit of every
+      page in both themes (empty/populated/started/hover/modal states,
+      plus a narrower viewport), grounded in researched common failure
+      modes — generic misalignment/clipping/inconsistency pitfalls, and
+      the specific "looks AI-generated" tells (gradients, glassmorphism,
+      generic card grids) this app's existing flat/brutalist design
+      already avoids by construction. Found and fixed real bugs, and — as
+      important — several suspected ones that verification (computed
+      styles, not just eyeballing screenshots) proved were *not* bugs,
+      so nothing got "fixed" that wasn't broken:
+      - The graph canvas never fit its own content — nodes placed further
+        out (a wider layout, or dagre's auto-arrange) could sit half
+        outside the visible pane with no indication there was more to
+        see, mid-word-clipped against the Sequence pane's edge. Added
+        `fitView`/`fitViewOptions` to the initial render and a refit on
+        switching to auto-arrange.
+      - React Flow's own internal theme class was hardcoded to "light"
+        regardless of the app's dark mode (harmless today since our own
+        CSS overrides everything currently visible, but latent — any
+        future built-in subcomponent, like Controls or MiniMap, would
+        silently render with light-mode chrome). Wired `colorMode` to the
+        same `isDark` the rest of the canvas already uses.
+      - `.btn-danger` had no actual danger styling — a transparent outline
+        button, barely distinguishable from Cancel next to it, used for
+        "Delete song," "Clear all data," and the new End Set confirm.
+        Given real weight: solid red, white text, the same fixed red as
+        the toolbar's End Set button (a genuinely destructive action
+        should never look like a routine secondary one).
+      - Settings' Light/System/Dark toggle could clip its own "Dark"
+        label — the label+control row let the control shrink along with
+        its sibling text instead of protecting the control's readable
+        width. Fixed the flex rule generically (`.settings-row`'s last
+        child never shrinks) rather than just this one instance.
+      - Add Audio's empty state ("add a song first") was the only one of
+        three empty states in the app with no actual way forward — no
+        Upload/Load-example buttons the other two already have. Brought
+        it in line.
+      Ruled out, after checking computed styles rather than trusting a
+      screenshot's small-text color at a glance (four separate times):
+      the graph hover-card's background in dark mode, the Library tags'
+      colors, keyboard focus rings, and the disabled Outro toggle's
+      tooltip — all were already correct; screenshots of small dark-on-
+      dark or light-on-light UI are genuinely easy to misread, and this
+      pass's actual process (verify before "fixing") is as much the
+      point as its findings.
 
 ### Hard
 - [x] ~~Real playback (Web Audio API)~~ — done, as a new `src/audioEngine.js`

@@ -148,6 +148,9 @@ export default function GraphPane({
       elementsSelectable={false}
       minZoom={0.25}
       maxZoom={2.5}
+      colorMode={isDark ? 'dark' : 'light'}
+      fitView
+      fitViewOptions={{ padding: 0.25 }}
       defaultEdgeOptions={{ type: 'default' }}
       proOptions={{ hideAttribution: true }}
     >
