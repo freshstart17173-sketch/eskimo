@@ -14,6 +14,27 @@
   font-display: swap;
 }
 
+/* ===================================================================
+   Theme tokens. :root holds the light palette (the only palette this app
+   had until now); a real dark palette overrides it below — designed
+   values per token, not an inverted-grays filter, so things like the
+   brutalist tag borders and the accent family stay legible and on-brand
+   rather than just flipped. Two mechanisms pick the palette: the OS-level
+   prefers-color-scheme media query (the default, "system" behavior) and
+   an explicit [data-theme] attribute on <html> (set by src/theme.js when
+   the person picks Light/Dark themselves in Settings) that always wins
+   over the media query in both directions.
+
+   A few tokens intentionally do NOT flip with the theme, because they're
+   already "inverted" by design and stay correct regardless of the page's
+   own theme — --paper-fixed (always-light text on an always-dark surface
+   like the Playing card, which has its own fixed navy background) and
+   --accent-ink (always-dark text on the --accent swatch itself, which
+   stays the same light pastel blue in both themes). Where accent-colored
+   text sits directly on the page or on --accent-bg instead — which DOES
+   need to lighten in dark mode — that's --accent-text, a second token,
+   not a reuse of --accent-ink for a background it was never tuned for.
+   =================================================================== */
 :root {
   --ink: #131313;
   --paper: #fcfcfc;
@@ -27,11 +48,12 @@
   --accent-bg: #eaf3fa;
   --accent-light: #bcdcef;
   --accent-ink: #16324a;
+  --accent-text: #16324a;
 
   --danger: #8a2f28;
   --danger-bg: #f7ece9;
-  --good: #131313;
-  --good-bg: #efefef;
+  --good: var(--ink);
+  --good-bg: var(--panel);
 
   /* the three graph states, in the order they matter: playing, next, later —
      all one hue (the accent blue), just darker for "this one is live" */
@@ -41,10 +63,27 @@
   --state-later: #bcdcef;
   --state-later-bg: #f6fafc;
 
+  /* fixed regardless of theme — see the note above */
+  --paper-fixed: #fcfcfc;
+
   --radius: 2px;
   --font: 'Jost', 'Avenir Next', 'Segoe UI', Arial, sans-serif;
   --font-display: 'Gnomon', var(--font);
   --font-mono: 'Drafting Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+  :root:not([data-theme="light"]) { --ink: #f1f0ed; --paper: #17181a; --panel: #232427; --line: #47494e; --line-soft: #2c2e31; --muted: #b7b8bd; --faint: #85878c;
+    --accent-bg: #1c3040; --accent-light: #3d5972; --accent-text: #cfe6f5;
+    --danger: #e8a89c; --danger-bg: #3a201c;
+    --state-next-bg: #17293a; --state-later-bg: #182430;
+  }
+}
+:root[data-theme="dark"] { color-scheme: dark; --ink: #f1f0ed; --paper: #17181a; --panel: #232427; --line: #47494e; --line-soft: #2c2e31; --muted: #b7b8bd; --faint: #85878c;
+  --accent-bg: #1c3040; --accent-light: #3d5972; --accent-text: #cfe6f5;
+  --danger: #e8a89c; --danger-bg: #3a201c;
+  --state-next-bg: #17293a; --state-later-bg: #182430;
 }
 
 * { box-sizing: border-box; scrollbar-width: thin; }
@@ -76,7 +115,7 @@ a { color: var(--accent); }
 
 .demo-banner {
   display: flex; align-items: center; justify-content: center; gap: 14px;
-  background: var(--accent-bg); color: var(--accent-ink); border-bottom: 1px solid var(--accent-light);
+  background: var(--accent-bg); color: var(--accent-text); border-bottom: 1px solid var(--accent-light);
   font-size: 12.5px; font-weight: 600; padding: 8px 16px; flex: none;
 }
 .demo-banner .btn-ghost { background: rgba(255, 255, 255, .55); color: var(--accent-ink); }
@@ -192,7 +231,7 @@ a { color: var(--accent); }
 
 .icon-btn {
   width: 26px; height: 26px; border-radius: var(--radius); background: var(--panel);
-  display: flex; align-items: center; justify-content: center; color: #363636; flex: none;
+  display: flex; align-items: center; justify-content: center; color: var(--muted); flex: none;
 }
 .icon-btn:hover { background: rgba(19, 19, 19, .08); }
 .icon-btn:disabled { opacity: .35; cursor: not-allowed; }
@@ -222,7 +261,7 @@ a { color: var(--accent); }
 
 .dropzone {
   min-height: 50px; padding: 9px; font-size: 12px; background: var(--paper);
-  border: 1px dashed #a2a2a2; border-radius: var(--radius);
+  border: 1px dashed var(--line); border-radius: var(--radius);
   display: flex; align-items: center; gap: 8px; color: var(--muted); cursor: pointer;
 }
 .dropzone-active { border-color: var(--accent); background: var(--accent-bg); }
@@ -253,7 +292,7 @@ a { color: var(--accent); }
 }
 .picker-chip-art { width: 26px; height: 26px; }
 .cover-picker { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
-.cover-picker-label { font-size: 11.5px; font-weight: 600; color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px; }
+.cover-picker-label { font-size: 11.5px; font-weight: 600; color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .cover-picker:hover .cover-picker-label { color: var(--ink); }
 .picker-chip-text { flex: 1; min-width: 0; }
 .picker-chip-title { font-weight: 600; font-size: 12.5px; }
@@ -279,9 +318,9 @@ a { color: var(--accent); }
 .seq-scroll { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
 .seq-venue { font-size: 12px; font-weight: 600; color: var(--muted); }
 
-.seq-now-card { border-radius: var(--radius); background: var(--state-playing); color: var(--paper); padding: 12px; }
+.seq-now-card { border-radius: var(--radius); background: var(--state-playing); color: var(--paper-fixed); padding: 12px; }
 .seq-now-row { display: flex; align-items: center; gap: 10px; }
-.seq-play-btn { width: 34px; height: 34px; flex: none; border-radius: var(--radius); background: rgba(252, 252, 252, .16); color: var(--paper); display: flex; align-items: center; justify-content: center; }
+.seq-play-btn { width: 34px; height: 34px; flex: none; border-radius: var(--radius); background: rgba(252, 252, 252, .16); color: var(--paper-fixed); display: flex; align-items: center; justify-content: center; }
 .seq-now-text { flex: 1; min-width: 0; }
 .seq-now-title { font-weight: 600; font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-now-artist { font-size: 11.5px; color: rgba(252, 252, 252, .65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -294,9 +333,9 @@ a { color: var(--accent); }
 .seq-mixing-text { min-width: 0; }
 .seq-mixing-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-mixing-artist { font-size: 10.5px; color: rgba(252, 252, 252, .6); }
-.seq-mixing-pct { font-family: var(--font-mono); font-weight: 600; font-size: 12px; color: var(--paper); flex: none; }
+.seq-mixing-pct { font-family: var(--font-mono); font-weight: 600; font-size: 12px; color: var(--paper-fixed); flex: none; }
 .playhead-track.in-crossfade .playhead-fill { background: var(--state-later); }
-.seq-now .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper); }
+.seq-now-card .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper-fixed); }
 /* a regular playhead — elapsed/total, not a countdown — plus the missing
    manual "skip to next" action right where you'd look for it */
 .playhead-track { position: relative; height: 4px; border-radius: 2px; background: rgba(252, 252, 252, .18); margin-top: 10px; }
@@ -457,7 +496,7 @@ a { color: var(--accent); }
 }
 .node-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); transform: scale(1.015); }
 .node-card.state-playing {
-  background: var(--state-playing); color: var(--paper); border-color: var(--state-playing);
+  background: var(--state-playing); color: var(--paper-fixed); border-color: var(--state-playing);
   animation: pulseRing 2.4s ease-in-out infinite; transform: scale(1.08); z-index: 5;
 }
 .node-card.state-playing:hover { transform: scale(1.095); }
@@ -472,8 +511,8 @@ a { color: var(--accent); }
 .node-art { width: 26px; height: 26px; flex: none; border-radius: 3px; }
 .node-tags-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .node-tags { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.state-playing .tag { border-color: rgba(252, 252, 252, .55); color: var(--paper); }
-.node-io { font-family: var(--font-mono); font-size: 9.5px; color: #8a8a8a; letter-spacing: .01em; white-space: nowrap; line-height: 1; }
+.state-playing .tag { border-color: rgba(252, 252, 252, .55); color: var(--paper-fixed); }
+.node-io { font-family: var(--font-mono); font-size: 9.5px; color: var(--faint); letter-spacing: .01em; white-space: nowrap; line-height: 1; }
 .state-playing .node-io { color: rgba(252, 252, 252, .55); }
 
 /* tiny animated waveform — only the Playing node gets this, a quiet "this
@@ -497,7 +536,7 @@ a { color: var(--accent); }
 .end-node:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); transform: scale(1.02); }
 .end-node.state-next { background: var(--state-next-bg); border-color: var(--state-next); }
 .end-node-title { display: flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; }
-.end-node-hint { font-size: 10px; margin-top: 2px; color: #8a8a8a; }
+.end-node-hint { font-size: 10px; margin-top: 2px; color: var(--faint); }
 
 /* node hover card — the graph's quick-action popover; mirrors the sequence
    panel's own commit functions so clicking through the graph or the list
@@ -515,7 +554,7 @@ a { color: var(--accent); }
 .hover-toggle:disabled { opacity: .35; cursor: not-allowed; text-decoration: line-through; }
 /* the graph's one-click commit — same action the side panel's card does */
 .hover-toggle-commit { display: block; width: 100%; margin-top: 4px; background: var(--ink); color: var(--paper); }
-.hover-toggle-commit:hover { background: #2b2b2b; }
+.hover-toggle-commit:hover { filter: brightness(1.3); }
 
 /* ---------------------------------------------------------------
    Library — flat accordion list
@@ -593,7 +632,7 @@ a { color: var(--accent); }
   border-radius: var(--radius); background: var(--panel); border: 1px solid transparent; font-size: 12px; font-weight: 600;
   white-space: nowrap;
 }
-.queue-chip-playing { background: var(--state-playing); color: var(--paper); }
+.queue-chip-playing { background: var(--state-playing); color: var(--paper-fixed); }
 .queue-chip-autoplay { border-style: dashed; border-color: var(--line); color: var(--muted); font-weight: 500; }
 .queue-chip-art { width: 18px; height: 18px; border-radius: 2px; flex: none; }
 .queue-chip-actions { display: flex; align-items: center; gap: 2px; }

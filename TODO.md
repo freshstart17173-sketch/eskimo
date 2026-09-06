@@ -408,10 +408,51 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       WebAssembly, client-side) — replaces `mockDuration` and the
       manually-entered BPM/key fields, and would make the Sequence pane's
       countdown mechanic real instead of simulated.
-- [ ] **Dark mode** as a genuine second token set (not a filter/invert) —
-      noted as real work in the original design pass and still true; the
-      brutalist tag styling in particular needs its own dark treatment,
-      not just inverted grays.
+- [x] ~~Dark mode~~ — done, as a genuine second token set, not a filter/
+      invert: `styles.css`'s `:root` still holds the light palette;
+      designed dark values override it via `@media (prefers-color-scheme:
+      dark)` (the default "System" behavior) and an explicit
+      `[data-theme]` attribute that always wins either direction — set by
+      a new Light/System/Dark toggle in Settings → Appearance, persisted
+      to `localStorage` via `src/theme.js` (a device preference, not
+      synced through the app's own JSON blob, same as the OS's own
+      dark-mode switch isn't part of your music library).
+      The real work (and why a blanket token flip would've broken things)
+      was sorting components into two groups: most of the app — page bg,
+      text, panels, borders, buttons, the brutalist tags (already just
+      `border/color: var(--ink)`, so they came along for free once --ink
+      itself got a real dark-mode value) — correctly want `--ink`/
+      `--paper`/`--panel`/etc. to flip together. But a few components are
+      already "inverted" by construction regardless of page theme — the
+      Playing card's fixed navy (`--state-playing`) with light text, the
+      toast/lib-select-bar/active-nav's ink-background chips — and reusing
+      the now-adaptive `--paper` for text on that fixed navy would have
+      gone dark-on-dark. Split those into a `--paper-fixed` token (always
+      light, for the Playing-card family) and a new `--accent-text` token
+      distinct from `--accent-ink` (the latter stays fixed-dark for text
+      *on* the light `--accent` swatch itself — btn-accent, pill.active —
+      while `--accent-text` adapts for accent-colored text sitting on the
+      page or on `--accent-bg`, like the demo banner and cover-picker
+      label). React Flow's edge strokes and canvas dot-grid are literal
+      SVG/canvas paint, not CSS, so they can't read custom properties —
+      `GraphPane.jsx` now picks a light/dark literal itself via the new
+      `useTheme()` hook, with real designed dark values rather than the
+      same light-tuned ones (which would've been jarringly bright against
+      a dark canvas).
+      Caught and fixed a real pre-existing contrast bug along the way,
+      unrelated to dark mode itself but found while auditing every
+      state-playing context: the Playing card's BPM/key tags were using a
+      dead `.seq-now .tag` selector (the real class is `.seq-now-card`),
+      so they'd silently fallen back to default `.tag` styling — dark ink
+      text/border directly on the dark navy card, always low-contrast even
+      in light mode. Fixed the selector.
+      Verified with Playwright across both the explicit `[data-theme]`
+      path and the pure OS-driven `prefers-color-scheme` path (no override
+      set): Perform (Playing card, tags, fanned graph edges, dot grid),
+      the End Set confirm modal, Library, and the undo toast all render
+      with real, legible, designed dark values — and a light-mode
+      screenshot taken after all these changes is pixel-equivalent to
+      before them, confirming zero regression to the default theme.
 - [ ] **Accessibility pass**: keyboard navigation for a fundamentally
       spatial, mouse-driven graph canvas is a real design problem, not a
       quick fix — needs its own thought-through interaction model (e.g. a

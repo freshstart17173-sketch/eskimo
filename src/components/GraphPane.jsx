@@ -3,11 +3,18 @@ import { ReactFlow, Background, BackgroundVariant, MarkerType, BaseEdge, useNode
 import { END } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
 import { SongNode, EndNode } from './GraphNodes.jsx';
+import { useTheme } from '../theme.js';
 
 const nodeTypes = { song: SongNode, end: EndNode };
 
-const EDGE_COLOR = { base: '#c7c7c7', later: '#bcdcef', next: '#7fb3d9' };
+// React Flow's edge stroke and the canvas's dot grid are plain SVG/canvas
+// paint, not CSS — they can't pick up the page's CSS custom properties, so
+// dark mode needs its own literal values here rather than just reusing
+// var(--line) etc. A base edge tuned to read as "subtle" against the light
+// panel would be jarringly bright against the dark one if left unchanged.
+const EDGE_COLOR = { light: { base: '#c7c7c7', later: '#bcdcef', next: '#7fb3d9' }, dark: { base: '#4b4d52', later: '#3d5972', next: '#7fb3d9' } };
 const EDGE_WIDTH = { base: 1.5, later: 2, next: 3 };
+const DOT_COLOR = { light: '#c8c8c8', dark: '#38393d' };
 
 // Same control-point math React Flow's own bezier edge uses for fixed
 // Right-source/Left-target handles (see @xyflow/system's getBezierPath) —
@@ -41,6 +48,10 @@ export default function GraphPane({
   onDragSongPosition, hoverCardFor, onRequestEndSet, endQueued,
   nowPlayingId, nowElapsedSec, nowDurationSec,
 }) {
+  const { isDark } = useTheme();
+  const edgeColor = isDark ? EDGE_COLOR.dark : EDGE_COLOR.light;
+  const dotColor = isDark ? DOT_COLOR.dark : DOT_COLOR.light;
+
   const initialNodes = useMemo(() => buildNodes(), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
 
@@ -113,12 +124,12 @@ export default function GraphPane({
         type: offset === 0 ? 'default' : 'fanned',
         data: offset === 0 ? undefined : { offset },
         animated: e._tier === 'next',
-        style: { stroke: EDGE_COLOR[e._tier], strokeWidth: EDGE_WIDTH[e._tier] },
-        markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLOR[e._tier], width: 10, height: 10 },
+        style: { stroke: edgeColor[e._tier], strokeWidth: EDGE_WIDTH[e._tier] },
+        markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor[e._tier], width: 10, height: 10 },
         zIndex: e._tier === 'base' ? 0 : e._tier === 'later' ? 1 : 2,
       };
     });
-  }, [transitionEdges]);
+  }, [transitionEdges, edgeColor]);
 
   const onNodeDragStop = useCallback((_, node) => {
     if (node.id === END) return;
@@ -140,7 +151,7 @@ export default function GraphPane({
       defaultEdgeOptions={{ type: 'default' }}
       proOptions={{ hideAttribution: true }}
     >
-      <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color="#c8c8c8" />
+      <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color={dotColor} />
     </ReactFlow>
   );
 }
