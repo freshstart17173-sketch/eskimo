@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
-import { Store, freshState, emptySession, removeSongCascade, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, advanceSession, transitionTriggerElapsed } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed } from './core.js';
+import { engine, performAdvance } from './audioEngine.js';
 import Sidebar from './components/Sidebar.jsx';
 
 // Lazy — each page's own module (and, for Perform, @xyflow/react + dagre +
@@ -51,23 +52,42 @@ export default function App() {
     return () => clearTimeout(saveTimer.current);
   }, [songs, edges, session, venueName, isDemo]);
 
-  // ---- the set clock: ticks Now Playing's countdown, then hands off to
-  // advanceSession (core.js) — the same function a manual "Next song" click
-  // uses — once transitionTriggerElapsed says it's time, so the timer and
-  // the button can never disagree about what happens next. Critically,
-  // that trigger point is the committed transition's real cue point when
+  // ---- the set clock: ticks Now Playing's countdown, then hands off via
+  // performAdvance (audioEngine.js) — the same function a manual "Next
+  // song" click uses — once transitionTriggerElapsed says it's time, so
+  // the timer and the button can never disagree about what happens next.
+  // That trigger point is the committed transition's real cue point when
   // one exists — not the full song length — so the handoff actually
-  // happens where the produced transition was built to happen. ----
+  // happens where the produced transition was built to happen.
+  //
+  // Elapsed comes from the real AudioContext clock (engine.getMainElapsed)
+  // whenever Now Playing actually has uploaded audio sounding right now —
+  // sample-accurate, immune to tab-throttling drift, and genuinely paused
+  // by togglePlaying's ctx.suspend() rather than just stopping a counter.
+  // A song with no uploaded master falls back to measuring real wall-clock
+  // time between ticks (not a fixed "-1 per tick", which would drift if
+  // this interval's period ever changed) — so the two paths always agree
+  // on what "elapsed" means even though only one of them is real audio.
+  // Kept at the same 1000ms cadence as before (not faster): each tick
+  // producing a new session object resets the save-effect's 400ms
+  // debounce below, so a tick period shorter than that would starve it
+  // and nothing would ever actually persist while a set is playing. ----
+  const lastTickAtRef = useRef(Date.now());
   useEffect(() => {
+    lastTickAtRef.current = Date.now();
     const t = setInterval(() => {
+      const now = Date.now();
+      const dtSec = Math.max(0, (now - lastTickAtRef.current) / 1000);
+      lastTickAtRef.current = now;
       setSession(prev => {
         if (!prev.isPlaying || !prev.nowPlayingId) return prev;
         const nowSong = songs[prev.nowPlayingId];
         const duration = nowSong ? nowSong.durationSec : 210;
-        const elapsed = duration - prev.timeLeft;
+        const engineElapsed = engine.getMainElapsed(prev.nowPlayingId);
+        const elapsed = engineElapsed != null ? engineElapsed : Math.max(0, (duration - prev.timeLeft) + dtSec);
         const triggerAt = transitionTriggerElapsed(prev.queue[0], edges, duration);
-        if (elapsed >= triggerAt || prev.timeLeft <= 1) return advanceSession(prev, songs, getVisibleEdges(edges));
-        return { ...prev, timeLeft: prev.timeLeft - 1 };
+        if (elapsed >= triggerAt || elapsed >= duration - 0.05) return performAdvance(prev, songs, getVisibleEdges(edges));
+        return { ...prev, timeLeft: Math.max(0, duration - elapsed) };
       });
     }, 1000);
     return () => clearInterval(t);
@@ -108,6 +128,7 @@ export default function App() {
     setEdges(result.edges);
     setSession(prev => {
       if (prev.nowPlayingId !== songId && !prev.queue.some(q => q.id === songId)) return prev;
+      if (prev.nowPlayingId === songId) engine.stopAll();
       return { ...prev, queue: prev.queue.filter(q => q.id !== songId), isPlaying: prev.nowPlayingId === songId ? false : prev.isPlaying, setEnded: prev.nowPlayingId === songId ? true : prev.setEnded };
     });
     showUndoToast('Deleted "' + (song ? song.title : 'that song') + '"', snapshot);
@@ -126,6 +147,7 @@ export default function App() {
   }, [edges, songs, session, showUndoToast]);
 
   const clearAllData = useCallback(() => {
+    engine.stopAll();
     Store.clear();
     const fresh = freshState();
     setSongs(fresh.songs); setEdges(fresh.edges); setSession(fresh.session); setVenueName(fresh.venueName);
@@ -148,6 +170,7 @@ export default function App() {
     setTab('perform');
   }, []);
   const clearExample = useCallback(() => {
+    engine.stopAll();
     const fresh = freshState();
     setSongs(fresh.songs); setEdges(fresh.edges); setSession(fresh.session);
     setVenueName(v => (v === 'Example set' ? '' : v));
@@ -167,6 +190,7 @@ export default function App() {
       if (!prev.nowPlayingId) {
         const first = orderedIds[0];
         const song = songs[first];
+        engine.startMain(song, null);
         base = { ...prev, nowPlayingId: first, startMethod: 'cut', isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition', queue: [] };
         startIdx = 1;
       }

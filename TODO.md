@@ -372,11 +372,49 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       page load, unrelated to this change).
 
 ### Hard
-- [ ] **Real playback (Web Audio API)** — actual scheduled crossfades,
-      not just planning. This is the biggest remaining "does it actually
-      DJ" gap and touches audio engine, timing/scheduling, and the whole
-      Sequence pane's countdown semantics (which are currently a mocked
-      `durationSec`, not read from real audio).
+- [x] ~~Real playback (Web Audio API)~~ — done, as a new `src/audioEngine.js`
+      that layers underneath the existing session/queue model rather than
+      replacing it: the session still decides *that* a hop happens (a
+      committed transition's cue point, a manual skip, a dead end); the
+      engine only performs the real audio side of it. Now Playing's own
+      uploaded master actually plays through an `AudioBufferSourceNode`;
+      at a hop, any produced fragment involved (a transition's own
+      recorded clip, an outro leaving the old song, an intro starting the
+      new one) plays to its natural end first, then the destination's own
+      master becomes the new "main" deck — a transition's clip is what
+      carries the actual crossfade, splicing back into the destination at
+      its recorded `inSeconds`; a plain cut/outro always starts its
+      destination from 0. Pausing suspends the whole `AudioContext`
+      (freezes whatever's sounding, fragment or main deck) rather than
+      tracking play/pause per node, so resume always continues exactly
+      where it left off.
+      Graceful per-song degradation, not a hard requirement that every
+      song has audio: `engine.getMainElapsed(songId)` returns null
+      whenever that song isn't genuinely sounding right now, and the set
+      clock (`App.jsx`) falls back to a wall-clock estimate for that song
+      — real audio and "still just planned" can sit side by side in the
+      same set. The set-clock's timer and the manual skip button now both
+      go through one shared `performAdvance` (`audioEngine.js`) so they
+      can never disagree about what a hop actually does.
+      Fixed a real regression caught during verification, not just in the
+      new code: tightening the set-clock's tick to 200ms (for a smoother
+      real-audio countdown) meant every tick produced a new session object
+      faster than the save effect's 400ms debounce could ever fire —
+      autosave would have silently stopped working for the entire
+      duration of any playing set. Reverted to the original 1000ms
+      cadence (still computed from real elapsed time, not a fixed "-1 per
+      tick", so accuracy didn't regress) rather than touching the
+      debounce itself.
+      Verified in a real browser (not mocked) with synthetic WAV audio for
+      two songs plus a produced transition clip between them: Song A's
+      real `AudioContext` clock is confirmed running and advancing at
+      real wall-clock speed; committing the transition and waiting past
+      its cue point shows the transition clip playing through, then
+      Song B's own master becomes the real main deck at its `inSeconds`
+      cue; clicking Pause suspends the context and the real elapsed time
+      genuinely stops advancing (confirmed unchanged after a further
+      1.2s wait); clicking Play resumes it and elapsed continues forward
+      from exactly where it paused.
 - [x] ~~Range-fetch based detection.~~ — done, for the case it can be done
       correctly: `audioDetect.js`'s new `fetchEdgesRanged(url)` gets a
       plain-PCM WAV reference's exact duration (from its header, not a

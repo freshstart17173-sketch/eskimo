@@ -2,9 +2,10 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
-  END, getVisibleEdges, inOutCounts, queueTailId, advanceSession, removeQueueItem,
+  END, getVisibleEdges, inOutCounts, queueTailId, removeQueueItem,
   transitionCandidates, cutCandidates, clamp,
 } from '../core.js';
+import { engine, performAdvance } from '../audioEngine.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
 import GraphPane from './GraphPane.jsx';
 import SequencePane from './SequencePane.jsx';
@@ -167,13 +168,24 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 
   function startSet(songId, starting) {
     const song = songs[songId];
+    const introEdge = starting === 'intro' ? findEdge(e => e.type === 'intro' && e.r === songId) : null;
+    engine.startMain(song, introEdge);
     setSession(prev => ({
       ...prev, nowPlayingId: songId, startMethod: starting,
       queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition',
     }));
   }
-  function togglePlaying() { setSession(prev => ({ ...prev, isPlaying: !prev.isPlaying })); }
-  function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, nextMode: 'transition', autoHistory: [] })); }
+  function togglePlaying() {
+    setSession(prev => {
+      const isPlaying = !prev.isPlaying;
+      if (isPlaying) engine.resume(); else engine.pause();
+      return { ...prev, isPlaying };
+    });
+  }
+  function resumeSet() {
+    engine.stopAll();
+    setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, nextMode: 'transition', autoHistory: [] }));
+  }
   function removeQueueFrom(index) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, index) })); }
   // Skip just one queued song, keeping the plan after it — the hop into
   // whatever was next gets recomputed against its new predecessor (see
@@ -181,8 +193,8 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   function removeQueueOne(index) {
     setSession(prev => ({ ...prev, queue: removeQueueItem(prev.queue, index, prev.nowPlayingId, visibleEdges) }));
   }
-  // the manual skip button — same rule the set-clock's timer uses (advanceSession, core.js)
-  function skipNow() { setSession(prev => advanceSession(prev, songs, visibleEdges)); }
+  // the manual skip button — same rule the set-clock's timer uses (performAdvance, audioEngine.js)
+  function skipNow() { setSession(prev => performAdvance(prev, songs, visibleEdges)); }
 
   // ---------------- layout: manual (stored x/y) or auto (dagre) ----------------
   const autoPositions = useMemo(() => layoutMode === 'auto' ? computeDagreLayout(songs, edges) : null, [layoutMode, songs, edges]);
