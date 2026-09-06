@@ -89,7 +89,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   );
 }
 
-export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onQueueSongs }) {
+export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onQueueSongs, onLoadExample }) {
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]); // ordered — selection order is play order
@@ -112,7 +112,10 @@ export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDe
         <div className="empty-state">
           <div className="empty-state-title">No songs yet</div>
           <div className="empty-state-sub">Upload your first track to start building your library.</div>
-          <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+          <div className="empty-state-actions">
+            <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+            <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>
+          </div>
         </div>
       </div>
     );

@@ -9,9 +9,11 @@ export const END = '__end__';
 const STORAGE_KEY = 'djflow:v3';
 
 // ---------------------------------------------------------------------------
-// Real app state starts empty — no demo/sample data is ever loaded into the app.
-// These sample* functions exist purely so the pure-logic unit tests have some
-// realistic data to exercise; nothing in the app itself calls them.
+// Real app state starts empty — no demo/sample data is ever loaded into the
+// app on its own. This same fixture doubles as both realistic data for
+// pure-logic unit tests and the guided "load an example graph" first-run
+// feature (App.jsx's loadExample) — the app itself never calls these on its
+// own initiative, only in direct response to that explicit click.
 // ---------------------------------------------------------------------------
 export function sampleSongsForTests() {
   return {
@@ -28,7 +30,7 @@ export function sampleEdgesForTests() {
     { id: 'e2', type: 'transition', l: 'hd', r: 'cb', verified: true },
     { id: 'e4', type: 'transition', l: 'cb', r: 'gs', verified: true },
     { id: 'e5', type: 'outro', l: 'cb', verified: true },
-    { id: 'e6', type: 'transition', l: 'gs', r: 'lr', verified: false },
+    { id: 'e6', type: 'transition', l: 'gs', r: 'lr', verified: true },
     { id: 'e13', type: 'transition', l: 'gs', r: 'wr', verified: true },
     { id: 'e14', type: 'outro', l: 'gs', verified: true },
   ];

@@ -10,7 +10,7 @@ import SequencePane from './SequencePane.jsx';
 import QueueBar from './QueueBar.jsx';
 import { Icon, ICONS } from './shared.jsx';
 
-export default function PerformPage({ songs, setSongs, edges, session, setSession, venueName, goUpload }) {
+export default function PerformPage({ songs, setSongs, edges, session, setSession, venueName, goUpload, onLoadExample }) {
   const rf = useReactFlow();
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -285,7 +285,10 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
         <div className="empty-state">
           <div className="empty-state-title">Your graph is empty</div>
           <div className="empty-state-sub">Add your first song, then come back here to lay out your set and connect it to others.</div>
-          <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+          <div className="empty-state-actions">
+            <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
+            <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>
+          </div>
         </div>
       </div>
     );

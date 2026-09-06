@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { Store, freshState, emptySession, removeSongCascade, END, getVisibleEdges, advanceSession, transitionTriggerElapsed } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, advanceSession, transitionTriggerElapsed } from './core.js';
 import Sidebar from './components/Sidebar.jsx';
 import PerformPage from './components/PerformPage.jsx';
 import LibraryPage from './components/Library.jsx';
@@ -19,6 +19,7 @@ export default function App() {
   const [edges, setEdges] = useState(INITIAL.edges);
   const [session, setSession] = useState(INITIAL.session);
   const [venueName, setVenueName] = useState(INITIAL.venueName);
+  const [isDemo, setIsDemo] = useState(!!INITIAL.isDemo);
 
   const [tab, setTab] = useState('perform');
 
@@ -39,12 +40,12 @@ export default function App() {
   useEffect(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      const data = { songs, edges, session, venueName };
+      const data = { songs, edges, session, venueName, isDemo };
       Store.save(data);
       Store.pushRemote(data);
     }, 400);
     return () => clearTimeout(saveTimer.current);
-  }, [songs, edges, session, venueName]);
+  }, [songs, edges, session, venueName, isDemo]);
 
   // ---- the set clock: ticks Now Playing's countdown, then hands off to
   // advanceSession (core.js) — the same function a manual "Next song" click
@@ -124,7 +125,29 @@ export default function App() {
     Store.clear();
     const fresh = freshState();
     setSongs(fresh.songs); setEdges(fresh.edges); setSession(fresh.session); setVenueName(fresh.venueName);
+    setIsDemo(false);
     setTab('perform');
+  }, []);
+
+  // Guided first-run: a brand-new library is correctly seed-data-free, but
+  // that also means a new producer opens the app to nothing. One click
+  // loads a small example graph instead of a blank canvas — clearly marked
+  // (see the demo banner below) and, per its own rule, never mixed into a
+  // real library: the first real song/audio added while it's showing wipes
+  // the example first, regardless of which page that add happens from.
+  const loadExample = useCallback(() => {
+    setSongs(sampleSongsForTests());
+    setEdges(sampleEdgesForTests());
+    setSession(emptySession());
+    setVenueName(v => v || 'Example set');
+    setIsDemo(true);
+    setTab('perform');
+  }, []);
+  const clearExample = useCallback(() => {
+    const fresh = freshState();
+    setSongs(fresh.songs); setEdges(fresh.edges); setSession(fresh.session);
+    setVenueName(v => (v === 'Example set' ? '' : v));
+    setIsDemo(false);
   }, []);
 
   // Select a run of songs in Library, in the order you want them played,
@@ -155,6 +178,14 @@ export default function App() {
     setTab('perform');
   }, [edges, songs]);
 
+  // The one real entry point for a song joining the library — guard it so
+  // an example graph never ends up blended with the user's own songs: the
+  // first real upload while the example is showing clears it first.
+  const addSong = useCallback((song) => {
+    if (isDemo) { clearExample(); setSongs({ [song.id]: song }); return; }
+    setSongs(prev => ({ ...prev, [song.id]: song }));
+  }, [isDemo, clearExample]);
+
   const songCount = Object.keys(songs).length;
   const edgeCount = edges.length;
 
@@ -162,23 +193,29 @@ export default function App() {
     <div className="app-shell">
       <Sidebar tab={tab} setTab={setTab} songCount={songCount} edgeCount={edgeCount} venueName={venueName} />
       <div className="main">
+        {isDemo && (
+          <div className="demo-banner">
+            <span>You're viewing an example graph — nothing here is saved to a real library.</span>
+            <button className="btn btn-ghost btn-sm" onClick={clearExample}>Start your own</button>
+          </div>
+        )}
         {tab === 'perform' && (
           <ReactFlowProvider>
             <PerformPage
               songs={songs} setSongs={setSongs} edges={edges} session={session} setSession={setSession}
-              venueName={venueName} goUpload={() => setTab('upload')}
+              venueName={venueName} goUpload={() => setTab('upload')} onLoadExample={loadExample}
             />
           </ReactFlowProvider>
         )}
         {tab === 'library' && (
           <LibraryPage songs={songs} edges={edges} goUpload={() => setTab('upload')}
             onUpdateSong={updateSong} onDeleteSong={deleteSong} onDeleteEdge={deleteEdge}
-            onQueueSongs={queueSongsAsPlaylist}
+            onQueueSongs={queueSongsAsPlaylist} onLoadExample={loadExample}
           />
         )}
         {tab === 'upload' && (
           <UploadSongPage
-            onAddSong={(song) => setSongs(prev => ({ ...prev, [song.id]: song }))}
+            onAddSong={addSong}
             onViewSong={() => setTab('library')}
             existingCount={songCount}
           />

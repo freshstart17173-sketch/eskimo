@@ -273,11 +273,17 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       the toast is the whole point of this item. Verified end-to-end with
       Playwright (delete → row gone + toast shown → Undo → row and its
       edges back, cascade-deleted edges included).
-- [ ] **Guided first-run example.** The app is correctly seed-data-free by
-      design, but that means a brand-new producer friend opens it to
-      nothing — a one-click "load an example graph" into an obviously-
-      marked demo state (never mixed into their real library) would help
-      the exact audience you're handing this to.
+- [x] ~~Guided first-run example.~~ — done: "Load an example graph" on
+      both empty states (Perform, Library) populates the small 5-song demo
+      graph (repurposed from `core.js`'s previously-unused
+      `sampleSongsForTests`/`sampleEdgesForTests`), and a persistent
+      `.demo-banner` ("You're viewing an example graph… Start your own")
+      shows the whole time it's active. Never mixes with a real library:
+      `App.jsx`'s `addSong` clears the example first the moment a real
+      song is uploaded, so nothing gets blended in regardless of when that
+      happens. Verified end-to-end with Playwright: empty state → load
+      example → 5 songs/7 pieces + banner → upload a real song → demo
+      wiped, banner gone, exactly the 1 real song remains.
 - [ ] Path breadcrumb in the Sequence pane can only be trimmed from the
       end (by re-staging); removing one specific mid-path step without
       clearing everything after it isn't possible yet.

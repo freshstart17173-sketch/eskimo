@@ -74,6 +74,14 @@ a { color: var(--accent); }
    --------------------------------------------------------------- */
 .app-shell { height: 100vh; display: flex; position: relative; }
 
+.demo-banner {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  background: var(--accent-bg); color: var(--accent-ink); border-bottom: 1px solid var(--accent-light);
+  font-size: 12.5px; font-weight: 600; padding: 8px 16px; flex: none;
+}
+.demo-banner .btn-ghost { background: rgba(255, 255, 255, .55); color: var(--accent-ink); }
+.demo-banner .btn-ghost:hover { background: rgba(255, 255, 255, .85); }
+
 /* One-level undo toast for song/edge deletion — replaces a blocking
    confirm dialog with an immediate delete plus a few seconds to change
    your mind. */
@@ -133,6 +141,7 @@ a { color: var(--accent); }
 }
 .empty-state-title { font-size: 17px; font-weight: 600; color: var(--ink); }
 .empty-state-sub { font-size: 13px; color: var(--muted); max-width: 320px; }
+.empty-state-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .empty-note { font-size: 13px; color: var(--faint); padding: 16px 4px; }
 .empty-note-sm { font-size: 11px; color: var(--muted); }
 .hint-text { font-size: 11px; color: var(--faint); }
