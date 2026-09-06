@@ -118,18 +118,22 @@ export function bestCorrelation(a, b) {
 // two without branching on the result shape. leftOutSeconds/rightInSeconds
 // are the actual detected splice timecodes (from the winning correlation
 // lag), not guesses — null when there was no confident match to derive them from.
-export async function detectMatch(file, candidateSongs) {
+// onProgress(checked, total), when given, fires once per reference track
+// actually looked at — lets the UI show real "N of M checked" feedback
+// instead of one static "Analyzing…" for the whole batch.
+export async function detectMatch(file, candidateSongs, onProgress) {
   const dropped = await decodeFile(file);
   const droppedHead = headEnvelope(dropped);
   const droppedTail = tailEnvelope(dropped);
 
+  const withAudio = candidateSongs.filter(s => s.audioUrl);
   let bestLeft = null, bestLeftScore = 0, bestLeftLag = 0, bestLeftRefDuration = 0;
   let bestRight = null, bestRightScore = 0, bestRightLag = 0;
 
-  for (const song of candidateSongs) {
-    if (!song.audioUrl) continue;
+  for (let i = 0; i < withAudio.length; i++) {
+    const song = withAudio[i];
     let ref;
-    try { ref = await fetchAndDecode(song.audioUrl); } catch (e) { console.warn('Eskimo Studio: could not fetch reference audio for', song.id, e); continue; }
+    try { ref = await fetchAndDecode(song.audioUrl); } catch (e) { console.warn('Eskimo Studio: could not fetch reference audio for', song.id, e); if (onProgress) onProgress(i + 1, withAudio.length); continue; }
 
     // the dropped file's leading edge should match a candidate's trailing
     // edge — that candidate is the "left side" (what it plays out of)
@@ -140,6 +144,7 @@ export async function detectMatch(file, candidateSongs) {
     // edge — that candidate is the "right side" (what it plays into)
     const right = bestCorrelation(droppedTail, headEnvelope(ref));
     if (right.score > bestRightScore) { bestRightScore = right.score; bestRight = song.id; bestRightLag = right.lag; }
+    if (onProgress) onProgress(i + 1, withAudio.length);
   }
 
   const matchedLeft = bestLeftScore >= MATCH_THRESHOLD;

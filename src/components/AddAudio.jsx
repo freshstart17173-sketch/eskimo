@@ -6,6 +6,7 @@ import { Field, Dropzone, SongPicker } from './shared.jsx';
 export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
   const [file, setFile] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [progress, setProgress] = useState(null); // { done, total } | null
   const [detected, setDetected] = useState(false);
   const [usedRealDetection, setUsedRealDetection] = useState(false);
   const [realCue, setRealCue] = useState(null); // { outSeconds, inSeconds } | null
@@ -23,17 +24,17 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
   const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
 
   function reset() {
-    setFile(null); setAnalyzing(false); setDetected(false);
+    setFile(null); setAnalyzing(false); setDetected(false); setProgress(null);
     setLeftId(null); setRightId(null); setFragLabel(''); setError(''); setRealCue(null);
   }
 
   async function handleFile(f) {
-    setFile(f); setAnalyzing(true); setDetected(false); setSaved(null);
+    setFile(f); setAnalyzing(true); setDetected(false); setSaved(null); setProgress(null);
     try {
       if (referenceableSongs.length > 0) {
         // Real detection: cross-correlate this file's head/tail against every
         // song that has a real reference track (see src/audioDetect.js).
-        const { leftId: l, rightId: r, leftOutSeconds, rightInSeconds } = await detectMatch(f, referenceableSongs);
+        const { leftId: l, rightId: r, leftOutSeconds, rightInSeconds } = await detectMatch(f, referenceableSongs, (done, total) => setProgress({ done, total }));
         setLeftId(l); setRightId(r);
         setRealCue((l || r) ? { outSeconds: leftOutSeconds, inSeconds: rightInSeconds } : null);
         setUsedRealDetection(true);
@@ -125,7 +126,9 @@ export default function AddAudioPage({ songs, onAddEdge, onViewSong }) {
         {analyzing && (
           <div className="hint-text analyzing-hint">
             <span className="spinner" />
-            {referenceableSongs.length > 0 ? 'Analyzing audio against your reference tracks…' : 'Analyzing audio…'}
+            {progress
+              ? `Checking reference track ${progress.done} of ${progress.total}…`
+              : (referenceableSongs.length > 0 ? 'Analyzing audio against your reference tracks…' : 'Analyzing audio…')}
           </div>
         )}
 

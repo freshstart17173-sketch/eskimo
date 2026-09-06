@@ -276,9 +276,15 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
 - [ ] Path breadcrumb in the Sequence pane can only be trimmed from the
       end (by re-staging); removing one specific mid-path step without
       clearing everything after it isn't possible yet.
-- [ ] Progress feedback for Add Audio detection when checking many
-      reference tracks (currently one static "Analyzing…" for the whole
-      batch, with no sense of how many candidates are left).
+- [x] ~~Progress feedback for Add Audio detection~~ — done:
+      `detectMatch` (`audioDetect.js`) takes an optional `onProgress(done,
+      total)` callback fired once per reference track actually checked;
+      `AddAudio.jsx` shows "Checking reference track N of M…" instead of
+      one static line for the whole batch. Verified by calling the real
+      `detectMatch` directly in a browser with synthetic WAV reference
+      tracks (a full UI drive got unreliable in this sandbox — its network
+      proxy struggles with the app's live Supabase/Google Fonts calls on
+      page load, unrelated to this change).
 
 ### Hard
 - [ ] **Real playback (Web Audio API)** — actual scheduled crossfades,
