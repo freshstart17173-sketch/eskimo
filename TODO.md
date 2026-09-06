@@ -404,10 +404,31 @@ drain bar. Picking up round 2's in-progress handoff and finishing it:
       than the file's own size, not one download per candidate; and a
       non-PCM WAV (audioFormat ≠ 1) correctly returns null to trigger the
       fallback.
-- [ ] **Real audio duration + BPM/key from analysis** (Essentia.js,
-      WebAssembly, client-side) — replaces `mockDuration` and the
-      manually-entered BPM/key fields, and would make the Sequence pane's
-      countdown mechanic real instead of simulated.
+- [x] ~~Real audio duration + BPM/key from analysis~~ — done, as a small
+      dependency-free DSP module (`src/audioAnalyze.js`) rather than pulling
+      in Essentia.js/WASM: duration comes straight off the decoded
+      `AudioBuffer` (exact, not `mockDuration`'s guess); BPM comes from
+      autocorrelating a frame-energy onset-strength envelope over the lag
+      range for 70-190 BPM (a standard, cheap beat-tracking approach); key
+      comes from a 12-bin chroma vector — built with the Goertzel algorithm
+      (a targeted single-frequency DFT bin, far cheaper than a full FFT
+      when only ~56 note frequencies across ~30s of audio are needed) —
+      correlated against the Krumhansl-Kessler major/minor key profiles at
+      all 12 rotations.
+      Wired into Upload Song: dropping a file kicks off `analyzeAudio` in
+      the background (with its own "Analyzing…" spinner, same visual
+      language as Add Audio's), then fills BPM/Key only if the DJ hasn't
+      already typed something in — same "detected but editable" contract
+      as Add Audio's transition detection — and a "Detected Ns, N BPM, key
+      — edit above if it's off" summary line confirms what was found.
+      Verified two ways: (1) a synthetic WAV built from a 128 BPM click
+      track plus a sustained A-minor chord, fed straight to `analyzeAudio`
+      in a real browser (not jsdom — needs real `decodeAudioData`), came
+      back with exact duration, BPM within 1.2 of true, and the correct
+      key; (2) the same file dropped through the actual Upload Song form
+      in Playwright auto-filled BPM/Key from empty, showed the detected
+      summary, and the saved song in `localStorage` carried the real
+      duration/BPM/key end to end.
 - [x] ~~Dark mode~~ — done, as a genuine second token set, not a filter/
       invert: `styles.css`'s `:root` still holds the light palette;
       designed dark values override it via `@media (prefers-color-scheme:
