@@ -3,6 +3,12 @@
 This file is the backlog and the reasoning behind it, for whoever (human or
 agent) picks this up next in Claude Code.
 
+**Push to `main`.** A `main` branch now exists, and Vercel deploys this
+site straight from it (https://eskimo-freshstart17173-9037s-projects.vercel.app/)
+— that's the live site the user actually looks at. Commit and push there
+directly unless told otherwise; a change left on an unmerged `claude/*`
+branch never reaches the user. See `CLAUDE.md`.
+
 ## Stack (changed this pass — read this first)
 
 This used to be a single `index.html` with React/Babel loaded from a CDN
@@ -623,7 +629,14 @@ None of the three steps depend on each other — do them in any order, or
 skip whichever you don't need. Current status of each, as of this pass:
 
 ### 1. GitHub Pages — get a public URL
-**Status: confirmed broken, two separate causes, both need a human.**
+**Update: superseded — the real deploy is Vercel, from `main` (see the
+top of this file), which now exists and is what's actually live at
+https://eskimo-freshstart17173-9037s-projects.vercel.app/. Everything
+below is the old GitHub-Pages-specific investigation, kept for history;
+Pages may still be broken exactly as described (unconfirmed since), but
+it's no longer the thing serving the actual site.**
+
+**Status (as of that investigation): confirmed broken, two separate causes, both need a human.**
 Checked via the GitHub MCP connection: `pages.yml` has run 29 times, every
 one triggered by a push, every one `conclusion: failure` — but
 `list_workflow_jobs` on the most recent run shows **zero jobs ever ran**,
