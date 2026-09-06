@@ -40,7 +40,12 @@ export function emptySession() {
   return {
     nowPlayingId: null, startMethod: null,
     queue: [], timeLeft: 0, isPlaying: false, setEnded: false,
-    endingChoice: 'cut', // how Now Playing will end if nothing more gets queued — 'cut' | 'outro'
+    // The one control for what the manual Next list offers and how Now
+    // Playing would end if nothing more gets queued: 'transition' shows
+    // only built transitions (an outgoing transition already carries its
+    // own ending); 'cut' or 'outro' show every other song, and decide
+    // whether Now Playing hard-cuts or plays its outro fragment first.
+    nextMode: 'transition', // 'transition' | 'cut' | 'outro'
     autoplay: false, // when true and nothing's manually queued, pickAutoplayNext chooses
     transitionOnly: false, // true = a dead end stops the set instead of cutting to a random song
     autoHistory: [], // songs autoplay has actually played, most recent last — for the bottom queue bar
@@ -246,16 +251,18 @@ export function inOutCounts(edges, songId) {
 }
 export function getVisibleEdges(edges) { return edges.filter(e => e.verified); }
 
-// One hop of *built* transitions out of a specific song, excluding ids already
-// used elsewhere in the current plan. This is the one primitive both the
-// "Next" list (from Now Playing) and the "Later" list (from whatever's
-// staged in Next) are built from.
-export function oneHopReachable(visibleEdges, fromId, excludeIds) {
-  const out = new Set();
-  visibleEdges.filter(e => e.type === 'transition' && e.l === fromId).forEach(e => {
-    if (!excludeIds.has(e.r)) out.add(e.r);
-  });
-  return out;
+// The two candidate lists the manual Next picker can show, gated by the
+// Playing card's single ending-mode toggle — Transition mode offers each
+// *produced transition* as its own candidate (a song with two transitions
+// built to it shows as two candidates, not one grouped item); Cut/Outro
+// mode offers every other song in the library, since a hard cut or an
+// outro can reach anywhere, not just what's been produced. Shared between
+// building the real Next list and previewing what a hover would lead to.
+export function transitionCandidates(visibleEdges, fromId, excludeIds) {
+  return visibleEdges.filter(e => e.type === 'transition' && e.l === fromId && !excludeIds.has(e.r));
+}
+export function cutCandidates(songs, excludeIds) {
+  return Object.keys(songs).filter(id => !excludeIds.has(id));
 }
 
 // Autoplay's picking policy: prefer a random *built* transition out of the
@@ -303,14 +310,14 @@ export function advanceSession(prev, songs, visibleEdges) {
   if (head) {
     if (head.id === END) return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0 };
     const nextSong = songs[head.id];
-    return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut' };
+    return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210 };
   }
   if (prev.autoplay) {
     const pick = pickAutoplayNext(songs, visibleEdges, prev.nowPlayingId, prev.transitionOnly);
     if (pick) {
       const nextSong = songs[pick.id];
       return {
-        ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210, endingChoice: 'cut',
+        ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210,
         autoHistory: [...prev.autoHistory, { id: pick.id, mode: pick.mode }].slice(-40),
       };
     }
@@ -349,27 +356,12 @@ export function removeSongCascade(songs, edges, songId) {
   return { songs: nextSongs, edges: nextEdges };
 }
 
-// ---------------------------------------------------------------------------
-// Reachability from the tail of the current queue (or Now Playing if the queue
-// is empty). "tier1" is the Next list; the Later list is computed separately,
-// live, from whichever song is staged (see oneHopReachable above).
-// ---------------------------------------------------------------------------
-export function computeReachability(songs, visibleEdges, nowPlayingId, queue) {
-  const queueHasId = (id) => queue.some(q => q.id === id);
+// What the Next list is reachable *from* — the tail of whatever's already
+// queued, or Now Playing itself when nothing's queued yet. null once an
+// End Set is queued (there's nothing to plan past it).
+export function queueTailId(nowPlayingId, queue) {
   const tail = queue.length ? queue[queue.length - 1] : null;
-  const fromId = tail ? (tail.id === END ? null : tail.id) : nowPlayingId;
-
-  const tier1 = new Set();
-  if (fromId) {
-    visibleEdges.filter(e => e.type === 'transition' && e.l === fromId).forEach(e => {
-      if (e.r !== nowPlayingId && !queueHasId(e.r)) tier1.add(e.r);
-    });
-    visibleEdges.filter(e => e.type === 'intro').forEach(e => {
-      if (e.r !== nowPlayingId && !queueHasId(e.r)) tier1.add(e.r);
-    });
-    if (!queueHasId(END)) tier1.add(END);
-  }
-  return { fromId, tier1 };
+  return tail ? (tail.id === END ? null : tail.id) : nowPlayingId;
 }
 
 export function hopEndingLabel(e) { return e === 'outro' ? 'outro' : 'cut'; }

@@ -163,7 +163,7 @@ export default function App() {
       if (!prev.nowPlayingId) {
         const first = orderedIds[0];
         const song = songs[first];
-        base = { ...prev, nowPlayingId: first, startMethod: 'cut', isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, endingChoice: 'cut', queue: [] };
+        base = { ...prev, nowPlayingId: first, startMethod: 'cut', isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition', queue: [] };
         startIdx = 1;
       }
       const newItems = [];

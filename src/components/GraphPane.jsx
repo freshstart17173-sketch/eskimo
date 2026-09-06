@@ -38,7 +38,8 @@ const edgeTypes = { fanned: FannedEdge };
 export default function GraphPane({
   songs, positions, transitionEdges, stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
-  onDragSongPosition, hoverCardFor, onStageEnd, endQueued,
+  onDragSongPosition, hoverCardFor, onRequestEndSet, endQueued,
+  nowPlayingId, nowElapsedSec, nowDurationSec,
 }) {
   const initialNodes = useMemo(() => buildNodes(), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -60,6 +61,7 @@ export default function GraphPane({
         hovered: hoveredId === id, inCount: io.inCount, outCount: io.outCount,
         onEnter: () => setHoveredId(id), onLeave: () => setHoveredId(null),
         hoverCard: hoverCardFor(id), playing: state === 'playing',
+        position: id === nowPlayingId ? { elapsed: nowElapsedSec, duration: nowDurationSec } : null,
       },
       style: { width: NODE_W },
     };
@@ -68,18 +70,19 @@ export default function GraphPane({
     const pos = positions[END] || { x: 1250, y: 20 };
     return {
       id: END, type: 'end', position: pos, draggable: true,
-      data: { state: stateFor(END), queued: endQueued, onClick: onStageEnd },
+      data: { state: stateFor(END), queued: endQueued, onClick: onRequestEndSet },
       style: { width: END_W },
     };
   }
 
   // Recompute node render-data (position/state/hover/etc.) whenever the
   // inputs that matter change — RF's own state (from useNodesState) still
-  // owns the live position during an in-progress drag.
+  // owns the live position during an in-progress drag. nowElapsedSec ticks
+  // every second so the Playing node's numeric position/length stays live.
   useEffect(() => {
     setNodes(prev => prev.map(n => (n.id === END ? endNodeFor() : nodeFor(n.id))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs, positions, stateFor, ioById, hoveredId, matchIds, searchActive, hoverCardFor, endQueued]);
+  }, [songs, positions, stateFor, ioById, hoveredId, matchIds, searchActive, hoverCardFor, endQueued, nowPlayingId, nowElapsedSec, nowDurationSec]);
 
   // songs/edges structurally changing (added/removed) needs a full rebuild,
   // not just a patch, so newly added nodes actually appear.

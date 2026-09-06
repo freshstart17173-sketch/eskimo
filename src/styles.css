@@ -98,6 +98,20 @@ a { color: var(--accent); }
 .toast .btn-ghost:hover { background: rgba(252, 252, 252, .2); }
 @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 
+/* A real confirm dialog — centered, blocks the page behind it. Reserved
+   for actions that should take a deliberate second step (End Set), unlike
+   the lighter inline-confirm pattern used for less consequential deletes. */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(19, 19, 19, .45);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+  animation: modalFadeIn .12s ease;
+}
+.modal-card { width: 320px; max-width: calc(100vw - 32px); background: var(--paper); border-radius: var(--radius); padding: 18px; box-shadow: 0 20px 50px rgba(0, 0, 0, .3); }
+.modal-title { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+.modal-sub { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+@keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
 .sidebar {
   width: 188px; flex: none; background: var(--panel);
   display: flex; flex-direction: column; padding: 18px 8px 16px;
@@ -284,63 +298,74 @@ a { color: var(--accent); }
 .playhead-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent); }
 .playhead-scrubber { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--paper); transform: translate(-50%, -50%); box-shadow: 0 0 0 2px var(--accent); }
 .playhead-times { display: flex; justify-content: space-between; font-size: 10px; color: rgba(252, 252, 252, .55); margin-top: 6px; }
-.playhead-next-btn { width: 100%; margin-top: 10px; background: rgba(252, 252, 252, .12); color: var(--paper); }
-.playhead-next-btn:hover { background: rgba(252, 252, 252, .2); }
+.seq-skip-btn {
+  width: 30px; height: 30px; flex: none; border-radius: var(--radius);
+  background: rgba(252, 252, 252, .14); color: var(--paper); display: flex; align-items: center; justify-content: center;
+}
+.seq-skip-btn:hover { background: rgba(252, 252, 252, .24); }
 
-.seq-ending-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 11px; padding-top: 11px; border-top: 1px solid rgba(252, 252, 252, .14); }
-.seq-ending-label { font-size: 10.5px; color: rgba(252, 252, 252, .55); text-transform: uppercase; letter-spacing: .04em; }
-.seq-ending-toggle { display: flex; gap: 4px; }
+/* The one control for what Next offers and how Now Playing would end —
+   Transition/Cut/Outro live together here instead of a separate per-row
+   toggle, so there's exactly one place "how does this end" gets decided. */
+.seq-mode-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 11px; padding-top: 11px; border-top: 1px solid rgba(252, 252, 252, .14); }
+.seq-mode-label { font-size: 10.5px; color: rgba(252, 252, 252, .55); text-transform: uppercase; letter-spacing: .04em; }
+.seq-mode-toggle { display: flex; gap: 4px; }
 .seq-ending-btn { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: var(--radius); background: rgba(252, 252, 252, .1); color: rgba(252, 252, 252, .7); }
 .seq-ending-btn.active { background: var(--accent); color: var(--accent-ink); }
 .seq-ending-btn:disabled { opacity: .3; cursor: not-allowed; }
 
+/* Deliberately low-key — End Set should never look like just another list
+   item to click through; this plus the confirm modal are the only ways in. */
+.seq-end-set-link {
+  display: block; margin-top: 9px; font-size: 10.5px; color: rgba(252, 252, 252, .42);
+  text-decoration: underline; text-underline-offset: 2px; padding: 2px 0;
+}
+.seq-end-set-link:hover { color: rgba(252, 252, 252, .75); }
+
 .seq-start-card { border-radius: var(--radius); background: var(--panel); padding: 12px; }
 
-.seq-list-title { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 7px; }
-.seq-list { display: flex; flex-direction: column; gap: 6px; }
-.seq-row {
-  border-radius: var(--radius); background: var(--panel); padding: 8px 9px; cursor: pointer;
-  border: 1px solid transparent; position: relative; overflow: hidden;
-}
-.seq-row:hover { border-color: var(--line); }
-.seq-row-armed { background: var(--state-next-bg); border-color: var(--state-next); }
-.seq-row-staged { border-color: var(--ink); background: var(--paper); }
-/* the actual countdown bar — drains right-to-left as time runs out, behind
-   the row's own content (which needs z-index:1 to stay above it) */
-.seq-row-drain { position: absolute; top: 0; right: 0; bottom: 0; background: rgba(19, 19, 19, .07); transition: width 1s linear; }
-.seq-row-staged .seq-row-drain { background: rgba(19, 19, 19, .05); }
-.seq-row-main { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.seq-row-text { min-width: 0; }
-.seq-row-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.seq-row-artist { font-size: 10.5px; color: var(--muted); }
-.seq-row-countdown { font-family: var(--font-mono); font-size: 10.5px; flex: none; }
-.seq-row-toggles { position: relative; z-index: 1; display: flex; gap: 4px; margin-top: 7px; }
+/* Cut/Intro (starting a set) and Cut/Outro (the End Set modal) — the two
+   remaining light-background toggles, styled apart from the dark-context
+   .seq-ending-btn above. */
+.seq-row-toggles { display: flex; gap: 4px; }
 .seq-toggle { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 10.5px; font-weight: 600; padding: 4px 5px; border-radius: var(--radius); background: rgba(19, 19, 19, .06); color: var(--muted); }
 .seq-toggle.active { background: var(--ink); color: var(--paper); }
 .seq-toggle:disabled { opacity: .35; cursor: not-allowed; }
+
+.seq-list-title { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 7px; }
+.seq-list { display: flex; flex-direction: column; gap: 8px; }
 .seq-empty { font-size: 11.5px; color: var(--faint); padding: 4px 2px; }
 
-/* multiple produced transitions between the row's song and Playing — shown
-   indented under the row, only when there's an actual choice to make */
-.seq-row-transitions { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 3px; margin-top: 7px; padding-left: 10px; border-left: 2px solid var(--line-soft); }
-.seq-transition-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); padding: 3px 5px; border-radius: var(--radius); }
-.seq-transition-item.selectable { cursor: pointer; }
-.seq-transition-item.selectable:hover { background: rgba(19, 19, 19, .05); }
-.seq-transition-item.active { background: var(--accent-bg); color: var(--accent-ink); }
-.seq-transition-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); flex: none; }
-.seq-transition-item.active .seq-transition-dot { background: var(--accent-ink); }
-.seq-transition-label { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.seq-transition-cue { font-size: 10px; color: var(--faint); flex: none; }
-.seq-transition-item.active .seq-transition-cue { color: var(--accent-ink); opacity: .75; }
-.seq-row-more {
-  align-self: flex-start; font-size: 10.5px; font-weight: 600; color: var(--accent-ink);
-  padding: 3px 5px; text-decoration: underline; text-underline-offset: 2px;
+/* One flat scrollable list of cards — a produced transition is its own
+   card (destination shown underneath the label), a cut/outro candidate's
+   card just leads with the song itself. Clicking commits immediately. */
+.seq-card {
+  position: relative; overflow: hidden; border-radius: var(--radius); background: var(--panel);
+  padding: 10px 12px; cursor: pointer; border: 1px solid transparent;
 }
-.seq-row-more:hover { color: var(--ink); }
+.seq-card:hover { border-color: var(--line); }
+.seq-card-readonly { cursor: default; }
+.seq-card-readonly:hover { border-color: transparent; }
+/* the countdown bar — drains right-to-left as a transition's cue nears,
+   behind the card's own content (which needs z-index:1 to stay above it) */
+.seq-card-drain { position: absolute; top: 0; right: 0; bottom: 0; background: rgba(19, 19, 19, .07); transition: width 1s linear; }
+.seq-card-main { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; }
+.seq-card-art { width: 34px; height: 34px; }
+.seq-card-text { flex: 1; min-width: 0; }
+.seq-card-label { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seq-card-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+.seq-card-sub-artist { color: var(--faint); }
+.seq-card-intro-tag { font-size: 9px; padding: 1px 5px; flex: none; }
+.seq-card-nums { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.seq-card-cue { font-size: 11.5px; font-weight: 600; }
+.seq-card-length { font-size: 10px; color: var(--faint); }
 
-.seq-path { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
-.seq-path-chip { display: flex; align-items: center; gap: 6px; padding: 3px 7px; border-radius: var(--radius); background: var(--panel); font-size: 11px; font-weight: 600; }
-.seq-path-arrow { font-size: 11px; color: var(--faint); }
+/* Hover preview of what picking a candidate would lead to — not a staged
+   plan, just a look-ahead, so it renders smaller/quieter than Next itself. */
+.seq-later-preview { margin-top: 14px; }
+.seq-list-compact .seq-card { padding: 7px 10px; }
+.seq-list-compact .seq-card-art { width: 24px; height: 24px; }
+.seq-list-compact .seq-card-label { font-size: 11.5px; }
 
 /* ---------------------------------------------------------------
    Perform: toolbar
@@ -442,7 +467,9 @@ a { color: var(--accent); }
 
 /* tiny animated waveform — only the Playing node gets this, a quiet "this
    one is actually live" signal instead of a static badge */
-.node-waveform { display: flex; align-items: flex-end; gap: 2px; height: 12px; margin-top: 6px; }
+.node-playing-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.node-position { font-size: 9.5px; color: rgba(252, 252, 252, .7); flex: none; }
+.node-waveform { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
 .node-waveform span { width: 2.5px; background: var(--accent); border-radius: 1px; animation: waveBounce 1.1s ease-in-out infinite; }
 .node-waveform span:nth-child(1) { height: 40%; animation-delay: -0.9s; }
 .node-waveform span:nth-child(2) { height: 90%; animation-delay: -0.6s; }
@@ -471,11 +498,13 @@ a { color: var(--accent); }
 }
 .hover-card-title { font-weight: 600; font-size: 14px; line-height: 1.2; }
 .hover-card-artist { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
-.hover-card-row { display: flex; gap: 5px; margin-top: 8px; }
-.hover-toggle { flex: 1; font-size: 10.5px; font-weight: 600; padding: 5px 4px; border-radius: var(--radius); background: var(--panel); color: var(--muted); text-align: center; transition: background .12s ease, color .12s ease; }
+.hover-toggle { font-size: 10.5px; font-weight: 600; padding: 5px 4px; border-radius: var(--radius); background: var(--panel); color: var(--muted); text-align: center; transition: background .12s ease, color .12s ease; }
 .hover-toggle:not(:disabled):hover { background: var(--line-soft); }
 .hover-toggle.active { background: var(--ink); color: var(--paper); }
 .hover-toggle:disabled { opacity: .35; cursor: not-allowed; text-decoration: line-through; }
+/* the graph's one-click commit — same action the side panel's card does */
+.hover-toggle-commit { display: block; width: 100%; margin-top: 4px; background: var(--ink); color: var(--paper); }
+.hover-toggle-commit:hover { background: #2b2b2b; }
 
 /* ---------------------------------------------------------------
    Library — flat accordion list

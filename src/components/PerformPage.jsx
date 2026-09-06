@@ -2,13 +2,14 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
-  END, clamp, getVisibleEdges, inOutCounts, oneHopReachable, computeReachability, advanceSession, removeQueueItem,
+  END, getVisibleEdges, inOutCounts, queueTailId, advanceSession, removeQueueItem,
+  transitionCandidates, cutCandidates, clamp,
 } from '../core.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
 import GraphPane from './GraphPane.jsx';
 import SequencePane from './SequencePane.jsx';
 import QueueBar from './QueueBar.jsx';
-import { Icon, ICONS } from './shared.jsx';
+import { Icon, ICONS, ConfirmModal } from './shared.jsx';
 
 export default function PerformPage({ songs, setSongs, edges, session, setSession, venueName, goUpload, onLoadExample }) {
   const rf = useReactFlow();
@@ -18,38 +19,22 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
   const [layoutMode, setLayoutMode] = useState('manual'); // 'manual' | 'auto'
   const [hoveredId, setHoveredId] = useState(null);
   const searchInputRef = useRef(null);
-
-  const [stagedId, setStagedId] = useState(null);
-  const [stagedMode, setStagedMode] = useState('cut'); // 'transition' | 'cut'
-  const [stagedEdgeId, setStagedEdgeId] = useState(null); // which produced transition, when there's more than one
-  const [stagedStarting, setStagedStarting] = useState('cut');
-
-  useEffect(() => { setStagedId(null); }, [session.nowPlayingId]);
+  const [endSetModalOpen, setEndSetModalOpen] = useState(false);
+  const [endSetEnding, setEndSetEnding] = useState('cut');
 
   const hasStarted = session.nowPlayingId !== null;
   const visibleEdges = useMemo(() => getVisibleEdges(edges), [edges]);
   const transitionEdgesRaw = useMemo(() => visibleEdges.filter(e => e.type === 'transition'), [visibleEdges]);
+  const isTransitionMode = session.nextMode === 'transition';
 
-  const reach = useMemo(
-    () => hasStarted
-      ? computeReachability(songs, visibleEdges, session.nowPlayingId, session.queue)
-      : { fromId: null, tier1: new Set(Object.keys(songs)) },
-    [songs, visibleEdges, hasStarted, session.nowPlayingId, session.queue]
+  const fromId = useMemo(
+    () => (hasStarted ? queueTailId(session.nowPlayingId, session.queue) : null),
+    [hasStarted, session.nowPlayingId, session.queue]
   );
-  const { fromId, tier1 } = reach;
 
   const usedIds = useMemo(() => new Set([session.nowPlayingId, ...session.queue.map(q => q.id)]), [session.nowPlayingId, session.queue]);
-  const laterIds = useMemo(
-    () => stagedId ? oneHopReachable(visibleEdges, stagedId, new Set([...usedIds, ...tier1])) : new Set(),
-    [stagedId, visibleEdges, usedIds, tier1]
-  );
 
   const findEdge = useCallback((pred) => visibleEdges.find(pred), [visibleEdges]);
-  // Two songs can have more than one produced transition between them —
-  // Add Audio never de-dupes, and Library already lists every one. Collect
-  // all of them here rather than just the first, so none are silently
-  // unreachable in Perform.
-  const findEdges = useCallback((pred) => visibleEdges.filter(pred), [visibleEdges]);
 
   const ioById = useMemo(() => {
     const m = {};
@@ -57,55 +42,120 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     return m;
   }, [songs, edges]);
 
-  function optionsFor(id) {
-    if (id === END) {
-      const outroEdge = findEdge(e => e.type === 'outro' && e.l === fromId);
-      return { id, title: 'End Set', outroEdge };
+  const hasOutroForPlaying = !!findEdge(e => e.type === 'outro' && e.l === session.nowPlayingId);
+
+  // An outro chosen for a previous song doesn't necessarily carry over —
+  // fall back to a hard cut the moment the new Now Playing doesn't have one,
+  // rather than silently disabling an ending that's still "selected".
+  useEffect(() => {
+    if (session.nextMode === 'outro' && !hasOutroForPlaying) {
+      setSession(prev => (prev.nextMode === 'outro' ? { ...prev, nextMode: 'cut' } : prev));
     }
-    const s = songs[id];
-    const transitionEdges = findEdges(e => e.type === 'transition' && e.l === fromId && e.r === id);
-    const introEdge = findEdge(e => e.type === 'intro' && e.r === id);
-    return { id, title: s.title, artist: s.artist, coverUrl: s.coverUrl, transitionEdges, transitionEdge: transitionEdges[0] || null, introEdge };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.nowPlayingId, hasOutroForPlaying]);
+
+  // ---------------- the manual Next list: what the Playing card's mode toggle currently offers ----------------
+  function rowsFrom(candidateFromId, excludeIds) {
+    if (isTransitionMode) {
+      return transitionCandidates(visibleEdges, candidateFromId, excludeIds).map(e => {
+        const dest = songs[e.r];
+        return {
+          kind: 'transition', key: e.id, edgeId: e.id, label: e.label || null,
+          destId: e.r, destTitle: dest.title, destArtist: dest.artist, destCoverUrl: dest.coverUrl, destDurationSec: dest.durationSec,
+          outSeconds: e.outSeconds,
+        };
+      });
+    }
+    return cutCandidates(songs, excludeIds).map(id => {
+      const s = songs[id];
+      const hasIntro = !!findEdge(e => e.type === 'intro' && e.r === id);
+      return { kind: 'cut', key: id, destId: id, destTitle: s.title, destArtist: s.artist, destCoverUrl: s.coverUrl, destDurationSec: s.durationSec, hasIntro };
+    });
   }
 
-  function stage(id) {
-    if (id === session.nowPlayingId) return;
-    const qIdx = session.queue.findIndex(q => q.id === id);
-    if (qIdx >= 0) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, qIdx) })); setStagedId(null); return; }
-    if (!fromId) return;
-    if (id === END) { setStagedId(END); return; }
-    const transitionEdges = findEdges(e => e.type === 'transition' && e.l === fromId && e.r === id);
-    const introEdge = findEdge(e => e.type === 'intro' && e.r === id);
-    setStagedId(id);
-    setStagedMode(transitionEdges.length > 0 ? 'transition' : 'cut');
-    setStagedEdgeId(transitionEdges[0] ? transitionEdges[0].id : null);
-    setStagedStarting(introEdge ? 'intro' : 'cut');
+  const nowSong = hasStarted ? songs[session.nowPlayingId] : null;
+  const elapsed = nowSong ? nowSong.durationSec - session.timeLeft : 0;
+
+  const nextRows = useMemo(() => {
+    if (!hasStarted || !fromId) return [];
+    const rows = rowsFrom(fromId, usedIds);
+    if (!isTransitionMode) return rows.sort((a, b) => a.destTitle.localeCompare(b.destTitle));
+    // Real per-edge cue timing: candidates with time left on their own
+    // built cue float to the top, soonest first; a transition with no cue
+    // point yet never expires, so it sinks below the timed ones.
+    return rows.map(r => {
+      const hasCue = r.outSeconds != null;
+      const secondsLeft = hasCue ? Math.max(0, r.outSeconds - elapsed) : session.timeLeft;
+      const basisSec = hasCue ? r.outSeconds : (nowSong ? nowSong.durationSec : 210);
+      return { ...r, hasCue, secondsLeft, basisSec };
+    }).sort((a, b) => {
+      if (a.hasCue && b.hasCue) return a.secondsLeft - b.secondsLeft;
+      if (a.hasCue) return -1;
+      if (b.hasCue) return 1;
+      return 0;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasStarted, fromId, isTransitionMode, visibleEdges, usedIds, songs, nowSong, session.timeLeft]);
+
+  const nextCandidateIds = useMemo(() => new Set(nextRows.map(r => r.destId)), [nextRows]);
+
+  // Hover preview ("what would picking this lead to") — not a staged plan,
+  // just a look-ahead. Only shows once you're hovering an actual candidate.
+  const laterRows = useMemo(() => {
+    if (!hoveredId || !nextCandidateIds.has(hoveredId)) return [];
+    const excl = new Set([...usedIds, hoveredId]);
+    return rowsFrom(hoveredId, excl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoveredId, nextCandidateIds, usedIds, isTransitionMode, visibleEdges, songs]);
+  const laterCandidateIds = useMemo(() => new Set(laterRows.map(r => r.destId)), [laterRows]);
+
+  // ---------------- committing a pick — always immediate, no separate stage/confirm step ----------------
+  function commitTransition(edgeId, destId) {
+    setSession(prev => ({ ...prev, queue: [...prev.queue, { id: destId, mode: 'transition', edgeId }] }));
+  }
+  function commitCutOrOutro(destId) {
+    const introEdge = findEdge(e => e.type === 'intro' && e.r === destId);
+    setSession(prev => ({
+      ...prev,
+      queue: [...prev.queue, { id: destId, mode: 'cut', ending: prev.nextMode === 'outro' ? 'outro' : 'cut', starting: introEdge ? 'intro' : 'cut' }],
+    }));
+  }
+  function commitRow(row) {
+    if (row.kind === 'transition') commitTransition(row.edgeId, row.destId);
+    else commitCutOrOutro(row.destId);
+  }
+  function commitForId(id) {
+    if (isTransitionMode) {
+      const edge = transitionCandidates(visibleEdges, fromId, usedIds).find(e => e.r === id);
+      if (edge) commitTransition(edge.id, id);
+    } else if (nextCandidateIds.has(id)) {
+      commitCutOrOutro(id);
+    }
   }
 
-  function commitStaged() {
-    if (!stagedId) return;
-    if (stagedId === END) {
-      setSession(prev => ({ ...prev, queue: [...prev.queue, { id: END, ending: prev.endingChoice }] }));
-      setStagedId(null);
-      return;
-    }
-    const item = stagedMode === 'transition'
-      ? { id: stagedId, mode: 'transition', edgeId: stagedEdgeId }
-      : { id: stagedId, mode: 'cut', ending: session.endingChoice, starting: stagedStarting };
-    setSession(prev => ({ ...prev, queue: [...prev.queue, item] }));
-    setStagedId(null);
+  function setNextMode(mode) { setSession(prev => ({ ...prev, nextMode: mode })); }
+
+  // End Set never sits in the ordinary Next list — it's reachable only from
+  // a low-key link plus a confirm modal, so it can't be picked by accident
+  // the way one more click through a scrolling list could.
+  function requestEndSet() {
+    setEndSetEnding(session.nextMode === 'outro' && hasOutroForPlaying ? 'outro' : 'cut');
+    setEndSetModalOpen(true);
+  }
+  function confirmEndSet() {
+    setSession(prev => ({ ...prev, queue: [...prev.queue, { id: END, ending: endSetEnding }] }));
+    setEndSetModalOpen(false);
   }
 
   function startSet(songId, starting) {
     const song = songs[songId];
     setSession(prev => ({
       ...prev, nowPlayingId: songId, startMethod: starting,
-      queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, endingChoice: 'cut',
+      queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition',
     }));
   }
   function togglePlaying() { setSession(prev => ({ ...prev, isPlaying: !prev.isPlaying })); }
-  function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, endingChoice: 'cut', autoHistory: [] })); }
-  function setEndingChoice(choice) { setSession(prev => ({ ...prev, endingChoice: choice })); }
+  function resumeSet() { setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, nextMode: 'transition', autoHistory: [] })); }
   function removeQueueFrom(index) { setSession(prev => ({ ...prev, queue: prev.queue.slice(0, index) })); }
   // Skip just one queued song, keeping the plan after it — the hop into
   // whatever was next gets recomputed against its new predecessor (see
@@ -113,7 +163,7 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
   function removeQueueOne(index) {
     setSession(prev => ({ ...prev, queue: removeQueueItem(prev.queue, index, prev.nowPlayingId, visibleEdges) }));
   }
-  // the manual "Next song" button — same rule the set-clock's timer uses (advanceSession, core.js)
+  // the manual skip button — same rule the set-clock's timer uses (advanceSession, core.js)
   function skipNow() { setSession(prev => advanceSession(prev, songs, visibleEdges)); }
 
   // ---------------- layout: manual (stored x/y) or auto (dagre) ----------------
@@ -135,20 +185,20 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     if (id === session.nowPlayingId) return 'playing';
     if (queueIds[0] === id) return 'next';
     if (queueIds.slice(1).includes(id)) return 'later';
-    if (tier1.has(id)) return 'next';
-    if (laterIds.has(id)) return 'later';
+    if (nextCandidateIds.has(id)) return 'next';
+    if (laterCandidateIds.has(id)) return 'later';
     return null;
-  }, [session.nowPlayingId, queueIds, tier1, laterIds]);
+  }, [session.nowPlayingId, queueIds, nextCandidateIds, laterCandidateIds]);
 
   // ---------------- edges: tiered coloring, all solid, no per-edge labels ----------------
+  // Only meaningful in Transition mode — a cut/outro candidate isn't backed
+  // by a specific edge, so there's nothing on the canvas to highlight for it.
   const transitionEdges = useMemo(() => transitionEdgesRaw.map(e => {
     let tier = 'base';
-    if (e.l === fromId && tier1.has(e.r)) tier = 'next';
-    else if (e.l === stagedId && laterIds.has(e.r)) tier = 'later';
+    if (isTransitionMode && e.l === fromId && nextCandidateIds.has(e.r)) tier = 'next';
+    else if (isTransitionMode && hoveredId && e.l === hoveredId && laterCandidateIds.has(e.r)) tier = 'later';
     return { ...e, _tier: tier };
-  }), [transitionEdgesRaw, fromId, tier1, stagedId, laterIds]);
-
-  const hasOutroForPlaying = !!findEdge(e => e.type === 'outro' && e.l === session.nowPlayingId);
+  }), [transitionEdgesRaw, isTransitionMode, fromId, nextCandidateIds, hoveredId, laterCandidateIds]);
 
   // ---------------- search (Fuse.js) ----------------
   const fuse = useMemo(() => new Fuse(Object.values(songs), { keys: ['title', 'artist'], threshold: 0.35, ignoreLocation: true }), [songs]);
@@ -222,68 +272,32 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchActive, matches, matchIndex, hasStarted]);
 
-  // ---------------- hover-card data (same commit functions as the Sequence pane) ----------------
+  // ---------------- graph hover-card: one click, commits immediately ----------------
   const hoverCardFor = useCallback((id) => {
-    if (!hasStarted || hoveredId !== id || !tier1.has(id)) return null;
-    const opts = optionsFor(id);
-    const isStagedHere = stagedId === id;
+    if (!hasStarted || hoveredId !== id || !nextCandidateIds.has(id)) return null;
     return {
-      isStaged: isStagedHere, mode: stagedMode, hasTransition: !!opts.transitionEdge,
-      onStage: () => stage(id), onConfirm: commitStaged, onSetMode: setStagedMode,
+      label: isTransitionMode ? 'Set as next — transition' : session.nextMode === 'outro' ? 'Set as next — outro' : 'Set as next — cut',
+      onCommit: () => commitForId(id),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasStarted, hoveredId, tier1, stagedId, stagedMode, fromId, songs]);
+  }, [hasStarted, hoveredId, nextCandidateIds, isTransitionMode, session.nextMode, fromId, usedIds, visibleEdges]);
 
-  const nowSong = hasStarted ? songs[session.nowPlayingId] : null;
   const cueBarPct = nowSong && nowSong.durationSec ? Math.round((1 - session.timeLeft / nowSong.durationSec) * 100) : 0;
 
   // Spotify-style dual display: once we're within CROSSFADE_LOOKAHEAD_SEC of
   // the committed transition's real cue point, show both songs instead of
-  // just Playing. Only applies to a committed (queued) transition — staging
-  // something in Next is a preview, not a commitment, so it doesn't trigger this.
+  // just Playing.
   const queueHead = session.queue[0];
   const committedEdge = (queueHead && queueHead.mode === 'transition' && queueHead.edgeId)
     ? edges.find(e => e.id === queueHead.edgeId) : null;
   let mixingIntoSong = null, crossfadePct = 0;
   if (nowSong && queueHead && queueHead.mode === 'transition') {
     const triggerAt = committedEdge && committedEdge.outSeconds != null ? committedEdge.outSeconds : nowSong.durationSec;
-    const elapsed = nowSong.durationSec - session.timeLeft;
     if (triggerAt - elapsed <= 8) {
       mixingIntoSong = songs[queueHead.id] || null;
       crossfadePct = clamp(Math.round((1 - Math.max(0, triggerAt - elapsed) / 8) * 100), 0, 100);
     }
   }
-
-  // Each candidate's countdown is its own transition's cue point, not a
-  // shared clock: a built transition edge carries a real outSeconds (when
-  // should must-trigger by, in Now Playing's own timeline). Candidates with
-  // time still on their clock float to the top, soonest-expiring first;
-  // candidates with no timed transition (reachable only via a cut, which
-  // never expires) sink below them, since there's no urgency to a cut.
-  const nextRows = useMemo(() => {
-    const elapsed = nowSong ? nowSong.durationSec - session.timeLeft : 0;
-    const rows = Array.from(tier1).map(id => {
-      const opts = optionsFor(id);
-      const hasRealCue = !!(opts.transitionEdge && opts.transitionEdge.outSeconds != null);
-      // every row shows a countdown — a real per-edge cue point when one's
-      // been built, otherwise the shared "time left in Now Playing" clock
-      // as a sane default, never blank. basisSec is the countdown's 100%
-      // mark (the cue point itself, or the full song when there's no cue)
-      // so the drain bar always starts full and empties to zero right as
-      // the trigger fires.
-      const secondsLeft = hasRealCue ? Math.max(0, opts.transitionEdge.outSeconds - elapsed) : session.timeLeft;
-      const basisSec = hasRealCue ? opts.transitionEdge.outSeconds : (nowSong ? nowSong.durationSec : 210);
-      return { ...opts, secondsLeft, hasRealCue, basisSec };
-    });
-    return rows.sort((a, b) => {
-      if (a.hasRealCue && b.hasRealCue) return a.secondsLeft - b.secondsLeft;
-      if (a.hasRealCue) return -1;
-      if (b.hasRealCue) return 1;
-      return 0;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tier1, fromId, songs, nowSong, session.timeLeft]);
-  const laterRows = stagedId ? Array.from(laterIds).map(id => optionsFor(id)) : [];
 
   if (Object.keys(songs).length === 0) {
     return (
@@ -355,7 +369,8 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition} hoverCardFor={hoverCardFor}
-            onStageEnd={() => hasStarted && stage(END)} endQueued={queueIds.includes(END)}
+            onRequestEndSet={requestEndSet} endQueued={queueIds.includes(END)}
+            nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
           />
           <QueueBar songs={songs} nowPlayingId={session.nowPlayingId} queue={session.queue} autoHistory={session.autoHistory} onRemoveQueueItem={removeQueueFrom} onRemoveQueueItemOnly={removeQueueOne} />
         </div>
@@ -364,12 +379,30 @@ export default function PerformPage({ songs, setSongs, edges, session, setSessio
           songs={songs} session={session} venueName={venueName}
           hasStarted={hasStarted} nowSong={nowSong} cueBarPct={cueBarPct} hasOutroForPlaying={hasOutroForPlaying}
           mixingIntoSong={mixingIntoSong} crossfadePct={crossfadePct}
-          nextRows={nextRows} laterRows={laterRows} stagedId={stagedId} stagedMode={stagedMode} stagedEdgeId={stagedEdgeId}
-          onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onStartSet={startSet} onSetEndingChoice={setEndingChoice}
-          onStage={stage} onCommitStaged={commitStaged} onSetStagedMode={setStagedMode} onSetStagedEdgeId={setStagedEdgeId}
-          onSkipNext={skipNow}
+          nextRows={nextRows} laterRows={laterRows} setHoveredId={setHoveredId}
+          onTogglePlaying={togglePlaying} onResumeSet={resumeSet} onStartSet={startSet} onSetNextMode={setNextMode}
+          onCommitRow={commitRow} onSkipNext={skipNow} onRequestEndSet={requestEndSet}
         />
       </div>
+
+      {endSetModalOpen && (
+        <ConfirmModal
+          title="End the set?"
+          confirmLabel="End set" danger
+          onCancel={() => setEndSetModalOpen(false)}
+          onConfirm={confirmEndSet}
+        >
+          <div className="modal-sub">
+            {nowSong ? nowSong.title : 'Now Playing'} will {endSetEnding === 'outro' ? 'play its outro, then' : 'cut, and'} stop the set — nothing more queued after it.
+          </div>
+          {hasOutroForPlaying && (
+            <div className="seq-row-toggles segmented" style={{ marginTop: 10 }}>
+              <button className={'seq-toggle' + (endSetEnding === 'cut' ? ' active' : '')} onClick={() => setEndSetEnding('cut')}>Cut</button>
+              <button className={'seq-toggle' + (endSetEnding === 'outro' ? ' active' : '')} onClick={() => setEndSetEnding('outro')}>Outro</button>
+            </div>
+          )}
+        </ConfirmModal>
+      )}
     </div>
   );
 }

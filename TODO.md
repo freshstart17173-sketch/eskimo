@@ -41,11 +41,13 @@ Intro, Outro, BPM, Key, Cue); only the app's own states are simplified to
 these three, used consistently in code, UI copy, and this document:
 
 - **Playing** — the song live right now.
-- **Next** — reachable-now candidates (the graph's purple-outlined nodes,
-  the Sequence pane's first list); once one is armed it's the thing that
-  will actually play after Playing.
-- **Later** — what's reachable *after* whatever's staged in Next — a
-  two-move lookahead, not an open chain.
+- **Next** — reachable-now candidates (the graph's accent-outlined nodes,
+  the Sequence pane's card list); clicking one commits it immediately as
+  the thing that will actually play after Playing — there's no separate
+  staging step (round 4).
+- **Later** — a hover-only preview (not a staged plan) of what picking a
+  given Next candidate would lead to — a one-move lookahead, not an open
+  chain, and nothing is committed by it.
 - **Cut** — a hard edge with no fragment.
 
 ## Graph model — decided, don't revisit
@@ -204,6 +206,48 @@ Everything below came out of actually looking at this with an eye toward
 "would this read as sleek, minimalist, and obvious to someone who's never
 seen it" — the standard you asked for, benchmarked against the kind of
 apps this one takes inspiration from.
+
+### Done this pass (round 4 — Perform live-experience redesign)
+A direct user request to simplify the live mental model, implemented in
+full: (1) the Playing card's old 2-way "How it ends" (Cut/Outro) toggle is
+now a 3-way **Transition / Cut / Outro** toggle that alone decides what
+the Next list offers — Transition mode shows only built transitions (each
+produced transition is its own card); Cut/Outro mode shows every other
+song in the library, auto-starting via its intro edge when one exists.
+The old per-row Cut/Transition toggle on Next rows is gone entirely — one
+mode, one place it's chosen, no more "which cut is this" confusion.
+(2) Clicking a Next card commits it immediately — no more stage-then-
+"Set X as Next"-button two-step. (3) Next is one flat scrollable list of
+larger cards, no nested sub-lists; a transition's destination song is
+shown underneath its label, with a real countdown/drain bar and numeric
+cue time; a cut/outro card leads with the destination song and its own
+numeric length. "Later" is now a hover-only preview (not a staged plan)
+of what picking a given card would lead to. (4) End Set is gone from the
+list — reachable only from a low-key "End set…" link on the Playing card
+or the graph's End node, both routing through a real `ConfirmModal`
+(`shared.jsx`) with its own Cut/Outro pick. (5) The Playing node on the
+graph canvas now shows live numeric elapsed/total time, matching what the
+side panel's Playing card already showed. (6) "Next song →" is now an
+icon-only skip button.
+Under the hood: `session.endingChoice` ('cut'|'outro') became
+`session.nextMode` ('transition'|'cut'|'outro'), persisting across a set
+instead of resetting every song (an outro auto-falls back to cut if the
+new Now Playing has none). `core.js` gained `transitionCandidates`/
+`cutCandidates` (the two candidate-list builders, shared between the real
+Next list and the hover preview) and `queueTailId` (replacing
+`computeReachability`, whose `tier1` output is no longer needed now that
+candidates are computed directly); `oneHopReachable` was removed as dead
+code once staging went away. The graph's node hover-card collapsed from a
+two-step Stage/Confirm + mode toggle to one "Set as next" button, calling
+the same commit path the side panel cards use. Autoplay's own
+Settings-page "Transition-only" toggle is intentionally untouched — it
+governs autoplay's unattended dead-end fallback, a different concern from
+the manual Next list's new mode toggle, even though the two are easy to
+conflate by name.
+Verified end-to-end with Playwright against the real dev server: multiple
+transition cards per song pair, immediate commit on click, mode switching
+changing the list contents, the End Set modal from both entry points
+(link and graph node), and the graph node's live numeric position.
 
 ### Done this pass (round 3 — multi-transition picker, mixing-into, finished + verified)
 Answers the user's three questions: (1) multiple produced transitions

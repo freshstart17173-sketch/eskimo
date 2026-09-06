@@ -1,12 +1,13 @@
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
+import { fmtTime } from '../core.js';
 import { Icon, ICONS, AlbumArt } from './shared.jsx';
 
 // state is one of null | 'playing' | 'next' | 'later' — the only three
 // highlight treatments the graph uses now (no badge, no black-fill-means-
 // selected ambiguity).
 export function SongNode({ data }) {
-  const { song, state, dimmed, hovered, inCount, outCount, onEnter, onLeave, hoverCard, playing } = data;
+  const { song, state, dimmed, hovered, inCount, outCount, onEnter, onLeave, hoverCard, playing, position } = data;
   const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
   return (
     <div className={cls} onMouseEnter={onEnter} onMouseLeave={onLeave}>
@@ -27,23 +28,17 @@ export function SongNode({ data }) {
         <div className="node-io">↓{inCount} ↑{outCount}</div>
       </div>
       {playing && (
-        <div className="node-waveform"><span /><span /><span /><span /><span /></div>
+        <div className="node-playing-row">
+          <div className="node-waveform"><span /><span /><span /><span /><span /></div>
+          {position && <div className="node-position mono-num">{fmtTime(position.elapsed)} / {fmtTime(position.duration)}</div>}
+        </div>
       )}
 
       {hoverCard && (
         <div className="hover-card" onMouseEnter={onEnter} onMouseLeave={onLeave}>
           <div className="hover-card-title">{song.title}</div>
           <div className="hover-card-artist">{song.artist}</div>
-          <div className="hover-card-row">
-            <button className={'hover-toggle' + (hoverCard.isStaged ? ' active' : '')} onClick={hoverCard.onStage}>Stage</button>
-            <button className="hover-toggle" disabled={!hoverCard.isStaged} onClick={hoverCard.onConfirm}>Confirm</button>
-          </div>
-          {hoverCard.isStaged && (
-            <div className="hover-card-row segmented">
-              <button className={'hover-toggle' + (hoverCard.mode === 'transition' ? ' active' : '')} disabled={!hoverCard.hasTransition} onClick={() => hoverCard.onSetMode('transition')}>Trans.</button>
-              <button className={'hover-toggle' + (hoverCard.mode === 'cut' ? ' active' : '')} onClick={() => hoverCard.onSetMode('cut')}>Cut</button>
-            </div>
-          )}
+          <button className="hover-toggle hover-toggle-commit" onClick={hoverCard.onCommit}>{hoverCard.label}</button>
         </div>
       )}
     </div>

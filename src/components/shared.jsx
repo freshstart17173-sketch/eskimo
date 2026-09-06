@@ -25,6 +25,7 @@ export const ICONS = {
   grid: <><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></>,
   hand: <><path d="M8 13V5a1.5 1.5 0 0 1 3 0v6"></path><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"></path><path d="M14 11V6a1.5 1.5 0 0 1 3 0v8"></path><path d="M8 12l-1.5-1.5a1.5 1.5 0 0 0-2.3 1.9L7 17a6 6 0 0 0 5.5 3.3h1a6 6 0 0 0 6-6v-3"></path></>,
   search: <><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="20" y1="20" x2="15.5" y2="15.5"></line></>,
+  skip: <><polygon points="5,4 15,12 5,20" fill="currentColor"></polygon><rect x="17" y="4" width="2.5" height="16" fill="currentColor"></rect></>,
 };
 
 // A real cover thumbnail when a song has one (url), otherwise the same
@@ -98,6 +99,24 @@ export function CoverPicker({ url, onFile, size = 48 }) {
       />
       <AlbumArt className="cover-picker-art" style={{ width: size, height: size }} url={url} />
       <span className="cover-picker-label">{url ? 'Change cover' : 'Add cover'}</span>
+    </div>
+  );
+}
+
+// A real confirm dialog — centered, backdrop-blocking, deliberately harder
+// to trigger by accident than an inline row in a scrolling list. Used for
+// anything that should require an actual second step to happen (End Set).
+export function ConfirmModal({ title, children, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger, onConfirm, onCancel }) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-title">{title}</div>
+        {children}
+        <div className="modal-actions">
+          <button className="btn btn-ghost btn-sm" onClick={onCancel}>{cancelLabel}</button>
+          <button className={'btn btn-sm ' + (danger ? 'btn-danger' : 'btn-primary')} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
     </div>
   );
 }
