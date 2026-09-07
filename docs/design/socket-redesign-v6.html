@@ -1,0 +1,547 @@
+<title>Socket Dropdown Mockup v6</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+:root{
+  --ink:#131313; --paper:#fcfcfc; --panel:#efefef; --line:#c2c2c2; --line-soft:#dadada;
+  --muted:#454545; --faint:#6c6c6c; --very-faint:#a8a8a8;
+  --state-active:#24506b; --paper-fixed:#fcfcfc;
+  --accent:#7fb3d9; --accent-bg:#eaf3fa;
+  --card-shadow:0 1px 3px rgba(19,19,19,.14); --card-shadow-hover:0 4px 14px rgba(19,19,19,.14);
+  --radius:2px;
+  --font:'Jost','Avenir Next','Segoe UI',Arial,sans-serif;
+  --font-mono:'IBM Plex Mono','Drafting Mono',ui-monospace,'SF Mono',Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#f1f0ed; --paper:#1c1d20; --panel:#232427; --line:#47494e; --line-soft:#2c2e31;
+    --muted:#b7b8bd; --faint:#85878c; --very-faint:#5b5d62;
+    --accent-bg:#1c3040;
+    --card-shadow:0 1px 3px rgba(0,0,0,.55); --card-shadow-hover:0 4px 16px rgba(0,0,0,.55);
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#f1f0ed; --paper:#1c1d20; --panel:#232427; --line:#47494e; --line-soft:#2c2e31;
+  --muted:#b7b8bd; --faint:#85878c; --very-faint:#5b5d62;
+  --accent-bg:#1c3040;
+  --card-shadow:0 1px 3px rgba(0,0,0,.55); --card-shadow-hover:0 4px 16px rgba(0,0,0,.55);
+}
+
+*{box-sizing:border-box;}
+button{ background:none; border:0; color:inherit; font:inherit; cursor:pointer; }
+body{ background:var(--panel); color:var(--ink); font-family:var(--font); padding:40px 20px 80px; line-height:1.5; }
+.wrap{ max-width:1060px; margin:0 auto; }
+
+header{ margin-bottom:34px; display:flex; justify-content:space-between; gap:20px; align-items:flex-start; }
+.eyebrow{ font-family:var(--font-mono); font-size:10.5px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--faint); margin-bottom:8px; }
+h1{ font-size:26px; font-weight:700; margin:0 0 10px; letter-spacing:-.01em; text-wrap:balance; }
+.lede{ font-size:14px; color:var(--muted); max-width:660px; margin:0; }
+.theme-toggle{ flex:none; display:flex; align-items:center; gap:8px; font-size:11.5px; font-weight:600; color:var(--muted); background:var(--paper); border-radius:var(--radius); padding:7px 12px; box-shadow:var(--card-shadow); }
+.theme-toggle button{ font-weight:600; color:var(--ink); }
+.theme-toggle button:hover{ text-decoration:underline; }
+
+section{ margin-bottom:46px; }
+.section-title{ font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); margin:0 0 4px; }
+.section-sub{ font-size:12.5px; color:var(--muted); margin:0 0 18px; max-width:660px; }
+
+.changelog{ background:var(--paper); border-radius:6px; padding:14px 18px; margin-bottom:20px; box-shadow:var(--card-shadow); }
+.changelog + .changelog{ margin-top:-4px; }
+.changelog b.h{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin-bottom:8px; }
+.changelog ul{ margin:0; padding-left:18px; font-size:12.5px; color:var(--muted); }
+.changelog li{ margin-bottom:4px; }
+.changelog li b{ color:var(--ink); font-weight:600; }
+.changelog.history{ opacity:.72; margin-bottom:40px; }
+
+/* --------------------------------------------------------------
+   Legend — a real, live, continuously-sweeping bar, not swatches
+   -------------------------------------------------------------- */
+.legend{ display:flex; gap:28px; flex-wrap:wrap; }
+.legend-item{ display:flex; align-items:center; gap:10px; font-size:12.5px; }
+.legend-text b{ display:block; font-weight:600; }
+.legend-text span{ color:var(--faint); font-size:11.5px; }
+.legend-timing{ display:flex; gap:30px; flex-wrap:wrap; margin-top:14px; align-items:center; }
+.legend-bar-neutral{ width:70px; height:6px; border-radius:3px; background:var(--ink); }
+.legend-bar-track{ width:70px; height:6px; border-radius:3px; background:var(--line-soft); overflow:hidden; position:relative; }
+.legend-bar-fill{ position:absolute; inset:0; right:auto; animation:live-countdown 5s linear infinite; }
+@keyframes live-countdown{
+  0%   { width:100%; background:hsl(120,58%,40%); }
+  20%  { width:80%;  background:hsl(88,58%,42%); }
+  40%  { width:60%;  background:hsl(58,62%,45%); }
+  60%  { width:40%;  background:hsl(35,68%,47%); }
+  80%  { width:20%;  background:hsl(15,66%,47%); }
+  100% { width:0%;   background:hsl(4,62%,47%); }
+}
+
+.shape{ flex:none; }
+.shape-none{ width:15px; height:15px; background:var(--ink); border-radius:1px; }
+.shape-tri{ width:0; height:0; border-left:8px solid transparent; border-right:8px solid transparent; border-bottom:13.5px solid var(--ink); }
+.shape-circle{ width:15px; height:15px; border-radius:50%; background:var(--ink); }
+
+/* --------------------------------------------------------------
+   Node card — borderless now (shadow-only separation). Selected gets
+   a real outline ring; Active is its own fill colour — between the two,
+   a card never needs a border to read as "in some state".
+   -------------------------------------------------------------- */
+.gallery{ display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+.gallery-item{ display:flex; flex-direction:column; gap:10px; align-items:center; }
+.gallery-caption{ font-size:11px; color:var(--muted); text-align:center; max-width:230px; line-height:1.4; }
+.gallery-caption b{ color:var(--ink); }
+
+.node-card-outer{ position:relative; padding:0 16px; }
+.node-card{
+  width:224px; border-radius:var(--radius); padding:10px; background:var(--paper); color:var(--ink);
+  position:relative; cursor:default; box-shadow:var(--card-shadow); transition:box-shadow .14s ease;
+}
+.node-card:hover{ box-shadow:var(--card-shadow-hover); }
+.node-card.is-active{ background:var(--state-active); color:var(--paper-fixed); box-shadow:var(--card-shadow); }
+/* Selected: the outline this system uses instead of a border — a flat
+   accent ring via box-shadow (a real `border` would fight the same
+   corners a `border-radius` on a borderless card is trying to keep
+   clean, and box-shadow doesn't add to the box's own layout size). */
+.node-card.is-selected{ box-shadow:0 0 0 3px var(--accent), var(--card-shadow); }
+.node-card::after{ content:''; position:absolute; top:0; right:-4px; bottom:0; width:8px; cursor:ew-resize; }
+
+.node-header{ display:flex; gap:9px; margin-bottom:10px; }
+.node-header-text{ flex:1; min-width:0; display:flex; flex-direction:column; justify-content:space-between; }
+.node-title{ font-weight:600; font-size:13.5px; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.node-artist{ font-size:11px; color:var(--muted); line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.is-active .node-artist{ color:rgba(252,252,252,.7); }
+.node-art{ width:60px; height:60px; flex:none; border-radius:4px; background:var(--line-soft); }
+.node-tags{ display:flex; gap:4px; }
+.tag{ font-family:var(--font-mono); font-size:9.5px; font-weight:600; border:1px solid var(--ink); color:var(--ink); border-radius:2px; padding:1.5px 4px; line-height:1.4; }
+.is-active .tag{ border-color:rgba(252,252,252,.55); color:var(--paper-fixed); }
+
+.socket-section{ border-top:1px dashed var(--line); padding-top:8px; }
+.is-active .socket-section{ border-top-color:rgba(252,252,252,.25); }
+.socket-cols{ display:flex; gap:22px; }
+.socket-col{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; position:relative; }
+
+.socket-row{ position:relative; display:flex; align-items:center; gap:6px; height:22px; min-width:0; padding:0 4px; border-radius:3px; transition:background .12s ease; }
+.socket-col:first-child .socket-row{ padding-left:8px; }
+.socket-col:last-child .socket-row{ padding-right:8px; }
+.socket-row-right{ flex-direction:row-reverse; text-align:right; }
+
+/* No translate, no chevron — a flat background tint is the whole hover
+   affordance; a light `scale` on press (not a translate) is the only
+   click feedback left, centred so it never nudges the row sideways. */
+.socket-row.has-picker{ cursor:pointer; }
+.socket-row.has-picker:hover{ background:var(--panel); }
+.is-active .socket-row.has-picker:hover{ background:rgba(252,252,252,.1); }
+.socket-row.has-picker:active{ background:var(--line-soft); transform:scale(.98); }
+.is-active .socket-row.has-picker:active{ background:rgba(252,252,252,.18); }
+
+/* Every socket straddles the card's actual edge (a real connection
+   point, same spot the shipped app already puts one) and ALWAYS carries
+   the same grey border, connected or not — border says "this is a
+   socket", fill says "this is what's plugged into it". Not connected:
+   a neutral grey/panel fill. Connected: black ink (white on the dark
+   Active card) — never a color, never a missing border. Positioning is
+   unaffected by the card losing its own border above — sockets are
+   placed off `.socket-col`, not off the card edge itself. */
+.socket-shape{ flex:none; position:absolute; top:50%; transform:translateY(-50%); }
+.socket-col:first-child .socket-shape{ left:-16px; }
+.socket-col:last-child .socket-shape{ right:-16px; }
+
+.shape-none{ width:13px; height:13px; border-radius:1px; border:1.5px solid var(--line); background:var(--panel); }
+.socket-row.active .shape-none{ background:var(--ink); }
+.is-active .shape-none{ border-color:rgba(252,252,252,.4); }
+.is-active .socket-row.active .shape-none{ background:var(--paper-fixed); }
+
+/* Triangle can't take a CSS border directly (the whole shape IS border-
+   trick triangles) — a slightly larger grey triangle sits behind a
+   smaller inset one, so the grey rim reads the same as the square/
+   circle's real border. */
+.shape-tri{ width:0; height:0; border-left:7.5px solid transparent; border-right:7.5px solid transparent; border-bottom:13px solid var(--line); }
+.is-active .shape-tri{ border-bottom-color:rgba(252,252,252,.4); }
+.shape-tri::after{ content:''; position:absolute; left:1.8px; top:2px; width:0; height:0; border-left:5.7px solid transparent; border-right:5.7px solid transparent; border-bottom:10px solid var(--panel); }
+.socket-row.active .shape-tri::after{ border-bottom-color:var(--ink); }
+.is-active .socket-row.active .shape-tri::after{ border-bottom-color:var(--paper-fixed); }
+
+.shape-circle{ width:13px; height:13px; border-radius:50%; border:1.5px solid var(--line); background:var(--panel); }
+.socket-row.active .shape-circle{ background:var(--ink); }
+.is-active .shape-circle{ border-color:rgba(252,252,252,.4); }
+.is-active .socket-row.active .shape-circle{ background:var(--paper-fixed); }
+
+.socket-row-text{ font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; color:var(--very-faint); }
+.socket-row.active .socket-row-text{ color:var(--ink); font-weight:700; }
+.is-active .socket-row.active .socket-row-text{ color:var(--paper-fixed); }
+.is-active .socket-row:not(.active) .socket-row-text{ color:rgba(252,252,252,.4); }
+
+/* Whole-song progress bar — true black/white, not a flat grey: on the
+   normal (paper) card that's `var(--ink)` (flips with theme); on the
+   Active card, whose fill is a fixed dark blue in both themes, it's
+   always `var(--paper-fixed)` — same rule the card already uses for its
+   own title/tag text, just applied to this bar too. */
+.node-progress{ margin-top:9px; }
+.node-progress-track{ position:relative; height:5px; border-radius:3px; background:var(--line-soft); }
+.is-active .node-progress-track{ background:rgba(252,252,252,.22); }
+.node-progress-fill{ position:absolute; inset:0 auto 0 0; border-radius:3px; background:var(--ink); }
+.is-active .node-progress-fill{ background:var(--paper-fixed); }
+
+/* --------------------------------------------------------------
+   Shared "strip" styling — used ONLY in the picker and the detail pane
+   now, never on the node card itself. Anchored left, shrinking width:
+   drains right-to-left on screen, unconditionally, regardless of which
+   column or panel it's in — no more row-reverse flipping its direction.
+   -------------------------------------------------------------- */
+.timing-strip{ position:relative; height:3px; border-radius:2px; background:var(--line-soft); overflow:hidden; }
+.timing-strip-fill{ position:absolute; top:0; bottom:0; left:0; width:var(--pct,0%); }
+.timing-strip-fill.progress{ background:var(--ink); }
+
+/* --------------------------------------------------------------
+   Anatomy / picker
+   -------------------------------------------------------------- */
+.anatomy-row{ display:flex; gap:36px; align-items:flex-start; flex-wrap:wrap; margin-bottom:150px; }
+.anatomy-card-wrap{ position:relative; transform:scale(1.45); transform-origin:top left; width:340px; height:280px; }
+.callouts{ flex:1; min-width:250px; padding-top:6px; }
+.callout{ display:flex; gap:10px; margin-bottom:16px; align-items:flex-start; }
+.callout-num{ font-family:var(--font-mono); font-size:10.5px; font-weight:700; color:var(--paper-fixed); background:var(--ink); border-radius:50%; width:18px; height:18px; flex:none; display:flex; align-items:center; justify-content:center; margin-top:1px; }
+.callout-text b{ display:block; font-size:13px; margin-bottom:2px; }
+.callout-text span{ font-size:12px; color:var(--muted); line-height:1.5; }
+
+/* Aligned to its own column (the parent), not forced to match that
+   column's rendered width — a 200px popup off a much narrower row is
+   intentional, not a bug. */
+.socket-listbox{ position:absolute; top:calc(100% + 4px); width:200px; z-index:5; background:var(--paper); border-radius:5px; box-shadow:0 10px 26px rgba(0,0,0,.2); }
+.socket-col:first-child .socket-listbox{ left:0; }
+.socket-col:last-child .socket-listbox{ right:0; }
+.socket-option{ position:relative; display:flex; align-items:center; padding:8px 10px 9px; font-size:11.5px; border-bottom:1px solid var(--line-soft); text-align:left; flex-wrap:wrap; width:100%; }
+.socket-option:last-child{ border-bottom:none; }
+.socket-option .opt-name{ flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
+.socket-option .opt-time{ font-family:var(--font-mono); font-size:9.5px; color:var(--muted); flex:none; margin-left:8px; }
+.socket-option .timing-strip{ width:100%; margin-top:5px; }
+.socket-option.selected{ background:var(--panel); }
+.listbox-scroll-hint{ text-align:center; font-size:9.5px; color:var(--faint); padding:5px 0 6px; font-style:italic; }
+
+/* --------------------------------------------------------------
+   Detail pane — the strip lives here too now, since it's gone from the
+   node itself. Close button and play button now use the app's real
+   `.icon-btn`/button-reset recipes instead of ad hoc ones; section
+   titles are plain text (shapes stay on the node card only).
+   -------------------------------------------------------------- */
+.detail-pane-mock{ width:270px; border:1.5px solid var(--line); border-radius:var(--radius); background:var(--paper); padding:16px 14px; position:relative; }
+.icon-btn{ width:26px; height:26px; border-radius:var(--radius); background:var(--panel); display:flex; align-items:center; justify-content:center; color:var(--muted); flex:none; }
+.icon-btn:hover{ background:rgba(19,19,19,.08); }
+.dp-close{ position:absolute; top:10px; right:10px; }
+.dp-header{ display:flex; gap:10px; margin-bottom:12px; padding-right:22px; }
+.dp-art{ width:48px; height:48px; border-radius:5px; flex:none; background:linear-gradient(135deg,#a8a8b8,#4a4a5a); }
+.dp-title{ font-weight:700; font-size:15px; }
+.dp-artist{ font-size:12.5px; color:var(--muted); }
+.dp-tags{ display:flex; gap:5px; margin-bottom:14px; }
+.dp-play{ width:100%; display:flex; align-items:center; justify-content:center; gap:7px; background:var(--ink); color:var(--paper); border-radius:var(--radius); padding:9px; margin-bottom:18px; font-size:13px; font-weight:600; }
+.dp-play:hover{ filter:brightness(1.15); }
+.dp-section{ margin-bottom:16px; }
+.dp-section-title{ font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin-bottom:6px; }
+.dp-row{ display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:600; margin-bottom:5px; }
+.dp-row .dp-time{ font-family:var(--font-mono); font-size:10px; color:var(--muted); font-weight:500; }
+
+/* --------------------------------------------------------------
+   Bottom player bar — the real, shipped .player-bar/.player-bar-bottom,
+   ported verbatim (structure + CSS values) from styles.css/PerformPage.jsx
+   so this reference shows the whole picture, not just the node/detail UI.
+   -------------------------------------------------------------- */
+.player-bar-demo-wrap{ border-radius:var(--radius); overflow:hidden; box-shadow:var(--card-shadow); }
+.player-bar{ display:flex; align-items:center; gap:12px; padding:8px 14px; background:var(--panel); }
+.player-bar-now{ display:flex; align-items:center; gap:8px; min-width:0; flex:none; width:170px; }
+.player-bar-art{ width:32px; height:32px; flex:none; border-radius:4px; background:linear-gradient(135deg,#a8a8b8,#4a4a5a); }
+.player-bar-text{ min-width:0; }
+.player-bar-title{ font-weight:600; font-size:12.5px; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.player-bar-artist{ font-size:10.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.player-bar-time{ font-family:var(--font-mono); font-size:10.5px; color:var(--muted); flex:none; width:32px; }
+.player-bar-time:last-of-type{ text-align:right; }
+.player-bar-scrub{ flex:1; min-width:80px; }
+.player-bar .playhead-track{ position:relative; height:4px; border-radius:2px; background:rgba(19,19,19,.12); cursor:pointer; }
+:root[data-theme="dark"] .player-bar .playhead-track{ background:rgba(252,252,252,.16); }
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .player-bar .playhead-track{ background:rgba(252,252,252,.16); } }
+.playhead-fill{ position:absolute; left:0; top:0; bottom:0; border-radius:2px; background:var(--accent); pointer-events:none; }
+.playhead-scrubber{ position:absolute; top:50%; width:9px; height:9px; border-radius:50%; background:var(--paper); transform:translate(-50%,-50%); box-shadow:0 0 0 2px var(--accent); pointer-events:none; }
+.player-bar-next{ display:flex; align-items:center; gap:6px; flex:none; max-width:260px; min-width:0; }
+.player-bar-hop-type{ font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); white-space:nowrap; flex:none; }
+.player-bar-art-sm{ width:22px; height:22px; flex:none; border-radius:3px; background:linear-gradient(135deg,#8fa8c9,#3f5a7a); }
+.player-bar-next-title{ font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.player-bar-crossfade{ flex:none; width:20px; height:20px; border-radius:50%; background:conic-gradient(var(--accent) 42%, var(--line) 0); }
+
+footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Eskimo Studio — node/socket design reference</div>
+      <h1>Sockets, cards, and the bottom bar — kept in the repo</h1>
+      <p class="lede">Committed at <code>docs/design/socket-redesign-v6.html</code> so this doesn't get lost between sessions. Same node layout/fonts/sizes as v6 throughout — this round only touches: the progress bar's colour, card borders → borderless + a real Selected outline, hover cleanup, the detail pane's close/play buttons and section titles, and adds the real bottom player bar.</p>
+    </div>
+    <div class="theme-toggle">
+      Theme: <button id="themeBtn" type="button">system</button>
+    </div>
+  </header>
+
+  <div class="changelog">
+    <b class="h">Changed this round</b>
+    <ul>
+      <li><b>Progress bar is true black/white, not flat grey</b> — <code>var(--ink)</code> on a normal card (flips with theme automatically), <code>var(--paper-fixed)</code> (always white) on the Active card, since Active's fill is a fixed dark blue in both themes. Same rule the card already used for its own text.</li>
+      <li><b>Cards are borderless.</b> The look you liked on the Active card (no visible border because its border-color matched its own fill) is now how every state works — separation comes from a soft shadow instead, same recipe the app's own <code>.modal-card</code> already uses.</li>
+      <li><b>Selected is a new state: a flat accent-colour outline</b> (box-shadow ring, so it doesn't fight the border-radius a real border would). Active stays distinguished purely by its own fill colour — the two never need to look alike.</li>
+      <li><b>No chevron, no translate-on-hover anywhere.</b> Hover is a flat background tint only; a small centred scale is the only click feedback left, and that only fires on press, never on hover.</li>
+      <li><b>Detail pane close button is the real <code>.icon-btn</code></b> (26×26, panel background, <code>rgba(19,19,19,.08)</code> hover) with the actual shipped × icon, not a bespoke bordered square.</li>
+      <li><b>Detail pane play button has no native bevel</b> — added the app's real global button reset (<code>background:none;border:0;font:inherit</code>); without it a bare <code>&lt;button&gt;</code> keeps native chrome underneath a custom background, which is exactly what was showing through before.</li>
+      <li><b>Detail pane section titles are plain text</b> — the little shape icon next to "Input"/"Output" is gone; shapes stay on the node card only.</li>
+      <li><b>The real bottom player bar is included</b>, ported structurally from <code>PerformPage.jsx</code>/<code>styles.css</code> — now/next, scrub bar, crossfade dot, volume — so this reference shows the full picture, not just the graph-side UI.</li>
+      <li><b>A theme toggle</b> (top right) cycles system → light → dark so both themes are actually checkable here without touching OS settings.</li>
+    </ul>
+  </div>
+
+  <div class="changelog history">
+    <b class="h">Earlier history — changed v5 → v6</b>
+    <ul>
+      <li><b>Countdown/progress strip removed from the node card entirely</b> — a connected row on the node is just its shape and name now; the live state moved to the picker and the detail pane instead.</li>
+      <li><b>Drains right-to-left, always</b> — v5 accidentally drained toward each row's own socket, flipping direction between columns.</li>
+    </ul>
+  </div>
+
+  <section>
+    <div class="section-title">Shape + timing key</div>
+    <div class="legend">
+      <div class="legend-item"><div class="shape shape-none"></div><div class="legend-text"><b>None</b><span>square</span></div></div>
+      <div class="legend-item"><div class="shape shape-tri"></div><div class="legend-text"><b>Intro (left) / Outro (right)</b><span>equilateral triangle, point up</span></div></div>
+      <div class="legend-item"><div class="shape shape-circle"></div><div class="legend-text"><b>Transition</b><span>circle</span></div></div>
+    </div>
+    <div class="legend-timing">
+      <div class="legend-item">
+        <div class="legend-bar-track"><div class="legend-bar-fill"></div></div>
+        <div class="legend-text"><b>Countdown</b><span>live — actually watch it drain and sweep</span></div>
+      </div>
+      <div class="legend-item"><div class="legend-bar-neutral"></div><div class="legend-text"><b>Progress</b><span>var(--ink) / var(--paper-fixed) — no hue, no grey</span></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">The node card — borderless, three states</div>
+    <p class="section-sub">Idle and Selected are the same paper background — only the outline (or its absence) tells them apart. Active is a completely different fill colour, no border needed at all.</p>
+    <div class="gallery">
+      <div class="gallery-item">
+        <div class="node-card-outer">
+          <div class="node-card" style="width:224px;">
+            <div class="node-header">
+              <div class="node-header-text">
+                <div><div class="node-title">Horizon Drift</div><div class="node-artist">Nomi Sato</div></div>
+                <div class="node-tags"><span class="tag">124 BPM</span><span class="tag">A min</span></div>
+              </div>
+              <div class="node-art" style="background:linear-gradient(135deg,#8fa8c9,#3f5a7a)"></div>
+            </div>
+            <div class="socket-section">
+              <div class="socket-cols">
+                <div class="socket-col">
+                  <div class="socket-row"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row active"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Intro</span></div>
+                  <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
+                </div>
+                <div class="socket-col">
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Outro</span></div>
+                  <div class="socket-row active socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Concrete Bloom</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="gallery-caption"><b>Idle.</b> Shadow only — no border at rest.</div>
+      </div>
+      <div class="gallery-item">
+        <div class="node-card-outer">
+          <div class="node-card is-selected" style="width:224px;">
+            <div class="node-header">
+              <div class="node-header-text">
+                <div><div class="node-title">Wire &amp; Rust</div><div class="node-artist">Ledger</div></div>
+                <div class="node-tags"><span class="tag">122 BPM</span><span class="tag">D min</span></div>
+              </div>
+              <div class="node-art" style="background:linear-gradient(135deg,#b98fc9,#5a3f7a)"></div>
+            </div>
+            <div class="socket-section">
+              <div class="socket-cols">
+                <div class="socket-col">
+                  <div class="socket-row"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row active"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Intro</span></div>
+                  <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
+                </div>
+                <div class="socket-col">
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row active socket-row-right"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Outro</span></div>
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="gallery-caption"><b>Selected.</b> A flat accent outline — this is what "what the detail pane is showing" looks like now, in place of a border.</div>
+      </div>
+      <div class="gallery-item">
+        <div class="node-card-outer">
+          <div class="node-card is-active" style="width:224px;">
+            <div class="node-header">
+              <div class="node-header-text">
+                <div><div class="node-title">Concrete Bloom</div><div class="node-artist">Ledger</div></div>
+                <div class="node-tags"><span class="tag">128 BPM</span><span class="tag">F♯ min</span></div>
+              </div>
+              <div class="node-art" style="background:linear-gradient(135deg,#c9a98f,#7a4f3f)"></div>
+            </div>
+            <div class="socket-section">
+              <div class="socket-cols">
+                <div class="socket-col">
+                  <div class="socket-row"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row active"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Intro</span></div>
+                  <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
+                </div>
+                <div class="socket-col">
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Outro</span></div>
+                  <div class="socket-row active socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Glass Static</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="node-progress"><div class="node-progress-track"><div class="node-progress-fill" style="width:34%"></div></div></div>
+          </div>
+        </div>
+        <div class="gallery-caption"><b>Active.</b> No outline, no border — the fill colour alone is the "different colour" that says this one's playing. Progress bar is white here, black on the two paper cards above.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Opening a picker</div>
+    <p class="section-sub">Aligned to its own column, sized to fit its content — not forced to match the row's own width. Flat hover tint only, no chevron, no sideways nudge.</p>
+    <div class="anatomy-row">
+      <div class="anatomy-card-wrap">
+        <div class="node-card" style="width:224px;">
+          <div class="node-header">
+            <div class="node-header-text">
+              <div><div class="node-title">Glass Static</div><div class="node-artist">Rook &amp; Vale</div></div>
+              <div class="node-tags"><span class="tag">126 BPM</span><span class="tag">G min</span></div>
+            </div>
+            <div class="node-art" style="background:linear-gradient(135deg,#a8a8b8,#4a4a5a)"></div>
+          </div>
+          <div class="socket-section">
+            <div class="socket-cols">
+              <div class="socket-col">
+                <div class="socket-row"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
+                <div class="socket-row active"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Intro</span></div>
+                <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
+              </div>
+              <div class="socket-col">
+                <div class="socket-row socket-row-right"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
+                <div class="socket-row socket-row-right"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Outro</span></div>
+                <div class="socket-row active has-picker socket-row-right" style="position:relative;" tabindex="0">
+                  <span class="socket-shape shape-circle"></span><span class="socket-row-text">Late Return</span>
+                  <div class="socket-listbox">
+                    <div class="socket-option selected">
+                      <span class="opt-name">Late Return</span><span class="opt-time">0:08</span>
+                      <div class="timing-strip"><div class="legend-bar-fill" style="position:absolute;inset:0;right:auto;"></div></div>
+                    </div>
+                    <div class="socket-option">
+                      <span class="opt-name">Wire &amp; Rust</span><span class="opt-time">0:12</span>
+                      <div class="timing-strip"><div class="timing-strip-fill" style="--pct:71%; background:hsl(96,58%,41%);"></div></div>
+                    </div>
+                    <div class="listbox-scroll-hint">2 of 2 — scrolls if more</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="callouts">
+        <div class="callout"><div class="callout-num">1</div><div class="callout-text"><b>Live, watchable sweep</b><span>"Late Return" is the same animation as the legend — drains right to left while its colour moves through the whole green→red range continuously.</span></div></div>
+        <div class="callout"><div class="callout-num">2</div><div class="callout-text"><b>Aligned to the column, not row-width-locked</b><span>The popup sits flush with its own column's edge; its 200px width is independent of how wide the triggering row happens to be.</span></div></div>
+        <div class="callout"><div class="callout-num">3</div><div class="callout-text"><b>No chevron</b><span>The row's own hover/selected state is signal enough — a trailing ▾ was redundant next to a socket shape that already looks clickable.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Detail pane — real close/play buttons, plain-text sections</div>
+    <p class="section-sub">Same layout as before; the close button, play button, and section titles now match what's actually shipped.</p>
+    <div class="anatomy-row" style="margin-bottom:40px;">
+      <div class="detail-pane-mock">
+        <button class="dp-close icon-btn" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+        <div class="dp-header">
+          <div class="dp-art"></div>
+          <div><div class="dp-title">Glass Static</div><div class="dp-artist">Rook &amp; Vale</div></div>
+        </div>
+        <div class="dp-tags"><span class="tag">126 BPM</span><span class="tag">G min</span><span class="tag">3:51</span></div>
+        <button class="dp-play">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>
+          Play
+        </button>
+        <div class="dp-section">
+          <div class="dp-section-title">Input</div>
+          <div class="dp-row"><span>Intro</span></div>
+        </div>
+        <div class="dp-section" style="margin-bottom:0;">
+          <div class="dp-section-title">Output</div>
+          <div class="dp-row"><span>Late Return</span><span class="dp-time">0:08</span></div>
+          <div class="timing-strip"><div class="legend-bar-fill" style="position:absolute;inset:0;right:auto;"></div></div>
+        </div>
+      </div>
+      <div class="callouts">
+        <div class="callout"><div class="callout-num">1</div><div class="callout-text"><b>Real close button</b><span>The app's actual <code>.icon-btn</code> (26×26, panel background, same hover tint) with the shipped × icon — not a bespoke bordered square.</span></div></div>
+        <div class="callout"><div class="callout-num">2</div><div class="callout-text"><b>Real play button</b><span>Uses the app's global button reset, so there's no native browser bevel showing through the custom fill.</span></div></div>
+        <div class="callout"><div class="callout-num">3</div><div class="callout-text"><b>Plain-text section titles</b><span>No shape icon next to "Input"/"Output" — shapes are a node-card-only convention.</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Bottom player bar — the real, shipped thing</div>
+    <p class="section-sub">Structure and values ported directly from <code>PerformPage.jsx</code>/<code>styles.css</code>, not redesigned — included here so the reference covers the whole screen, not just the graph side.</p>
+    <div class="player-bar-demo-wrap">
+      <div class="player-bar">
+        <div class="player-bar-now">
+          <div class="player-bar-art"></div>
+          <div class="player-bar-text">
+            <div class="player-bar-title">Glass Static</div>
+            <div class="player-bar-artist">Rook &amp; Vale</div>
+          </div>
+        </div>
+        <button class="icon-btn" aria-label="Pause">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16"></rect><rect x="14" y="4" width="5" height="16"></rect></svg>
+        </button>
+        <button class="icon-btn" aria-label="Skip to next">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,4 15,12 5,20"></polygon><rect x="17" y="4" width="2.5" height="16"></rect></svg>
+        </button>
+        <span class="player-bar-time">1:42</span>
+        <div class="player-bar-scrub">
+          <div class="playhead-track"><div class="playhead-fill" style="width:44%"></div><div class="playhead-scrubber" style="left:44%"></div></div>
+        </div>
+        <span class="player-bar-time">3:51</span>
+        <div class="player-bar-next">
+          <span class="player-bar-hop-type">Transition</span>
+          <div class="player-bar-art-sm"></div>
+          <span class="player-bar-next-title">Late Return</span>
+          <span class="player-bar-crossfade" data-tooltip="42% mixed"></span>
+        </div>
+        <button class="icon-btn" aria-label="Volume" style="margin-left:auto;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="3,9 8,9 13,4 13,20 8,15 3,15"></polygon><path d="M16.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.6"></path></svg>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <footer>Static reference — colors/spacing pulled from the app's real design tokens (styles.css) and real component structure (PerformPage.jsx/GraphNodes.jsx) where they apply. The countdown sweep, picker hover/press, and theme toggle are real CSS/JS; nothing here is wired to actual audio or graph data.</footer>
+</div>
+
+<script>
+  (function () {
+    var order = ['system', 'light', 'dark'];
+    var i = 0;
+    var btn = document.getElementById('themeBtn');
+    btn.addEventListener('click', function () {
+      i = (i + 1) % order.length;
+      var mode = order[i];
+      btn.textContent = mode;
+      if (mode === 'system') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', mode);
+    });
+  })();
+</script>
