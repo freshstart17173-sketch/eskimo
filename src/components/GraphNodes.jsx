@@ -121,39 +121,70 @@ function CountdownRing({ cueOffsetSec, songId }) {
   );
 }
 
-// One row: a colored socket dot (a real React Flow `Handle`) plus its
-// fixed type label — "Transition"/"Intro"/"Outro" never renames itself to
-// whichever specific edge is wired underneath it, since that read as the
-// socket changing kind rather than just a choice under a stable one.
-// Every song shows the same three rows per side, always in the same order
-// (None, Intro/Outro, Transition) — a row this particular song can't use
-// (no produced edge) still renders, just greyed out and non-interactive,
-// so every node card has the same scannable shape instead of a variable
-// number of rows. Available dots (whether active or not) render the same
-// way — solid, filled with the type's color — with only a ring/glow added
-// for the active one; unavailable dots are flat grey. One dot style, one
-// position rule (straddling the card edge, same offset for every row),
-// applied everywhere, is the whole point — no socket looks like an
-// exception. Every *available* socket is drag-connectable, since
-// None/Outro on one song can link to None/Intro on a *different* song (a
-// plain click can't express which other song to link to); None/Intro/
-// Outro additionally toggle on a plain click, for marking a song's own
-// ending/starting style with no particular partner in mind (e.g. "this is
-// the last song, it just has an outro"). Transition is drag-only — two
-// songs only ever have a specific produced transition between them, never
-// a generic one to click into existence. Nesting the Handle inside a
-// `position: relative` row lets it center on *this row* (CSS resolves an
-// absolutely-positioned element against its nearest positioned ancestor,
-// not the whole node), so rows can stack via ordinary flexbox regardless
-// of how many there are.
-function SocketRow({ side, type, available, active, cueOffsetSec, songId, onToggle }) {
+// One row: a colored socket dot (a real React Flow `Handle`) plus a label
+// — normally the fixed type title ("Intro"/"Outro"/"Transition"), so a
+// row this particular song can't use (no produced edge) still renders,
+// just greyed out and non-interactive, giving every node card the same
+// scannable shape instead of a variable number of rows. Available dots
+// (whether active or not) render the same way — solid, filled with the
+// type's color — with only a ring/glow added for the active one;
+// unavailable dots are flat grey. One dot style, one position rule
+// (straddling the card edge, same offset for every row), applied
+// everywhere, is the whole point — no socket looks like an exception.
+// Every *available* socket is drag-connectable, since None/Outro on one
+// song can link to None/Intro on a *different* song (a plain click can't
+// express which other song to link to); None/Intro/Outro additionally
+// toggle on a plain click, for marking a song's own ending/starting style
+// with no particular partner in mind (e.g. "this is the last song, it
+// just has an outro"). Transition is drag-only — two songs only ever have
+// a specific produced transition between them, never a generic one to
+// click into existence. Nesting the Handle inside a `position: relative`
+// row lets it center on *this row* (CSS resolves an absolutely-positioned
+// element against its nearest positioned ancestor, not the whole node),
+// so rows can stack via ordinary flexbox regardless of how many there are.
+//
+// The *active* row for a slot with 2+ produced candidates (see
+// `*Options`) doubles as its own variant picker — the label swaps from
+// the fixed type title to the currently-picked candidate's own name (the
+// only case where a row's text isn't the fixed title: this is the same
+// name a separate trigger button used to show below the columns, just
+// relocated onto the row itself now that that trigger is gone), and
+// clicking the row (not the dot — the dot keeps its own toggle-click)
+// opens a listbox of the other candidates. A Transition row's dot has no
+// click handler at all, so the row's own click can't conflict with it.
+function SocketRow({ side, type, available, active, cueOffsetSec, songId, onToggle, options = [], selectedEdgeId, onSelectVariant }) {
   const isInput = side === 'left';
+  const hasPicker = !!(active && options.length > 1);
+  const [open, setOpen] = useState(false);
+  const rowRef = useRef(null);
+  useEffect(() => {
+    if (!hasPicker) setOpen(false);
+  }, [hasPicker]);
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDocMouseDown(e) {
+      if (rowRef.current && !rowRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocMouseDown, true);
+    return () => document.removeEventListener('mousedown', onDocMouseDown, true);
+  }, [open]);
+  const selected = hasPicker ? (options.find(o => o.id === selectedEdgeId) || options[0]) : null;
   const cls = [
     'node-socket-row', !isInput && 'node-socket-row-right',
     active && 'node-socket-row-active', !available && 'node-socket-row-unavailable',
+    hasPicker && 'node-socket-row-picker nodrag',
   ].filter(Boolean).join(' ');
   return (
-    <div className={cls}>
+    <div
+      className={cls} ref={rowRef}
+      role={hasPicker ? 'button' : undefined} tabIndex={hasPicker ? 0 : undefined}
+      onMouseDown={hasPicker ? (e) => e.stopPropagation() : undefined}
+      onClick={hasPicker ? (e) => { e.stopPropagation(); setOpen(o => !o); } : undefined}
+      onKeyDown={hasPicker ? (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault(); e.stopPropagation(); setOpen(o => !o);
+      } : undefined}
+    >
       <Handle
         type={isInput ? 'target' : 'source'} position={isInput ? Position.Left : Position.Right}
         id={side + '-' + type} isConnectable={available}
@@ -164,77 +195,37 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
         ].filter(Boolean).join(' ')}
         onClick={(!available || type === 'transition') ? undefined : (e) => { e.stopPropagation(); onToggle(side, type); }}
       />
-      <span className="node-socket-label">{SOCKET_TITLE[type]}</span>
+      <span className="node-socket-label">{hasPicker ? selected.label : SOCKET_TITLE[type]}</span>
       {active && cueOffsetSec != null && songId != null && <CountdownRing cueOffsetSec={cueOffsetSec} songId={songId} />}
+      {open && (
+        <div className="node-socket-listbox" onMouseDown={(e) => e.stopPropagation()}>
+          {options.map((opt) => (
+            <button
+              key={opt.id} type="button"
+              className={'node-socket-option' + (opt.id === selectedEdgeId ? ' node-socket-option-selected' : '')}
+              onClick={(e) => { e.stopPropagation(); onSelectVariant(opt.id); setOpen(false); }}
+            >
+              <span className="node-socket-option-label">{opt.label}</span>
+              {songId != null && opt.outSeconds != null && <CountdownRing cueOffsetSec={opt.outSeconds} songId={songId} />}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function SocketList({ side, types, availability, active, onToggle, cueOffsetSec, songId }) {
+function SocketList({ side, types, availability, active, onToggle, cueOffsetSec, songId, options, selectedEdgeId, onSelectVariant }) {
   return (
     <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
       {types.map((type) => (
         <SocketRow
           key={type} side={side} type={type} available={!!availability[type]} active={active === type}
           cueOffsetSec={active === type ? cueOffsetSec : null} songId={active === type ? songId : null} onToggle={onToggle}
+          options={active === type ? options : undefined} selectedEdgeId={active === type ? selectedEdgeId : undefined}
+          onSelectVariant={active === type ? onSelectVariant : undefined}
         />
       ))}
-    </div>
-  );
-}
-
-// The dropdown for switching between 2+ candidates on an active slot —
-// deliberately NOT squeezed into its column's half-width; Blender's own
-// socket dropdowns run the node's full width, which is what actually
-// makes a long transition/fragment name readable instead of truncated.
-// Renders below the two columns, one line per side that currently needs
-// one. A custom listbox, not a native `<select>`, specifically so the
-// *closed* candidates can carry their own live countdown ring too — a
-// native `<option>` can only ever hold plain text, which would hide
-// exactly the information ("which of these is coming up soonest") this
-// picker exists to surface at a glance.
-function SocketDropdown({ typeLabel, options, selectedEdgeId, songId, onSelectVariant }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    function onDocMouseDown(e) {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onDocMouseDown, true);
-    return () => document.removeEventListener('mousedown', onDocMouseDown, true);
-  }, [open]);
-  const selected = options.find(o => o.id === selectedEdgeId) || options[0];
-  return (
-    <div className="node-socket-dropdown-row nodrag" ref={rootRef}>
-      <span className="node-socket-dropdown-caption">{typeLabel}</span>
-      <div className="node-socket-select-wrap">
-        <button
-          type="button" className="node-socket-select"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
-        >
-          <span className="node-socket-select-label">{selected ? selected.label : ''}</span>
-          {selected && songId != null && selected.outSeconds != null && (
-            <CountdownRing cueOffsetSec={selected.outSeconds} songId={songId} />
-          )}
-          <span className="node-socket-select-chevron">▾</span>
-        </button>
-        {open && (
-          <div className="node-socket-listbox" onMouseDown={(e) => e.stopPropagation()}>
-            {options.map((opt) => (
-              <button
-                key={opt.id} type="button"
-                className={'node-socket-option' + (opt.id === selectedEdgeId ? ' node-socket-option-selected' : '')}
-                onClick={() => { onSelectVariant(opt.id); setOpen(false); }}
-              >
-                <span className="node-socket-option-label">{opt.label}</span>
-                {songId != null && opt.outSeconds != null && <CountdownRing cueOffsetSec={opt.outSeconds} songId={songId} />}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -295,22 +286,17 @@ export function SongNode({ data }) {
       )}
       <div className="node-socket-section">
         <div className="node-socket-columns">
-          <SocketList side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} active={leftActive} onToggle={onToggle} />
-          <SocketList side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} active={rightActive} onToggle={onToggle} cueOffsetSec={rightCueSeconds} songId={ringSongId} />
-        </div>
-        {leftOptions.length > 1 && (
-          <SocketDropdown
-            typeLabel={SOCKET_TITLE[leftActive]} options={leftOptions} selectedEdgeId={leftEdgeId}
+          <SocketList
+            side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} active={leftActive} onToggle={onToggle}
+            songId={ringSongId} options={leftOptions} selectedEdgeId={leftEdgeId}
             onSelectVariant={(edgeId) => onSelectVariant(song.id, 'left', edgeId)}
           />
-        )}
-        {rightOptions.length > 1 && (
-          <SocketDropdown
-            typeLabel={SOCKET_TITLE[rightActive]} options={rightOptions} selectedEdgeId={rightEdgeId}
-            songId={ringSongId}
+          <SocketList
+            side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} active={rightActive} onToggle={onToggle}
+            cueOffsetSec={rightCueSeconds} songId={ringSongId} options={rightOptions} selectedEdgeId={rightEdgeId}
             onSelectVariant={(edgeId) => onSelectVariant(song.id, 'right', edgeId)}
           />
-        )}
+        </div>
       </div>
     </div>
   );

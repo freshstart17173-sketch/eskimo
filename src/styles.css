@@ -675,8 +675,9 @@ a { color: var(--accent); }
 }
 .state-active .node-socket-section { border-top-color: rgba(252, 252, 252, .25); }
 /* The two label/dot columns — kept compact so the fixed three rows per
-   side never take much vertical space; a dropdown never lives in here,
-   it drops to its own full-width line below (see .node-socket-dropdown-row). */
+   side never take much vertical space; a variant picker opens directly
+   from whichever row is active (see .node-socket-row-picker below), not
+   as a separate line under both columns. */
 .node-socket-columns { display: flex; justify-content: space-between; gap: 10px; }
 /* Rows deliberately stretch to the *column's* full width on both sides
    (no align-items override here) rather than shrink-wrapping to their
@@ -707,38 +708,35 @@ a { color: var(--accent); }
 .state-active .node-socket-row-active .node-socket-label { color: var(--paper-fixed); }
 .state-active .node-socket-row-unavailable .node-socket-label { color: rgba(252, 252, 252, .3); }
 
-/* One full-width line per side that currently has 2+ produced candidates
-   for its active slot (see socketDataById's `*Options`) — deliberately
-   NOT squeezed into one column's half-width the way the socket rows
-   above are: a real transition/fragment name needs the room, matching
-   how Blender's own socket dropdowns run the full node width. `nodrag`
-   keeps a click/drag inside it from being read as a node-drag start. */
-.node-socket-dropdown-row { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
-.node-socket-dropdown-caption {
-  font-size: 9px; font-weight: 700; color: var(--muted); white-space: nowrap; flex: none;
-}
-.state-active .node-socket-dropdown-caption { color: rgba(252, 252, 252, .6); }
-.node-socket-select-wrap { position: relative; flex: 1; min-width: 0; }
-.node-socket-select {
-  display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0;
-  font-size: 10px; padding: 3px 5px; border-radius: 4px; text-align: left;
-  border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer;
-}
-.state-active .node-socket-select { background: rgba(252, 252, 252, .12); border-color: rgba(252, 252, 252, .35); color: var(--paper-fixed); }
-.node-socket-select-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.node-socket-select-chevron { flex: none; font-size: 8px; color: var(--muted); }
-.state-active .node-socket-select-chevron { color: rgba(252, 252, 252, .5); }
+/* A row whose active slot has 2+ produced candidates (see socketDataById's
+   `*Options`) is itself the variant-picker trigger — no separate control
+   below the columns, no chevron; the row's own hover/active tint is
+   signal enough that it's clickable (matches
+   docs/design/socket-redesign-v6.html's "no chevron" callout). `nodrag`
+   keeps the click from being read as a node-drag start. */
+.node-socket-row-picker { cursor: pointer; }
+.node-socket-row-picker:hover { background: var(--panel); }
+.state-active .node-socket-row-picker:hover { background: rgba(252, 252, 252, .1); }
+.node-socket-row-picker:active { background: var(--line-soft); }
+.state-active .node-socket-row-picker:active { background: rgba(252, 252, 252, .18); }
 
-/* The open listbox — an absolutely positioned overlay so it doesn't push
-   the node's own layout around, matching how a native <select> popup
-   behaves. Each row can carry its own live countdown ring (see
-   SocketDropdown in GraphNodes.jsx) — the whole point of building this
-   instead of a native <select>, which can only ever show plain text. */
+/* The open listbox — an absolutely positioned overlay anchored to the
+   *row* that opened it (mirroring .node-socket-row .node-socket's own
+   left/right split below: left-column rows anchor left, right-column
+   rows anchor right), so it doesn't push the node's own layout around.
+   Wide enough to hold a real transition/fragment name without truncating
+   — same reasoning as the old separate full-width row this replaces —
+   which means it can and does extend past its own row/column, same as a
+   native <select> popup wider than its trigger. Borderless/shadow, same
+   language as .node-card. Each option can carry its own live countdown
+   ring (see SocketRow in GraphNodes.jsx) — the whole point of building
+   this instead of a native <select>, which can only ever show plain text. */
 .node-socket-listbox {
-  position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 20;
-  background: var(--paper); border: 1px solid var(--line); border-radius: 5px;
+  position: absolute; top: calc(100% + 3px); left: 0; width: 190px; z-index: 20;
+  background: var(--paper); border-radius: 5px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .18); overflow: hidden auto; max-height: 160px;
 }
+.node-socket-row-right .node-socket-listbox { left: auto; right: 0; }
 .node-socket-option {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;
   width: 100%; padding: 5px 7px; font-size: 10px; color: var(--ink); text-align: left;
