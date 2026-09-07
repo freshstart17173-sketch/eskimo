@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useRef, useEffect } from 'r
 import { Handle, Position } from '@xyflow/react';
 import { fmtTime, LEFT_SOCKET_TYPES, RIGHT_SOCKET_TYPES } from '../core.js';
 import { engine } from '../audioEngine.js';
+import { usePlaybackFrame } from '../playbackControls.js';
 import { Icon, ICONS, AlbumArt } from './shared.jsx';
 
 // A real spectrum reading off the master bus (engine.getLevels), not a
@@ -82,20 +83,38 @@ const SOCKET_TITLE = { none: 'None', intro: 'Intro', outro: 'Outro', transition:
 // you the urgency before you even look at which edge is selected.
 const RING_WARN_WINDOW_SEC = 20;
 function clamp01(n) { return Math.max(0, Math.min(1, n)); }
-function CountdownRing({ remainingSec }) {
-  const pct = clamp01(remainingSec / RING_WARN_WINDOW_SEC);
-  const hue = 120 * pct;
-  const radius = 2.5, circumference = 2 * Math.PI * radius;
-  const dash = circumference * pct;
+const RING_RADIUS = 2.5, RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+// `cueOffsetSec` is the fixed cue point on `songId`'s own timeline (an
+// edge's outSeconds) — the only thing that varies is how much of it is
+// left, and that has to come from the engine's own clock every frame, the
+// same way the bottom scrub bar does (see usePlaybackFrame,
+// docs/playback-model.md sec 7), not from a once-a-second `elapsed` React
+// prop the way this used to work — that was the same 1Hz-stepping cause
+// as the old progress bar, just on a ring instead of a fill width. Written
+// straight to the SVG's own attributes through refs, never setState, so a
+// caller mounting/unmounting this (socket wiring changes, a hop happens)
+// is the only thing that ever triggers a real re-render.
+function CountdownRing({ cueOffsetSec, songId }) {
+  const svgRef = useRef(null);
+  const circleRef = useRef(null);
+  usePlaybackFrame((pos) => {
+    const remainingSec = (pos.phase === 'main' && pos.songId === songId) ? cueOffsetSec - pos.elapsedSec : null;
+    if (remainingSec == null) return;
+    const pct = clamp01(remainingSec / RING_WARN_WINDOW_SEC);
+    const hue = 120 * pct;
+    const dash = RING_CIRCUMFERENCE * pct;
+    if (circleRef.current) {
+      circleRef.current.setAttribute('stroke', `hsl(${hue}, 75%, 45%)`);
+      circleRef.current.setAttribute('stroke-dasharray', `${dash} ${RING_CIRCUMFERENCE}`);
+    }
+    if (svgRef.current) svgRef.current.setAttribute('aria-label', 'cue in ' + fmtTime(Math.max(0, Math.round(remainingSec))));
+  });
   return (
-    <svg
-      className="socket-countdown-ring" width={6} height={6} viewBox="0 0 7 7"
-      role="img" aria-label={'cue in ' + fmtTime(Math.max(0, Math.round(remainingSec)))}
-    >
-      <circle cx="3.5" cy="3.5" r={radius} className="socket-countdown-track" fill="none" />
+    <svg ref={svgRef} className="socket-countdown-ring" width={6} height={6} viewBox="0 0 7 7" role="img" aria-label="cue">
+      <circle cx="3.5" cy="3.5" r={RING_RADIUS} className="socket-countdown-track" fill="none" />
       <circle
-        cx="3.5" cy="3.5" r={radius} fill="none" strokeLinecap="round" strokeWidth="1"
-        stroke={`hsl(${hue}, 75%, 45%)`} strokeDasharray={`${dash} ${circumference}`}
+        ref={circleRef} cx="3.5" cy="3.5" r={RING_RADIUS} fill="none" strokeLinecap="round" strokeWidth="1"
         transform="rotate(-90 3.5 3.5)"
       />
     </svg>
@@ -127,7 +146,7 @@ function CountdownRing({ remainingSec }) {
 // absolutely-positioned element against its nearest positioned ancestor,
 // not the whole node), so rows can stack via ordinary flexbox regardless
 // of how many there are.
-function SocketRow({ side, type, available, active, remainingSec, onToggle }) {
+function SocketRow({ side, type, available, active, cueOffsetSec, songId, onToggle }) {
   const isInput = side === 'left';
   const cls = [
     'node-socket-row', !isInput && 'node-socket-row-right',
@@ -146,18 +165,18 @@ function SocketRow({ side, type, available, active, remainingSec, onToggle }) {
         onClick={(!available || type === 'transition') ? undefined : (e) => { e.stopPropagation(); onToggle(side, type); }}
       />
       <span className="node-socket-label">{SOCKET_TITLE[type]}</span>
-      {active && remainingSec != null && <CountdownRing remainingSec={remainingSec} />}
+      {active && cueOffsetSec != null && songId != null && <CountdownRing cueOffsetSec={cueOffsetSec} songId={songId} />}
     </div>
   );
 }
 
-function SocketList({ side, types, availability, active, onToggle, remainingSec }) {
+function SocketList({ side, types, availability, active, onToggle, cueOffsetSec, songId }) {
   return (
     <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
       {types.map((type) => (
         <SocketRow
           key={type} side={side} type={type} available={!!availability[type]} active={active === type}
-          remainingSec={active === type ? remainingSec : null} onToggle={onToggle}
+          cueOffsetSec={active === type ? cueOffsetSec : null} songId={active === type ? songId : null} onToggle={onToggle}
         />
       ))}
     </div>
@@ -174,7 +193,7 @@ function SocketList({ side, types, availability, active, onToggle, remainingSec 
 // native `<option>` can only ever hold plain text, which would hide
 // exactly the information ("which of these is coming up soonest") this
 // picker exists to surface at a glance.
-function SocketDropdown({ typeLabel, options, selectedEdgeId, elapsed, onSelectVariant }) {
+function SocketDropdown({ typeLabel, options, selectedEdgeId, songId, onSelectVariant }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
   useEffect(() => {
@@ -196,8 +215,8 @@ function SocketDropdown({ typeLabel, options, selectedEdgeId, elapsed, onSelectV
           onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
         >
           <span className="node-socket-select-label">{selected ? selected.label : ''}</span>
-          {selected && elapsed != null && selected.outSeconds != null && (
-            <CountdownRing remainingSec={selected.outSeconds - elapsed} />
+          {selected && songId != null && selected.outSeconds != null && (
+            <CountdownRing cueOffsetSec={selected.outSeconds} songId={songId} />
           )}
           <span className="node-socket-select-chevron">▾</span>
         </button>
@@ -210,7 +229,7 @@ function SocketDropdown({ typeLabel, options, selectedEdgeId, elapsed, onSelectV
                 onClick={() => { onSelectVariant(opt.id); setOpen(false); }}
               >
                 <span className="node-socket-option-label">{opt.label}</span>
-                {elapsed != null && opt.outSeconds != null && <CountdownRing remainingSec={opt.outSeconds - elapsed} />}
+                {songId != null && opt.outSeconds != null && <CountdownRing cueOffsetSec={opt.outSeconds} songId={songId} />}
               </button>
             ))}
           </div>
@@ -247,7 +266,11 @@ export function SongNode({ data }) {
   // Only the song actually playing has a live elapsed clock to count down
   // against — a wired-but-not-yet-playing outro/transition just shows its
   // dropdown with no ring, since "time left" means nothing until it starts.
-  const rightRemainingSec = (position && rightCueSeconds != null) ? (rightCueSeconds - position.elapsed) : null;
+  // `position` (nowPlayingId === this song) gates that; CountdownRing
+  // itself reads the actual live remaining time off the engine's own
+  // clock every frame (see its own comment) rather than a value computed
+  // here from `position.elapsed`, which only updates once a second.
+  const ringSongId = position ? song.id : null;
   return (
     <div className={cls} style={dynamicStyle} onMouseEnter={onEnter} onMouseLeave={onLeave} onClick={onSelect}>
       <div className="node-title-row">
@@ -273,7 +296,7 @@ export function SongNode({ data }) {
       <div className="node-socket-section">
         <div className="node-socket-columns">
           <SocketList side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} active={leftActive} onToggle={onToggle} />
-          <SocketList side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} active={rightActive} onToggle={onToggle} remainingSec={rightRemainingSec} />
+          <SocketList side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} active={rightActive} onToggle={onToggle} cueOffsetSec={rightCueSeconds} songId={ringSongId} />
         </div>
         {leftOptions.length > 1 && (
           <SocketDropdown
@@ -284,7 +307,7 @@ export function SongNode({ data }) {
         {rightOptions.length > 1 && (
           <SocketDropdown
             typeLabel={SOCKET_TITLE[rightActive]} options={rightOptions} selectedEdgeId={rightEdgeId}
-            elapsed={position ? position.elapsed : null}
+            songId={ringSongId}
             onSelectVariant={(edgeId) => onSelectVariant(song.id, 'right', edgeId)}
           />
         )}
