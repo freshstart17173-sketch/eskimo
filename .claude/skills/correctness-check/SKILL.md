@@ -15,8 +15,8 @@ right through the bug, because the bug and the test share the same wrong
 premise. Passing tests only prove the code does what its author *thought*
 it should do. That is a much weaker claim than "the code is correct", and
 treating it as the same claim is how the same class of bug keeps coming
-back after being "fixed" — the fix was to the code, not to the premise the
-tests are the code's own alibi rather than independent evidence.
+back after being "fixed" — the fix was to the code, not to the premise.
+The tests are the code's own alibi, not independent evidence.
 
 The fix is ordering, not effort: derive what's *actually* required before
 looking at what's *currently there*. If the spec comes from reading the
@@ -79,7 +79,37 @@ than expected" turn into scope creep.** A missing feature or an open
 design question is a finding to report, not an invitation to improvise an
 implementation for it in the same pass.
 
-**6. Persist the spec and the findings as a real doc in the repo, not just
+**6. Run a polish pass on each element right after building it — don't
+wait until everything's done to ask whether any of it is actually good.**
+"It satisfies the spec" and "it's actually the best this can be" are
+different claims; step 3 only checked the first one. For each fix or piece
+built, ask, in order:
+
+1. **Is this the best this particular thing can be?** Not "does it pass" —
+   is there a meaningfully better way a reasonably careful pass would
+   find?
+2. **Have I actually confirmed that** — checked how this problem is
+   normally solved (a search, established docs, a library's own
+   recommended pattern) — **or is "seems fine" doing the work of
+   "confirmed"?**
+   - **Genuinely confirmed, and it holds up** → done, move to the next
+     element. Don't manufacture polish that isn't needed.
+   - **Not confirmed, or the check turned up something better** → name
+     the specific improvement, however small, then weigh what it costs:
+     - **Cost is mostly time** → just make the improvement now, in this
+       pass — don't defer easy wins to a "someday" list where they never
+       happen.
+     - **Cost is mostly complexity** (it would pull in a new dependency,
+       pattern, or abstraction) → search for the *simplest* version of
+       that improvement rather than the most thorough one. Prefer
+       something established over something invented for the occasion —
+       inventing is usually where the next round of bugs comes from.
+     - **Cost is a real decision** (a genuine tradeoff someone should
+       choose between, not a technical call) → surface it explicitly,
+       same as an open design question in step 4 — don't pick one
+       silently just to keep moving.
+
+**7. Persist the spec and the findings as a real doc in the repo, not just
 as chat output.** The whole point is that the next person (or the next
 session) doesn't have to re-derive this from scratch, and doesn't quietly
 regress a fixed bug because the reasoning behind the fix lived only in a
