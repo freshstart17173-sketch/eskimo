@@ -1,0 +1,1044 @@
+<title>Eskimo Studio Atlas</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+/* =========================================================================
+   Tokens — the app's own (src/styles.css), not invented for this doc.
+   ========================================================================= */
+:root{
+  --ink:#131313; --paper:#fcfcfc; --panel:#efefef; --line:#c2c2c2; --line-soft:#dadada;
+  --muted:#454545; --faint:#6c6c6c; --very-faint:#a8a8a8;
+  --accent:#7fb3d9; --accent-bg:#eaf3fa; --accent-light:#bcdcef; --accent-ink:#16324a; --accent-text:#16324a;
+  --danger:#8a2f28; --danger-bg:#f7ece9;
+  --state-active:#24506b; --paper-fixed:#fcfcfc;
+  --sock-intro:#3f9e82; --sock-outro:#c98a3e; --sock-transition:#8b6fc9;
+  --card-shadow:0 1px 3px rgba(19,19,19,.14); --card-shadow-hover:0 4px 14px rgba(19,19,19,.14); --card-shadow-lg:0 10px 26px rgba(19,19,19,.16);
+  --radius:2px;
+  --font:'Jost','Avenir Next','Segoe UI',Arial,sans-serif;
+  --font-mono:'IBM Plex Mono','Drafting Mono',ui-monospace,'SF Mono',Consolas,monospace;
+  --canvas-bg:#f4f3f0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#f1f0ed; --paper:#1c1d20; --panel:#232427; --line:#47494e; --line-soft:#2c2e31;
+    --muted:#b7b8bd; --faint:#85878c; --very-faint:#5b5d62;
+    --accent-bg:#1c3040; --accent-light:#3d5972; --accent-text:#cfe6f5;
+    --danger:#e8a89c; --danger-bg:#3a201c;
+    --card-shadow:0 1px 3px rgba(0,0,0,.5); --card-shadow-hover:0 4px 16px rgba(0,0,0,.5); --card-shadow-lg:0 14px 34px rgba(0,0,0,.5);
+    --canvas-bg:#131416;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#f1f0ed; --paper:#1c1d20; --panel:#232427; --line:#47494e; --line-soft:#2c2e31;
+  --muted:#b7b8bd; --faint:#85878c; --very-faint:#5b5d62;
+  --accent-bg:#1c3040; --accent-light:#3d5972; --accent-text:#cfe6f5;
+  --danger:#e8a89c; --danger-bg:#3a201c;
+  --card-shadow:0 1px 3px rgba(0,0,0,.5); --card-shadow-hover:0 4px 16px rgba(0,0,0,.5); --card-shadow-lg:0 14px 34px rgba(0,0,0,.5);
+  --canvas-bg:#131416;
+}
+
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--panel); color:var(--ink); font-family:var(--font); font-size:14.5px; font-weight:500; line-height:1.5;}
+button{background:none; border:0; color:inherit; font:inherit; cursor:pointer;}
+input{font:inherit; color:inherit;}
+h1,h2,h3{text-wrap:balance; margin:0;}
+.mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
+::selection{background:var(--accent-light);}
+
+/* ---------- shell ---------- */
+.atlas{display:flex; align-items:flex-start;}
+.atlas-nav{
+  position:sticky; top:0; align-self:flex-start; height:100vh; width:200px; flex:none;
+  background:var(--paper); box-shadow:var(--card-shadow); padding:22px 16px; overflow-y:auto; z-index:20;
+}
+.atlas-brand{font-size:19px; font-weight:700; letter-spacing:.01em;}
+.atlas-brand span{display:block; font-size:9.5px; font-weight:600; letter-spacing:.22em; color:var(--faint); margin-top:1px;}
+.atlas-nav-caption{font-size:10.5px; color:var(--faint); margin:16px 0 14px; line-height:1.5;}
+.atlas-nav a{display:flex; align-items:baseline; gap:8px; padding:7px 9px; border-radius:var(--radius); font-size:12.5px; font-weight:600; color:var(--muted); text-decoration:none; margin-bottom:1px;}
+.atlas-nav a:hover{background:var(--panel); color:var(--ink);}
+.atlas-nav a.current{background:var(--ink); color:var(--paper);}
+.atlas-nav a .n{font-family:var(--font-mono); font-size:10px; font-weight:500; opacity:.55; width:14px; flex:none;}
+.atlas-theme-toggle{display:flex; align-items:center; gap:7px; font-size:11px; font-weight:600; color:var(--muted); background:var(--panel); border-radius:var(--radius); padding:7px 10px; margin-top:16px;}
+.atlas-theme-toggle button{font-weight:700; color:var(--ink);}
+.atlas-theme-toggle button:hover{text-decoration:underline;}
+
+.atlas-main{flex:1; min-width:0; padding:56px 64px 140px; max-width:1220px;}
+.atlas-intro{max-width:660px; margin-bottom:64px;}
+.atlas-eyebrow{font-family:var(--font-mono); font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--accent-ink); background:var(--accent-bg); display:inline-block; padding:4px 9px; border-radius:var(--radius); margin-bottom:16px;}
+.atlas-intro h1{font-size:36px; font-weight:700; letter-spacing:-.01em; margin-bottom:14px;}
+.atlas-intro p{font-size:14.5px; color:var(--muted); line-height:1.65; margin:0 0 11px;}
+.atlas-stats{display:flex; gap:10px; margin-top:24px; flex-wrap:wrap;}
+.atlas-stat{background:var(--paper); box-shadow:var(--card-shadow); border-radius:var(--radius); padding:12px 18px;}
+.atlas-stat b{display:block; font-family:var(--font-mono); font-size:21px; font-weight:600;}
+.atlas-stat span{font-size:10px; color:var(--faint); text-transform:uppercase; letter-spacing:.07em;}
+
+.atlas-section{margin-bottom:96px; scroll-margin-top:26px;}
+.atlas-section-head{max-width:660px; margin-bottom:26px;}
+.atlas-section-eyebrow{font-family:var(--font-mono); font-size:11px; font-weight:600; color:var(--faint); letter-spacing:.06em; text-transform:uppercase; display:block; margin-bottom:7px;}
+.atlas-section h2{font-size:25px; font-weight:700; margin-bottom:9px;}
+.atlas-section-desc{font-size:13.5px; color:var(--muted); line-height:1.65;}
+.atlas-subhead{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); margin:40px 0 4px;}
+.atlas-subhead:first-of-type{margin-top:30px;}
+.atlas-sub-desc{font-size:12.5px; color:var(--muted); margin:0 0 20px; max-width:640px;}
+
+/* ---------- surfaces on canvas-bg ---------- */
+.stage{background:var(--canvas-bg); border-radius:6px; padding:34px; position:relative;}
+.stage-tight{padding:0; overflow:hidden; border-radius:6px;}
+.stage-label{position:absolute; top:12px; left:16px; font-family:var(--font-mono); font-size:9.5px; color:var(--faint); letter-spacing:.03em;}
+.stage-label-r{position:absolute; top:12px; right:16px; font-family:var(--font-mono); font-size:9.5px; color:var(--faint); letter-spacing:.03em;}
+
+/* ---------- gallery / callouts (ported from the socket-redesign reference) ---------- */
+.gallery{display:flex; gap:30px; flex-wrap:wrap; align-items:flex-start;}
+.gallery-item{display:flex; flex-direction:column; gap:12px; align-items:center;}
+.gallery-caption{font-size:11.5px; color:var(--muted); text-align:center; max-width:230px; line-height:1.45;}
+.gallery-caption b{color:var(--ink);}
+
+.anatomy-row{display:flex; gap:40px; align-items:flex-start; flex-wrap:wrap;}
+.anatomy-stage{flex:none; position:relative;}
+.callouts{flex:1; min-width:260px; padding-top:8px;}
+.callout{display:flex; gap:11px; margin-bottom:18px; align-items:flex-start;}
+.callout-num{font-family:var(--font-mono); font-size:10.5px; font-weight:700; color:var(--paper-fixed); background:var(--ink); border-radius:50%; width:19px; height:19px; flex:none; display:flex; align-items:center; justify-content:center; margin-top:1px;}
+.callout-text b{display:block; font-size:13px; margin-bottom:2px;}
+.callout-text span{font-size:12px; color:var(--muted); line-height:1.55;}
+
+/* ---------- control index (the completionist map) ---------- */
+.control-grid{border-top:1px solid var(--line-soft); margin-top:8px;}
+.control-row{display:grid; grid-template-columns:230px 1fr; gap:20px; padding:12px 4px; border-bottom:1px solid var(--line-soft);}
+.control-row b{font-size:12.5px; font-weight:600;}
+.control-row .tag-mini{display:inline-block; font-family:var(--font-mono); font-size:8.5px; font-weight:600; letter-spacing:.03em; padding:1.5px 5px; border-radius:var(--radius); background:var(--panel); color:var(--faint); margin-left:7px; vertical-align:1px;}
+.control-row p{font-size:12.5px; color:var(--muted); line-height:1.6; margin:3px 0 0;}
+
+/* ---------- buttons / atoms shared across mockups (real recipes) ---------- */
+.icon-btn{width:26px; height:26px; border-radius:var(--radius); background:var(--panel); display:flex; align-items:center; justify-content:center; color:var(--muted); flex:none;}
+.icon-btn:hover{background:rgba(19,19,19,.08);}
+:root[data-theme="dark"] .icon-btn:hover, .darkscope .icon-btn:hover{background:rgba(252,252,252,.1);}
+.btn{font-size:13px; font-weight:600; padding:7px 14px; border-radius:var(--radius);}
+.btn-primary{background:var(--ink); color:var(--paper);}
+.btn-primary:hover{filter:brightness(1.15);}
+.btn-ghost{background:var(--panel); color:var(--ink);}
+.btn-ghost:hover{background:var(--line-soft);}
+.btn-accent{background:var(--accent); color:var(--accent-ink);}
+.btn-danger{background:var(--danger); color:#fff;}
+.btn-sm{font-size:12px; padding:5px 10px;}
+.tag{font-family:var(--font-mono); font-size:9.5px; font-weight:600; border:1px solid var(--ink); color:var(--ink); border-radius:2px; padding:1.5px 4px; line-height:1.4; display:inline-flex;}
+.input{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:8px 11px; font-size:12.5px; color:var(--ink); width:100%;}
+.input:focus{outline:2px solid var(--accent-light); outline-offset:-1px;}
+.switch{width:36px; height:20px; border-radius:20px; background:var(--line); position:relative; flex:none; transition:background .15s;}
+.switch i{position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--paper); transition:left .15s;}
+.switch.on{background:var(--ink);}
+.switch.on i{left:18px;}
+.segmented{display:flex; border-radius:var(--radius); overflow:hidden; box-shadow:var(--card-shadow); background:var(--paper);}
+.segmented button{padding:7px 13px; font-size:11.5px; font-weight:600; color:var(--muted);}
+.segmented button.active{background:var(--ink); color:var(--paper);}
+.art{flex:none; border-radius:4px; background-size:cover;}
+.art-1{background:linear-gradient(135deg,#8fa8c9,#3f5a7a);}
+.art-2{background:linear-gradient(135deg,#c9a98f,#7a4f3f);}
+.art-3{background:linear-gradient(135deg,#b98fc9,#5a3f7a);}
+.art-4{background:linear-gradient(135deg,#8fc9a3,#3f7a56);}
+.art-5{background:linear-gradient(135deg,#c98f8f,#7a3f3f);}
+.art-6{background:linear-gradient(135deg,#a8a8b8,#4a4a5a);}
+
+/* ---------- legend / live sweep (ported) ---------- */
+.legend-timing{display:flex; gap:34px; flex-wrap:wrap; align-items:center; margin-bottom:8px;}
+.legend-item{display:flex; align-items:center; gap:10px; font-size:12.5px;}
+.legend-text b{display:block; font-weight:600;}
+.legend-text span{color:var(--faint); font-size:11.5px;}
+.legend-bar-track{width:74px; height:6px; border-radius:3px; background:var(--line-soft); overflow:hidden; position:relative;}
+.legend-bar-fill{position:absolute; inset:0; right:auto; animation:live-countdown 5s linear infinite;}
+@keyframes live-countdown{
+  0%   { width:100%; background:hsl(120,58%,40%); }
+  20%  { width:80%;  background:hsl(88,58%,42%); }
+  40%  { width:60%;  background:hsl(58,62%,45%); }
+  60%  { width:40%;  background:hsl(35,68%,47%); }
+  80%  { width:20%;  background:hsl(15,66%,47%); }
+  100% { width:0%;   background:hsl(4,62%,47%); }
+}
+
+/* =========================================================================
+   Node card — ported directly from the socket-redesign-v6 reference:
+   borderless, shadow-elevated, three real states.
+   ========================================================================= */
+.node-card{width:224px; border-radius:var(--radius); padding:10px; background:var(--paper); color:var(--ink); position:relative; cursor:default; box-shadow:var(--card-shadow); transition:box-shadow .14s ease;}
+.node-card:hover{box-shadow:var(--card-shadow-hover);}
+.node-card.is-active{background:var(--state-active); color:var(--paper-fixed); box-shadow:var(--card-shadow);}
+.node-card.is-selected{box-shadow:0 0 0 3px var(--accent), var(--card-shadow);}
+.node-header{display:flex; gap:9px; margin-bottom:10px;}
+.node-header-text{flex:1; min-width:0; display:flex; flex-direction:column; justify-content:space-between;}
+.node-title{font-weight:600; font-size:13.5px; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.node-artist{font-size:11px; color:var(--muted); line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.is-active .node-artist{color:rgba(252,252,252,.7);}
+.node-art{width:56px; height:56px;}
+.node-tags{display:flex; gap:4px; align-items:center;}
+.is-active .tag{border-color:rgba(252,252,252,.55); color:var(--paper-fixed);}
+.node-io{font-family:var(--font-mono); font-size:9px; color:var(--faint); margin-left:auto;}
+.is-active .node-io{color:rgba(252,252,252,.5);}
+.node-wave{display:flex; align-items:flex-end; gap:2px; height:13px; margin:8px 0 -2px;}
+.node-wave i{width:2.5px; background:rgba(252,252,252,.85); border-radius:1px;}
+
+.socket-section{border-top:1px dashed var(--line); padding-top:8px; margin-top:9px;}
+.is-active .socket-section{border-top-color:rgba(252,252,252,.25);}
+.socket-cols{display:flex; gap:22px;}
+.socket-col{flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; position:relative;}
+.socket-row{position:relative; display:flex; align-items:center; gap:6px; height:22px; min-width:0; padding:0 4px; border-radius:3px;}
+.socket-col:first-child .socket-row{padding-left:8px;}
+.socket-col:last-child .socket-row{padding-right:8px;}
+.socket-row-right{flex-direction:row-reverse; text-align:right;}
+.socket-row.has-picker{cursor:pointer;}
+.socket-row.has-picker:hover{background:var(--panel);}
+.is-active .socket-row.has-picker:hover{background:rgba(252,252,252,.1);}
+.socket-shape{flex:none; position:absolute; top:50%; transform:translateY(-50%); width:13px; height:13px; border-radius:50%; border:1.5px solid var(--line); background:var(--panel);}
+.socket-col:first-child .socket-shape{left:-16px;}
+.socket-col:last-child .socket-shape{right:-16px;}
+.socket-row.active .socket-shape{background:var(--ink); border-color:var(--ink);}
+.is-active .socket-shape{border-color:rgba(252,252,252,.4);}
+.is-active .socket-row.active .socket-shape{background:var(--paper-fixed); border-color:var(--paper-fixed);}
+.socket-row-text{font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; color:var(--very-faint);}
+.socket-row.active .socket-row-text{color:var(--ink); font-weight:700;}
+.is-active .socket-row.active .socket-row-text{color:var(--paper-fixed);}
+.is-active .socket-row:not(.active) .socket-row-text{color:rgba(252,252,252,.4);}
+.node-progress{margin-top:9px;}
+.node-progress-track{position:relative; height:5px; border-radius:3px; background:var(--line-soft);}
+.is-active .node-progress-track{background:rgba(252,252,252,.22);}
+.node-progress-fill{position:absolute; inset:0 auto 0 0; border-radius:3px; background:var(--ink);}
+.is-active .node-progress-fill{background:var(--paper-fixed);}
+
+.timing-strip{position:relative; height:3px; border-radius:2px; background:var(--line-soft); overflow:hidden; margin-top:5px;}
+.timing-strip-fill{position:absolute; top:0; bottom:0; left:0; width:var(--pct,0%); background:var(--ink);}
+
+.socket-listbox{position:absolute; top:calc(100% + 4px); width:200px; z-index:6; background:var(--paper); border-radius:5px; box-shadow:var(--card-shadow-lg);}
+.socket-col:first-child .socket-listbox{left:0;}
+.socket-col:last-child .socket-listbox{right:0;}
+.socket-option{position:relative; display:flex; align-items:center; flex-wrap:wrap; padding:8px 10px 9px; font-size:11.5px; border-bottom:1px solid var(--line-soft); width:100%; text-align:left;}
+.socket-option:last-child{border-bottom:none;}
+.socket-option:hover{background:var(--panel);}
+.socket-option .opt-name{flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.socket-option .opt-time{font-family:var(--font-mono); font-size:9.5px; color:var(--muted); flex:none; margin-left:8px;}
+.socket-option .timing-strip{width:100%;}
+.socket-option.selected{background:var(--panel);}
+
+/* ---------- Start / End nodes ---------- */
+.pill-node{border-radius:var(--radius); padding:11px 14px; background:var(--paper); box-shadow:var(--card-shadow); font-size:11px; color:var(--faint); width:118px; text-align:left;}
+.pill-node-title{font-weight:700; color:var(--ink); font-size:11.5px; margin-bottom:3px; display:flex; align-items:center; gap:5px;}
+
+/* ---------- edges ---------- */
+.edge-ink{stroke:var(--ink);}
+.edge-grey{stroke:var(--line);}
+
+/* ---------- context menu (real interaction) ---------- */
+.ctx-menu{position:absolute; background:var(--paper); border-radius:var(--radius); box-shadow:var(--card-shadow-lg); padding:4px; font-size:12px; width:186px; z-index:10;}
+.ctx-item{padding:7px 10px; border-radius:var(--radius); display:block; width:100%; text-align:left;}
+.ctx-item:hover{background:var(--panel);}
+.ctx-item.danger{color:var(--danger);}
+.ctx-sep{height:1px; background:var(--line-soft); margin:4px 3px;}
+
+/* ---------- detail pane ---------- */
+.detail-pane{width:272px; border-radius:var(--radius); background:var(--paper); box-shadow:var(--card-shadow-lg); padding:16px 15px; position:relative;}
+.dp-close{position:absolute; top:10px; right:10px;}
+.dp-header{display:flex; gap:10px; margin-bottom:12px; padding-right:22px;}
+.dp-art{width:48px; height:48px; border-radius:5px; flex:none;}
+.dp-title{font-weight:700; font-size:15px;}
+.dp-artist{font-size:12.5px; color:var(--muted);}
+.dp-tags{display:flex; gap:5px; margin-bottom:14px;}
+.dp-play{width:100%; display:flex; align-items:center; justify-content:center; gap:7px; background:var(--ink); color:var(--paper); border-radius:var(--radius); padding:9px; margin-bottom:18px; font-size:13px; font-weight:600;}
+.dp-play:hover{filter:brightness(1.15);}
+.dp-section{margin-bottom:16px;}
+.dp-section-title{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin-bottom:6px;}
+.dp-row{display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:600; margin-bottom:5px;}
+.dp-row .dp-time{font-family:var(--font-mono); font-size:10px; color:var(--muted); font-weight:500;}
+
+/* ---------- player bar (ported, real values) ---------- */
+.player-bar-demo-wrap{border-radius:var(--radius); overflow:hidden; box-shadow:var(--card-shadow);}
+.player-bar{display:flex; align-items:center; gap:13px; padding:9px 15px; background:var(--panel); flex-wrap:wrap;}
+.player-bar-now{display:flex; align-items:center; gap:9px; min-width:0; flex:none; width:180px;}
+.player-bar-art{width:34px; height:34px; flex:none; border-radius:4px;}
+.player-bar-text{min-width:0;}
+.player-bar-title{font-weight:600; font-size:12.5px; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.player-bar-artist{font-size:10.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.player-bar-time{font-family:var(--font-mono); font-size:10.5px; color:var(--muted); flex:none; width:32px;}
+.player-bar-time:last-of-type{text-align:right;}
+.player-bar-scrub{flex:1; min-width:100px;}
+.playhead-track{position:relative; height:4px; border-radius:2px; background:rgba(19,19,19,.12); cursor:pointer;}
+:root[data-theme="dark"] .playhead-track{background:rgba(252,252,252,.16);}
+.playhead-fill{position:absolute; left:0; top:0; bottom:0; border-radius:2px; background:var(--accent); pointer-events:none;}
+.playhead-scrubber{position:absolute; top:50%; width:10px; height:10px; border-radius:50%; background:var(--paper); transform:translate(-50%,-50%); box-shadow:0 0 0 2px var(--accent); pointer-events:none;}
+.player-bar-next{display:flex; align-items:center; gap:6px; flex:none; max-width:260px; min-width:0;}
+.player-bar-hop-type{font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); white-space:nowrap; flex:none;}
+.player-bar-art-sm{width:22px; height:22px; flex:none; border-radius:3px;}
+.player-bar-next-title{font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+/* ---------- toolbar ---------- */
+.toolbar{display:flex; align-items:center; gap:9px; padding:10px 15px; background:var(--paper); box-shadow:var(--card-shadow); flex-wrap:wrap; border-radius:6px 6px 0 0;}
+.toolbar-btn{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; padding:7px 12px; border-radius:var(--radius); background:var(--panel); color:var(--ink); white-space:nowrap;}
+.toolbar-btn:hover{background:var(--line-soft);}
+.search-wrap{position:relative; width:210px;}
+.search-suggestions{position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--paper); border-radius:var(--radius); box-shadow:var(--card-shadow-lg); overflow:hidden; z-index:8;}
+.search-suggestion{display:flex; justify-content:space-between; gap:8px; width:100%; padding:8px 11px; font-size:12px; text-align:left;}
+.search-suggestion:hover{background:var(--panel);}
+.search-suggestion-artist{color:var(--faint); font-size:10.5px;}
+
+/* ---------- sidebar / shell ---------- */
+.shell-demo{display:flex; height:380px; border-radius:6px; overflow:hidden; box-shadow:var(--card-shadow);}
+.shell-sidebar{width:150px; flex:none; background:var(--paper); padding:18px 12px; display:flex; flex-direction:column;}
+.shell-brand{font-size:16px; font-weight:700;}
+.shell-brand span{display:block; font-size:8px; font-weight:600; letter-spacing:.2em; color:var(--faint);}
+.shell-navitem{display:flex; align-items:center; gap:8px; font-size:11.5px; font-weight:600; padding:8px 9px; border-radius:var(--radius); color:var(--muted); margin-top:12px;}
+.shell-navitem.active{background:var(--ink); color:var(--paper);}
+.shell-navitem:hover:not(.active){background:var(--panel);}
+.shell-foot{margin-top:auto; font-size:9.5px; color:var(--faint); line-height:1.5;}
+.shell-main{flex:1; display:flex; flex-direction:column; min-width:0; background:var(--canvas-bg);}
+.shell-demo-banner{background:var(--accent-bg); color:var(--accent-text); font-size:10.5px; font-weight:600; padding:8px 14px; display:flex; align-items:center; justify-content:center; gap:12px;}
+.shell-demo-banner button{background:rgba(255,255,255,.55); border-radius:var(--radius); padding:3px 8px; font-weight:600; color:var(--accent-ink); font-size:10.5px;}
+.shell-page-body{flex:1; display:flex; align-items:center; justify-content:center; color:var(--faint); font-size:11px;}
+.shell-toast{position:absolute; left:50%; bottom:16px; transform:translateX(-50%); background:var(--ink); color:var(--paper); border-radius:var(--radius); padding:9px 9px 9px 15px; display:flex; align-items:center; gap:11px; font-size:11.5px; box-shadow:var(--card-shadow-lg);}
+
+/* ---------- library ---------- */
+.lib-row{border-radius:var(--radius); margin-bottom:7px; background:var(--paper); box-shadow:var(--card-shadow);}
+.lib-head{display:flex; align-items:center; gap:11px; padding:10px 13px; font-size:12.5px; cursor:pointer;}
+.lib-check{width:15px; height:15px; border:1.5px solid var(--line); border-radius:2px; flex:none;}
+.lib-check.checked{background:var(--ink); border-color:var(--ink); position:relative;}
+.lib-check.checked::after{content:'✓'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--paper); font-size:10px;}
+.lib-art{width:30px; height:30px;}
+.lib-title{font-weight:600;}
+.lib-artist{font-size:10.5px; color:var(--muted); margin-left:7px; font-weight:500;}
+.lib-tags{display:flex; gap:4px; margin-left:auto;}
+.lib-io{font-family:var(--font-mono); font-size:10px; color:var(--faint); margin-left:11px;}
+.lib-body{border-top:1px solid var(--line-soft); padding:14px; font-size:11.5px;}
+.lib-frag{border-radius:var(--radius); background:var(--panel); padding:9px 11px; margin-top:7px;}
+.lib-frag-row{display:flex; justify-content:space-between; align-items:center;}
+.select-bar{display:flex; align-items:center; justify-content:space-between; background:var(--accent-bg); color:var(--accent-text); padding:9px 14px; border-radius:var(--radius); margin-bottom:11px; font-size:11.5px; font-weight:600;}
+
+/* ---------- forms (upload/add-audio) ---------- */
+.form-card{background:var(--paper); box-shadow:var(--card-shadow); border-radius:6px; padding:20px; display:flex; flex-direction:column; gap:13px; max-width:440px;}
+.field-label{font-size:10.5px; font-weight:600; color:var(--muted); margin-bottom:5px; display:block;}
+.dropzone{border:1.5px dashed var(--line); border-radius:var(--radius); padding:18px; display:flex; align-items:center; gap:11px; font-size:11.5px; color:var(--faint);}
+.dropzone b{color:var(--ink); font-size:11.5px; font-weight:600;}
+.cover-picker{display:flex; align-items:center; gap:10px; cursor:pointer;}
+.cover-picker span{font-size:11px; font-weight:600; text-decoration:underline; color:var(--accent-text);}
+.waveform-bar{position:relative; height:28px; background:var(--panel); border-radius:var(--radius); margin-top:20px;}
+.waveform-marker{position:absolute; top:0; bottom:0; width:2px; background:var(--danger);}
+.waveform-label{position:absolute; top:-16px; font-family:var(--font-mono); font-size:8.5px; font-weight:600; color:var(--danger); transform:translateX(-50%); white-space:nowrap;}
+
+/* ---------- transition preview player (Add Audio's "Listen before you
+   save it") — a real waveform, a real moving playhead, a real draggable
+   scrub, a real volume popover. No audio file backs it (nothing here has
+   real audio to decode), same honest convention as everything else
+   interactive in this doc — but the window logic is real: always exactly
+   3s of original audio, the transition itself, then 3s of original audio
+   again, never the whole dropped file. ---------- */
+.xpreview{background:var(--panel); border-radius:var(--radius); padding:12px 12px 8px;}
+.xpreview-wave{position:relative; height:52px; display:flex; align-items:center; gap:1.5px; cursor:pointer; user-select:none;}
+.xpreview-wave i{flex:1; min-width:0; border-radius:1px; background:var(--very-faint);}
+.xpreview-wave i.in-transition{background:var(--accent);}
+:root[data-theme="dark"] .xpreview-wave i{background:#5b5d62;}
+.xpreview-bracket{position:absolute; bottom:-2px; height:3px; background:var(--accent); border-radius:2px;}
+.xpreview-bracket-label{position:absolute; bottom:9px; font-family:var(--font-mono); font-size:9px; font-weight:600; color:var(--accent-ink); white-space:nowrap; transform:translateX(-50%);}
+:root[data-theme="dark"] .xpreview-bracket-label{color:var(--accent-text);}
+.xpreview-playhead{position:absolute; top:0; bottom:0; width:2px; background:var(--ink); pointer-events:none; box-shadow:0 0 0 2px rgba(19,19,19,.15);}
+:root[data-theme="dark"] .xpreview-playhead{background:var(--paper-fixed); box-shadow:0 0 0 2px rgba(252,252,252,.2);}
+.xpreview-controls{display:flex; align-items:center; gap:10px; margin-top:12px;}
+.xpreview-time{font-size:10px; color:var(--muted); width:26px; flex:none;}
+.xpreview-time:last-of-type{text-align:right;}
+.xpreview-scrub{flex:1; height:4px; border-radius:2px; background:var(--line-soft); position:relative; cursor:pointer;}
+.xpreview-scrub-fill{position:absolute; left:0; top:0; bottom:0; width:0%; background:var(--ink); border-radius:2px; pointer-events:none;}
+:root[data-theme="dark"] .xpreview-scrub-fill{background:var(--paper-fixed);}
+.xpreview-volume{position:relative;}
+.xpreview-volume-pop{position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%); background:var(--paper); box-shadow:var(--card-shadow-lg); border-radius:var(--radius); padding:10px 8px;}
+.xpreview-note{font-size:10px; color:var(--faint); margin-top:8px; line-height:1.5;}
+
+/* ---------- settings ---------- */
+.settings-card{background:var(--paper); box-shadow:var(--card-shadow); border-radius:6px; padding:6px 16px; max-width:480px;}
+.settings-row{display:flex; align-items:center; justify-content:space-between; padding:13px 0; border-bottom:1px solid var(--line-soft); gap:18px;}
+.settings-row:last-child{border-bottom:none;}
+.settings-row-title{font-size:12.5px; font-weight:600;}
+.settings-row-sub{font-size:11px; color:var(--muted); margin-top:2px; max-width:280px; line-height:1.5;}
+
+footer.atlas-foot{font-size:11.5px; color:var(--faint); margin-top:16px; max-width:640px; line-height:1.6;}
+</style>
+
+<div class="atlas">
+  <nav class="atlas-nav">
+    <div class="atlas-brand">eskimo<span>STUDIO</span></div>
+    <div class="atlas-nav-caption">Screen &amp; control atlas — every page, mapped at real component fidelity.</div>
+    <a href="#chrome" data-nav><span class="n">00</span> Chrome</a>
+    <a href="#perform" data-nav><span class="n">01</span> Graph</a>
+    <a href="#library" data-nav><span class="n">02</span> Library</a>
+    <a href="#upload" data-nav><span class="n">03</span> Upload Song</a>
+    <a href="#addaudio" data-nav><span class="n">04</span> Add Audio</a>
+    <a href="#settings" data-nav><span class="n">05</span> Settings</a>
+    <div class="atlas-theme-toggle">Theme: <button id="themeBtn" type="button">system</button></div>
+  </nav>
+
+  <main class="atlas-main">
+    <div class="atlas-intro">
+      <span class="atlas-eyebrow">Reference · not a redesign</span>
+      <h1>Every screen, every control</h1>
+      <p>Eskimo Studio is a graph-based DJ set editor: songs are nodes, produced transitions/intros/outros are the wires between them, and a set is whatever path is wired through the graph. This atlas walks all five screens plus the shell around them at the app's real component scale — same shadows, same type, same interaction recipes as <code>styles.css</code> — with a full control index under each one.</p>
+      <p>Everything below that can plausibly move on the page does: hover states, the theme toggle, the socket picker, the context menu. Static-only mockups are marked as such.</p>
+      <div class="atlas-stats">
+        <div class="atlas-stat"><b class="mono">5</b><span>Screens</span></div>
+        <div class="atlas-stat"><b class="mono">4</b><span>Socket types</span></div>
+        <div class="atlas-stat"><b class="mono">~90</b><span>Controls indexed</span></div>
+      </div>
+    </div>
+
+    <!-- ============================================================= 00 CHROME ============================================================= -->
+    <section id="chrome" class="atlas-section">
+      <div class="atlas-section-head">
+        <span class="atlas-section-eyebrow">00 — always on screen</span>
+        <h2>Global chrome</h2>
+        <p class="atlas-section-desc">The sidebar, plus the two overlays that can appear on top of any page — an undo toast (every delete gets one, no blocking confirm) and a demo-mode banner.</p>
+      </div>
+      <div class="stage">
+        <div class="shell-demo">
+          <div class="shell-sidebar">
+            <div class="shell-brand">eskimo<span>STUDIO</span></div>
+            <div class="shell-navitem active">◆&nbsp; Graph</div>
+            <div class="shell-navitem">⚬⚬&nbsp; Library</div>
+            <div class="shell-navitem">↑&nbsp; Upload Song</div>
+            <div class="shell-navitem">⟲&nbsp; Add Audio</div>
+            <div class="shell-navitem">⚙&nbsp; Settings</div>
+            <div class="shell-foot">Friday Warehouse<br>63 songs · 118 audio pieces</div>
+          </div>
+          <div class="shell-main" style="position:relative;">
+            <div class="shell-demo-banner">You're viewing an example graph — nothing here is saved to a real library. <button>Start your own</button></div>
+            <div class="shell-page-body">— active page renders here —</div>
+            <div class="shell-toast"><span>Deleted "Faultline Blue"</span><button class="btn btn-ghost btn-sm">Undo</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="control-grid">
+        <div class="control-row"><b>eskimo / STUDIO wordmark</b><p>Brand mark only — not a link.</p></div>
+        <div class="control-row"><b>Graph · Library · Upload Song · Add Audio · Settings</b><p>The five tabs. Current tab fills solid; switching tabs never interrupts playback — Now Playing keeps running underneath whichever screen you're looking at.</p></div>
+        <div class="control-row"><b>Footer line</b><p>Venue/session name plus a live song and audio-piece count for the whole library.</p></div>
+        <div class="control-row"><b>Demo banner<span class="tag-mini">conditional</span></b><p>Shown only while viewing the built-in example graph. "Start your own" clears it the moment you add anything real.</p></div>
+        <div class="control-row"><b>Undo toast<span class="tag-mini">6s</span></b><p>Appears after deleting a song or an audio piece — deletes happen immediately, no blocking confirm, but a few seconds' undo covers a mistake.</p></div>
+        <div class="control-row"><b>Save-error toast<span class="tag-mini">conditional</span></b><p>Local storage full or disabled — your last change didn't persist.</p></div>
+      </div>
+    </section>
+
+    <!-- ============================================================= 01 GRAPH ============================================================= -->
+    <section id="perform" class="atlas-section">
+      <div class="atlas-section-head">
+        <span class="atlas-section-eyebrow">01 — the flagship screen</span>
+        <h2>Graph</h2>
+        <p class="atlas-section-desc">A pan/zoom canvas of every song placed as a node, wired with Intro/None/Outro/Transition sockets. Clicking a node only ever <i>selects</i> it; nothing plays until Play is pressed somewhere explicit.</p>
+      </div>
+
+      <div class="legend-timing">
+        <div class="legend-item"><div class="legend-bar-track"><div class="legend-bar-fill"></div></div><div class="legend-text"><b>Countdown ring</b><span>live — watch it drain and sweep, same rhythm the real one runs</span></div></div>
+      </div>
+
+      <div class="atlas-subhead">The node card — three states</div>
+      <p class="atlas-sub-desc">Idle and Selected share the same paper background — only the outline (or its absence) tells them apart. Active is a completely different fill, no border needed.</p>
+      <div class="gallery">
+        <div class="gallery-item">
+          <div class="node-card">
+            <div class="node-header">
+              <div class="art art-1 node-art"></div>
+              <div class="node-header-text">
+                <div><div class="node-title">Try Again</div><div class="node-artist">Nomi Sato</div></div>
+                <div class="node-tags"><span class="tag">140 BPM</span><span class="tag">F min</span><span class="node-io">↓1 ↑1</span></div>
+              </div>
+            </div>
+            <div class="socket-section">
+              <div class="socket-cols">
+                <div class="socket-col">
+                  <div class="socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Intro</span></div>
+                  <div class="socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div>
+                </div>
+                <div class="socket-col">
+                  <div class="socket-row-right socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Faultline Blue</span></div>
+                  <div class="socket-row-right socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="gallery-caption"><b>Idle.</b> Shadow only — no border at rest.</div>
+        </div>
+        <div class="gallery-item">
+          <div class="node-card is-selected">
+            <div class="node-header">
+              <div class="art art-3 node-art"></div>
+              <div class="node-header-text">
+                <div><div class="node-title">Horoscopes</div><div class="node-artist">Nomi Sato</div></div>
+                <div class="node-tags"><span class="tag">147 BPM</span><span class="tag">D min</span><span class="node-io">↓1 ↑0</span></div>
+              </div>
+            </div>
+            <div class="socket-section">
+              <div class="socket-cols">
+                <div class="socket-col">
+                  <div class="socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Outro</span></div>
+                  <div class="socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div>
+                </div>
+                <div class="socket-col">
+                  <div class="socket-row-right socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row-right socket-row"><span class="socket-shape"></span><span class="socket-row-text">Transition</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="gallery-caption"><b>Selected.</b> A flat accent outline — this is what "the detail pane is showing this one" looks like.</div>
+        </div>
+        <div class="gallery-item">
+          <div class="node-card is-active">
+            <div class="node-header">
+              <div class="art art-2 node-art"></div>
+              <div class="node-header-text">
+                <div><div class="node-title">Faultline Blue</div><div class="node-artist">Nomi Sato</div></div>
+                <div class="node-tags"><span class="tag">126 BPM</span><span class="tag">A min</span><span class="node-io">↓1 ↑1</span></div>
+              </div>
+            </div>
+            <div class="node-wave">
+              <i style="height:35%"></i><i style="height:75%"></i><i style="height:50%"></i><i style="height:95%"></i><i style="height:30%"></i><i style="height:65%"></i><i style="height:45%"></i><i style="height:80%"></i>
+            </div>
+            <div class="socket-section">
+              <div class="socket-cols">
+                <div class="socket-col">
+                  <div class="socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row"><span class="socket-shape"></span><span class="socket-row-text">Intro</span></div>
+                </div>
+                <div class="socket-col">
+                  <div class="socket-row-right socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Horoscopes</span></div>
+                  <div class="socket-row-right socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="node-progress"><div class="node-progress-track"><div class="node-progress-fill" style="width:38%"></div></div></div>
+          </div>
+          <div class="gallery-caption"><b>Active.</b> Fill colour alone says "playing" — a live spectrum reading and whole-song progress bar appear only here.</div>
+        </div>
+      </div>
+
+      <div class="atlas-subhead" style="margin-top:56px;">Opening a socket picker</div>
+      <p class="atlas-sub-desc">A row with more than one produced candidate opens a picker aligned to its own column, sized to its content — not forced to match the row's width.</p>
+      <div class="anatomy-row">
+        <div class="anatomy-stage" style="transform:scale(1.3); transform-origin:top left; width:292px; height:230px;">
+          <div class="node-card">
+            <div class="node-header">
+              <div class="art art-3 node-art"></div>
+              <div class="node-header-text">
+                <div><div class="node-title">Horoscopes</div><div class="node-artist">Nomi Sato</div></div>
+                <div class="node-tags"><span class="tag">147 BPM</span><span class="tag">D min</span></div>
+              </div>
+            </div>
+            <div class="socket-section">
+              <div class="socket-cols">
+                <div class="socket-col">
+                  <div class="socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Outro</span></div>
+                  <div class="socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div>
+                </div>
+                <div class="socket-col">
+                  <div class="socket-row-right socket-row active has-picker" style="position:relative;" tabindex="0">
+                    <span class="socket-shape"></span><span class="socket-row-text">Late Return</span>
+                    <div class="socket-listbox">
+                      <div class="socket-option selected"><span class="opt-name">Late Return</span><span class="opt-time">0:08</span><div class="timing-strip"><div class="legend-bar-fill" style="position:absolute;inset:0;right:auto;"></div></div></div>
+                      <div class="socket-option"><span class="opt-name">Wire &amp; Rust</span><span class="opt-time">0:12</span><div class="timing-strip"><div class="timing-strip-fill" style="--pct:71%; background:hsl(96,58%,41%);"></div></div></div>
+                    </div>
+                  </div>
+                  <div class="socket-row-right socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="callouts">
+          <div class="callout"><div class="callout-num">1</div><div class="callout-text"><b>Live, watchable sweep</b><span>"Late Return"'s ring is the same animation as the legend above — drains right to left while its colour moves through the whole green→red range, continuously, not just at the last few seconds.</span></div></div>
+          <div class="callout"><div class="callout-num">2</div><div class="callout-text"><b>Aligned to the column, not the row's width</b><span>The popup sits flush with its own column's edge; its own width is independent of how wide the triggering row happens to be.</span></div></div>
+          <div class="callout"><div class="callout-num">3</div><div class="callout-text"><b>Appears only with 2+ candidates</b><span>A single wired Intro/Outro/Transition never gets a dropdown at all — nothing to switch between.</span></div></div>
+        </div>
+      </div>
+
+      <div class="atlas-subhead" style="margin-top:56px;">Right-click menus</div>
+      <p class="atlas-sub-desc">Three targets, three menus — always closes on outside-click or Escape. Click each menu below to see it live.</p>
+      <div class="gallery" style="align-items:flex-start; gap:46px;">
+        <div class="gallery-item">
+          <button class="ctx-demo-trigger btn btn-ghost btn-sm" data-menu="pane">Empty canvas ▾</button>
+          <div class="ctx-menu" data-panel="pane" hidden style="position:static; margin-top:8px;">
+            <button class="ctx-item">Add node here</button>
+            <button class="ctx-item">Arrange for me</button>
+            <button class="ctx-item">Autoconnect all transitions</button>
+          </div>
+        </div>
+        <div class="gallery-item">
+          <button class="ctx-demo-trigger btn btn-ghost btn-sm" data-menu="song">Song node ▾</button>
+          <div class="ctx-menu" data-panel="song" hidden style="position:static; margin-top:8px;">
+            <button class="ctx-item">Focus here</button>
+            <button class="ctx-item">Set as Start</button>
+            <button class="ctx-item">Autoconnect transitions</button>
+            <button class="ctx-item">Disconnect all wires</button>
+            <button class="ctx-item">Edit in Library</button>
+            <div class="ctx-sep"></div>
+            <button class="ctx-item">Remove from graph</button>
+            <button class="ctx-item danger">Delete song</button>
+          </div>
+        </div>
+        <div class="gallery-item">
+          <button class="ctx-demo-trigger btn btn-ghost btn-sm" data-menu="start">Start / End node ▾</button>
+          <div class="ctx-menu" data-panel="start" hidden style="position:static; margin-top:8px;">
+            <button class="ctx-item" style="opacity:.4; cursor:not-allowed;">Not wired</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="atlas-subhead" style="margin-top:56px;">Detail pane</div>
+      <p class="atlas-sub-desc">The only place a non-playing song's socket specifics show in full — opened by selecting a node, closed by the ✕ or selecting nothing.</p>
+      <div class="anatomy-row">
+        <div class="detail-pane">
+          <button class="dp-close icon-btn" aria-label="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+          <div class="dp-header"><div class="art art-3 dp-art"></div><div><div class="dp-title">Horoscopes</div><div class="dp-artist">Nomi Sato</div></div></div>
+          <div class="dp-tags"><span class="tag">147 BPM</span><span class="tag">D min</span><span class="tag">2:27</span></div>
+          <button class="dp-play"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>Play</button>
+          <div class="dp-section"><div class="dp-section-title">Input ↓1</div><div class="dp-row"><span>Outro</span></div></div>
+          <div class="dp-section" style="margin-bottom:0;"><div class="dp-section-title">Output ↑1 (2 variants)</div><div class="dp-row"><span>Late Return</span><span class="dp-time">0:08</span></div><div class="timing-strip"><div class="legend-bar-fill" style="position:absolute;inset:0;right:auto;"></div></div></div>
+        </div>
+        <div class="callouts">
+          <div class="callout"><div class="callout-num">1</div><div class="callout-text"><b>Play</b><span>The one button that actually starts playback from here — auto-picks Intro when one's produced, a plain cut otherwise.</span></div></div>
+          <div class="callout"><div class="callout-num">2</div><div class="callout-text"><b>Input / Output summary</b><span>Which socket is active on each side, how many variants it has, and — on output — the wired cue point's own live countdown.</span></div></div>
+          <div class="callout"><div class="callout-num">3</div><div class="callout-text"><b>✕ close</b><span>Deselects only — never affects playback.</span></div></div>
+        </div>
+      </div>
+
+      <div class="atlas-subhead" style="margin-top:56px;">Toolbar</div>
+      <div class="stage stage-tight">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <input class="input" placeholder="Find a song or artist… (/)" value="try">
+            <div class="search-suggestions">
+              <button class="search-suggestion"><span>Try Again</span><span class="search-suggestion-artist">Nomi Sato</span></button>
+            </div>
+          </div>
+          <span class="icon-btn">‹</span><span class="mono" style="font-size:10.5px; color:var(--faint);">1/1</span><span class="icon-btn">›</span>
+          <span class="toolbar-btn">◎ Focus active</span>
+          <span class="toolbar-btn">▦ Arrange for me</span>
+          <div style="flex:1;"></div>
+          <span class="toolbar-btn">‖ Pause</span>
+          <span class="btn btn-danger btn-sm">■ Stop</span>
+        </div>
+      </div>
+
+      <div class="atlas-subhead" style="margin-top:56px;">The whole canvas, zoomed out</div>
+      <p class="atlas-sub-desc">One real hop chain — an Intro start, a Transition, and a wired Outro leading toward End Set — plus one song with nothing wired at all, to show how the pieces above actually compose.</p>
+      <div class="stage" style="height:340px; overflow:hidden;">
+        <div style="transform:scale(.72); transform-origin:top left; width:1230px;">
+          <svg style="position:absolute; inset:0; width:1230px; height:440px; pointer-events:none;">
+            <path class="edge-ink" d="M120,170 C170,170 175,90 225,90" stroke-dasharray="5 3" stroke-width="2" fill="none" marker-end="url(#atl-a1)"/>
+            <path class="edge-ink" d="M320,95 C380,95 380,195 440,200" stroke-width="3" fill="none" marker-end="url(#atl-a1)"/>
+            <path class="edge-ink" d="M440,230 C500,275 700,270 765,220" stroke-dasharray="5 3" stroke-width="2" fill="none" marker-end="url(#atl-a1)"/>
+            <defs>
+              <marker id="atl-a1" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="var(--ink)"/></marker>
+            </defs>
+          </svg>
+          <div class="pill-node" style="position:absolute; left:16px; top:98px;"><div class="pill-node-title">▶ Start Set</div>wired to Try Again</div>
+          <div class="node-card" style="position:absolute; left:110px; top:20px; width:200px; transform:scale(.92);">
+            <div class="node-header"><div class="art art-1 node-art" style="width:44px;height:44px;"></div><div class="node-header-text"><div><div class="node-title">Try Again</div><div class="node-artist">Nomi Sato</div></div><div class="node-tags"><span class="tag">140</span><span class="tag">F min</span></div></div></div>
+            <div class="socket-section"><div class="socket-cols">
+              <div class="socket-col"><div class="socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Intro</span></div></div>
+              <div class="socket-col"><div class="socket-row-right socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Transition</span></div></div>
+            </div></div>
+          </div>
+          <div class="node-card is-active" style="position:absolute; left:340px; top:130px; width:200px; transform:scale(.92);">
+            <div class="node-header"><div class="art art-2 node-art" style="width:44px;height:44px;"></div><div class="node-header-text"><div><div class="node-title">Faultline Blue</div><div class="node-artist">Nomi Sato</div></div><div class="node-tags"><span class="tag">126</span><span class="tag">A min</span></div></div></div>
+            <div class="node-wave"><i style="height:40%"></i><i style="height:80%"></i><i style="height:55%"></i><i style="height:90%"></i><i style="height:35%"></i><i style="height:70%"></i></div>
+            <div class="socket-section"><div class="socket-cols">
+              <div class="socket-col"><div class="socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div></div>
+              <div class="socket-col"><div class="socket-row-right socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Horoscopes</span></div></div>
+            </div></div>
+            <div class="node-progress"><div class="node-progress-track"><div class="node-progress-fill" style="width:61%"></div></div></div>
+          </div>
+          <div class="node-card is-selected" style="position:absolute; left:570px; top:20px; width:200px; transform:scale(.92);">
+            <div class="node-header"><div class="art art-3 node-art" style="width:44px;height:44px;"></div><div class="node-header-text"><div><div class="node-title">Horoscopes</div><div class="node-artist">Nomi Sato</div></div><div class="node-tags"><span class="tag">147</span><span class="tag">D min</span></div></div></div>
+            <div class="socket-section"><div class="socket-cols">
+              <div class="socket-col"><div class="socket-row active"><span class="socket-shape"></span><span class="socket-row-text">Outro</span></div></div>
+              <div class="socket-col"><div class="socket-row-right socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div></div>
+            </div></div>
+          </div>
+          <div class="node-card" style="position:absolute; left:570px; top:250px; width:200px; transform:scale(.92);">
+            <div class="node-header"><div class="art art-5 node-art" style="width:44px;height:44px;"></div><div class="node-header-text"><div><div class="node-title">Guillotine</div><div class="node-artist">Nomi Sato</div></div><div class="node-tags"><span class="tag">122</span><span class="tag">G min</span></div></div></div>
+            <div class="socket-section"><div class="socket-cols">
+              <div class="socket-col"><div class="socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div></div>
+              <div class="socket-col"><div class="socket-row-right socket-row"><span class="socket-shape"></span><span class="socket-row-text">None</span></div></div>
+            </div></div>
+          </div>
+          <div class="pill-node" style="position:absolute; left:825px; top:190px;"><div class="pill-node-title">■ End Set</div>part of your plan</div>
+        </div>
+      </div>
+
+      <div class="atlas-subhead" style="margin-top:56px;">Bottom player bar</div>
+      <p class="atlas-sub-desc">Appears once a set has started, replacing nothing — the toolbar's Start/Pause/Stop stays visible above it too.</p>
+      <div class="player-bar-demo-wrap">
+        <div class="player-bar">
+          <div class="player-bar-now"><div class="art art-2 player-bar-art"></div><div class="player-bar-text"><div class="player-bar-title">Faultline Blue</div><div class="player-bar-artist">Nomi Sato</div></div></div>
+          <button class="icon-btn" aria-label="Back"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="19,4 9,12 19,20"></polygon><rect x="4.5" y="4" width="2.5" height="16"></rect></svg></button>
+          <button class="icon-btn" aria-label="Pause"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16"></rect><rect x="14" y="4" width="5" height="16"></rect></svg></button>
+          <button class="icon-btn" aria-label="Skip to next"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,4 15,12 5,20"></polygon><rect x="17" y="4" width="2.5" height="16"></rect></svg></button>
+          <span class="player-bar-time">1:24</span>
+          <div class="player-bar-scrub"><div class="playhead-track"><div class="playhead-fill" style="width:57%"></div><div class="playhead-scrubber" style="left:57%"></div></div></div>
+          <span class="player-bar-time">2:11</span>
+          <div class="player-bar-next"><span class="player-bar-hop-type">Transition</span><div class="art art-3 player-bar-art-sm"></div><span class="player-bar-next-title">Horoscopes</span></div>
+          <button class="icon-btn" aria-label="Volume" style="margin-left:auto;"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="3,9 8,9 13,4 13,20 8,15 3,15"></polygon><path d="M16.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.6"></path></svg></button>
+        </div>
+      </div>
+
+      <div class="atlas-subhead" style="margin-top:56px;">Full control index</div>
+      <div class="control-grid">
+        <div class="control-row"><b>Search (/ or ⌘K)</b><p>Fuzzy-matches songs already on this canvas — not the whole library. Enter jumps to the first match; ←/→ step through the rest, each one re-centering the camera.</p></div>
+        <div class="control-row"><b>Match nav (‹ n/n ›)<span class="tag-mini">while searching</span></b><p>Steps the camera between search results without retyping.</p></div>
+        <div class="control-row"><b>Focus active</b><p>Re-centers the camera on whatever's actually playing — or fits the whole graph in view if nothing is.</p></div>
+        <div class="control-row"><b>Arrange for me</b><p>Runs the dagre auto-layout algorithm once and writes the result into every node's stored position — one-shot, not a toggle, so a manual drag afterward sticks.</p></div>
+        <div class="control-row"><b>Start<span class="tag-mini">before a set</span></b><p>Appears once something is wired to Start Set — begins playback there immediately.</p></div>
+        <div class="control-row"><b>Pause / Resume · Stop<span class="tag-mini">once started</span></b><p>Stop ends the set outright — no confirm; the graph's own wiring into End Set is what makes an ending feel graceful.</p></div>
+        <div class="control-row"><b>Socket dots — None / Intro / Transition (left), None / Outro / Transition (right)</b><p>Click None/Intro/Outro to toggle it on or off. Transition is drag-only — drag from one song's Transition dot to another's to wire a produced crossfade.</p></div>
+        <div class="control-row"><b>↓in / ↑out counts</b><p>How many wires touch this song, at a glance.</p></div>
+        <div class="control-row"><b>Start Set / End Set nodes</b><p>Start: drag a wire to any song's Intro/None socket. End: purely informational — "part of your plan" once some song's output leads here.</p></div>
+        <div class="control-row"><b>Hover-✕ on an active edge</b><p>Disconnects that one wire. Deliberately not "click the line" — a stray click destroying a built set was a real, reported hazard.</p></div>
+        <div class="control-row"><b>Shift+drag to pan · drag to box-select</b><p>Plain click-drag draws a real multi-select box; panning moved to Shift+drag so a stray right-click-menu dismissal never fights the canvas's default gesture.</p></div>
+        <div class="control-row"><b>Add Node modal</b><p>Opened by "Add node here" — searches the library's <i>unplaced</i> songs only, placing whichever one you pick at the exact right-clicked spot.</p></div>
+        <div class="control-row"><b>Back</b><p>Restarts the current song from 0 — or, within the first few seconds of it, jumps back to whatever played immediately before. Always a plain cut.</p></div>
+        <div class="control-row"><b>Skip</b><p>Leaves for whatever's wired next right now, always a plain cut — never waits out or plays a wired transition's produced clip first.</p></div>
+        <div class="control-row"><b>Scrub bar</b><p>Drag to seek Now Playing's own master. No effect while a produced fragment (not the master) is what's actually sounding.</p></div>
+        <div class="control-row"><b>Next preview + crossfade meter</b><p>What's coming and how — the crossfade meter only appears within 8 seconds of the real handoff.</p></div>
+        <div class="control-row"><b>Volume</b><p>Collapsed to a plain icon until clicked; stored on the audio engine itself, so it survives navigating away and back.</p></div>
+      </div>
+    </section>
+
+    <!-- ============================================================= 02 LIBRARY ============================================================= -->
+    <section id="library" class="atlas-section">
+      <div class="atlas-section-head">
+        <span class="atlas-section-eyebrow">02 — every song in the crate</span>
+        <h2>Library</h2>
+        <p class="atlas-section-desc">A flat, searchable list of every song, independent of whether it has a node on the Graph canvas. Expanding a row is the only place a song's own details, cover, and built audio pieces get edited.</p>
+      </div>
+      <div class="stage">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <div style="font-size:19px; font-weight:700;">Library</div>
+          <span class="btn btn-primary">+ New song</span>
+        </div>
+        <input class="input" value="Nomi" style="max-width:280px; margin-bottom:16px; box-shadow:var(--card-shadow);">
+        <div class="select-bar"><span>2 selected, in pick order</span><div style="display:flex; gap:8px;"><span class="btn btn-ghost btn-sm">Clear</span><span class="btn btn-accent btn-sm">Queue as playlist</span></div></div>
+        <div class="lib-row">
+          <div class="lib-head">
+            <div class="lib-check checked"></div><span style="color:var(--faint);">⌄</span>
+            <div class="art art-2 lib-art"></div>
+            <span class="lib-title">Faultline Blue<span class="lib-artist">Nomi Sato</span></span>
+            <div class="lib-tags"><span class="tag">126</span><span class="tag">A min</span></div>
+            <span class="lib-io">↓1 ↑1</span>
+          </div>
+        </div>
+        <div class="lib-row">
+          <div class="lib-head">
+            <div class="lib-check"></div><span style="color:var(--faint);">›</span>
+            <div class="art art-3 lib-art"></div>
+            <span class="lib-title">Horoscopes<span class="lib-artist">Nomi Sato</span></span>
+            <div class="lib-tags"><span class="tag">147</span><span class="tag">D min</span></div>
+            <span class="lib-io">↓1 ↑0</span>
+          </div>
+          <div class="lib-body">
+            <div class="cover-picker" style="margin-bottom:12px;"><div class="art art-3 lib-art" style="width:42px;height:42px;"></div><span>Change cover</span></div>
+            <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;"><span class="btn btn-ghost btn-sm">Edit details</span><span class="btn btn-ghost btn-sm">Download reference</span><span class="btn btn-danger btn-sm">Delete song</span></div>
+            <div style="font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin-top:12px;">Built audio</div>
+            <div class="lib-frag"><div class="lib-frag-row"><b>Outro</b><span class="btn btn-ghost btn-sm" style="padding:3px 8px; font-size:10px;">Remove</span></div><div style="font-size:10.5px; color:var(--muted); margin-top:3px;">ends set</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="control-grid">
+        <div class="control-row"><b>+ New song</b><p>Jumps to Upload Song.</p></div>
+        <div class="control-row"><b>Search field</b><p>Filters by title or artist — this list only, not the graph.</p></div>
+        <div class="control-row"><b>Row checkbox + selection bar</b><p>Check a run of rows in the order you want them played, then "Queue as playlist" — wires a real transition between consecutive picks where one exists, a plain cut otherwise, and jumps straight to the Graph screen playing.</p></div>
+        <div class="control-row"><b>Row (collapsed)</b><p>Cover, title/artist, BPM/key tags, a "dead end" tag when nothing's wired out of it, and the same ↓in/↑out counts as the graph node.</p></div>
+        <div class="control-row"><b>Cover picker<span class="tag-mini">expanded</span></b><p>Click to replace the song's cover art.</p></div>
+        <div class="control-row"><b>Edit details</b><p>Opens inline fields for title, artist, BPM, key, and an optional two-part "mashup of" pairing.</p></div>
+        <div class="control-row"><b>Download reference</b><p>Only shown once a real master is uploaded.</p></div>
+        <div class="control-row"><b>Delete song</b><p>Cascades: also removes every audio piece touching this song. Covered by the global undo toast.</p></div>
+        <div class="control-row"><b>Built audio list<span class="tag-mini">per edge</span></b><p>Every Intro/Outro/Transition this song is part of — inline audio preview, Remove, and a clash warning when relevant.</p></div>
+        <div class="control-row"><b>Empty state</b><p>No songs at all yet — Upload a song, or Load an example graph.</p></div>
+      </div>
+    </section>
+
+    <!-- ============================================================= 03 UPLOAD SONG ============================================================= -->
+    <section id="upload" class="atlas-section">
+      <div class="atlas-section-head">
+        <span class="atlas-section-eyebrow">03 — add a new master</span>
+        <h2>Upload Song</h2>
+        <p class="atlas-section-desc">Adds one new song to the library. A remix is its own song here, not a variant — give it its own title and BPM, then connect it with Add Audio like anything else.</p>
+      </div>
+      <div class="stage">
+        <div class="form-card">
+          <div><span class="field-label">Cover art (optional)</span><div class="cover-picker"><div class="art art-2 lib-art" style="width:44px;height:44px;"></div><span>Add cover</span></div></div>
+          <div><span class="field-label">Title</span><input class="input" value="Faultline Blue"></div>
+          <div><span class="field-label">Artist</span><input class="input" value="Nomi Sato"></div>
+          <div style="display:flex; gap:12px;">
+            <div style="flex:1;"><span class="field-label">BPM</span><input class="input" value="126"></div>
+            <div style="flex:1;"><span class="field-label">Key</span><input class="input" value="A min"></div>
+          </div>
+          <div><span class="field-label">Master audio</span>
+            <div class="dropzone">↑ <div><b>faultline_blue_master.wav</b><br><span class="mono" style="font-size:10px;">42.1 MB</span></div></div>
+            <div style="font-size:10.5px; color:var(--muted); margin-top:6px;">Detected 231s — BPM/Key aren't auto-detected, type them in above.</div>
+          </div>
+          <span class="btn btn-primary" style="align-self:flex-start;">Add to library</span>
+        </div>
+      </div>
+      <div class="control-grid">
+        <div class="control-row"><b>Cover picker</b><p>Optional — a plain placeholder swatch stands in until one's set.</p></div>
+        <div class="control-row"><b>Title / Artist</b><p>Title is required to save; Artist falls back to "Unknown".</p></div>
+        <div class="control-row"><b>BPM / Key</b><p>Not auto-detected — dropping the master only detects its duration. Left blank, BPM defaults to 120 and Key to "—".</p></div>
+        <div class="control-row"><b>Master audio dropzone</b><p>Click or drag a file in. While reading it, an inline spinner reads "Reading duration…"; once done, the detected length shows as a one-line summary.</p></div>
+        <div class="control-row"><b>Add to library</b><p>Disabled mid-upload (spinner + "Uploading…"). On success, the form clears and offers a direct "View in Library" link.</p></div>
+      </div>
+    </section>
+
+    <!-- ============================================================= 04 ADD AUDIO ============================================================= -->
+    <section id="addaudio" class="atlas-section">
+      <div class="atlas-section-head">
+        <span class="atlas-section-eyebrow">04 — wire the graph with real audio</span>
+        <h2>Add Audio</h2>
+        <p class="atlas-section-desc">Drop a produced transition, intro, or outro; the app tries to identify which two songs it belongs between, then you confirm before it ever becomes part of the graph — no separate "verify" step after the fact.</p>
+      </div>
+      <div class="stage">
+        <div class="form-card" style="max-width:540px;">
+          <div><span class="field-label">Produced audio</span><div class="dropzone">↑ <div><b>faultline_to_horoscopes.wav</b><br><span class="mono" style="font-size:10px;">8.4 MB</span></div></div></div>
+          <div>
+            <span class="field-label">Listen before you save it</span>
+            <div class="xpreview" id="xpreview">
+              <div class="xpreview-wave" id="xwave">
+                <div class="xpreview-bracket" id="xbracket"></div>
+                <div class="xpreview-bracket-label" id="xbracketlabel">Transition · 0:04</div>
+                <div class="xpreview-playhead" id="xplayhead" style="left:0%;"></div>
+              </div>
+              <div class="xpreview-controls">
+                <button class="icon-btn" id="xplaybtn" aria-label="Play">
+                  <svg id="xplayicon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20"/></svg>
+                </button>
+                <span class="mono xpreview-time" id="xtimenow">0:00</span>
+                <div class="xpreview-scrub" id="xscrub"><div class="xpreview-scrub-fill" id="xscrubfill"></div></div>
+                <span class="mono xpreview-time" id="xtimetotal">0:10</span>
+                <div class="xpreview-volume">
+                  <button class="icon-btn" id="xvolbtn" aria-label="Volume">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="3,9 8,9 13,4 13,20 8,15 3,15"/><path d="M16.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                  </button>
+                  <div class="xpreview-volume-pop" id="xvolpop" hidden><input type="range" min="0" max="1" step="0.01" value="0.8" id="xvolrange" aria-label="Volume"></div>
+                </div>
+              </div>
+              <div class="xpreview-note">Always just this window — 3s before the transition starts through 3s after it ends, never the whole dropped file.</div>
+            </div>
+          </div>
+          <div style="font-size:10.5px; font-weight:700; color:var(--accent-ink);">Detected</div>
+          <div style="display:flex; gap:12px;">
+            <div style="flex:1;"><span class="field-label">Left side (plays out of)</span><div style="display:flex; align-items:center; gap:7px; background:var(--panel); border-radius:var(--radius); padding:7px 9px;"><div class="art art-2 lib-art" style="width:20px;height:20px;"></div><span style="font-size:11.5px;">Faultline Blue</span></div></div>
+            <div style="flex:1;"><span class="field-label">Right side (plays into)</span><div style="display:flex; align-items:center; gap:7px; background:var(--panel); border-radius:var(--radius); padding:7px 9px;"><div class="art art-3 lib-art" style="width:20px;height:20px;"></div><span style="font-size:11.5px;">Horoscopes</span></div></div>
+          </div>
+          <div style="display:flex; gap:5px; flex-wrap:wrap;"><span class="tag">Type: Transition</span><span class="tag">126 → 147 BPM</span><span class="tag">A min → D min</span></div>
+          <div style="display:flex; gap:12px;">
+            <div style="flex:1;"><span class="field-label">Faultline Blue — out point</span><div class="waveform-bar"><div class="waveform-marker" style="left:60%;"></div><div class="waveform-label" style="left:60%;">OUT 2:44</div></div></div>
+            <div style="flex:1;"><span class="field-label">Horoscopes — in point</span><div class="waveform-bar"><div class="waveform-marker" style="left:15%;"></div><div class="waveform-label" style="left:15%;">IN 0:17</div></div></div>
+          </div>
+          <div><span class="field-label">Note (optional)</span><input class="input" value="Tempo drop into verse"></div>
+          <span class="btn btn-primary" style="align-self:flex-start;">Sounds right — save Transition</span>
+        </div>
+      </div>
+      <div class="control-grid">
+        <div class="control-row"><b>Produced audio dropzone</b><p>Drop the finished render — the trigger for the whole detection flow below.</p></div>
+        <div class="control-row"><b>Listen before you save it</b><p>A real waveform, not a bare progress bar — the transition itself is highlighted in accent color against the original audio on either side, so you can see exactly where it starts and ends before you ever hear it. Always plays just a 3-seconds-before / transition / 3-seconds-after window, never the whole dropped file — full transport (play/pause, drag-to-seek, volume) scoped to that same window.</p></div>
+        <div class="control-row"><b>Left / Right SongPicker</b><p>Auto-filled by detection, always editable — "Free" on either side means "starts/ends the set" rather than naming a song.</p></div>
+        <div class="control-row"><b>Type · BPM · Key summary tags</b><p>Derived, not chosen: Transition needs both sides, Intro only a right side, Outro only a left.</p></div>
+        <div class="control-row"><b>Cue-point waveform bars</b><p>The detected out/in timestamp, placed at its real proportional position along each reference song's own duration — not a fixed decorative spot.</p></div>
+        <div class="control-row"><b>Conflict warning<span class="tag-mini">conditional</span></b><p>Flags an existing shorter Outro/Intro this one would silently occlude before it's saved.</p></div>
+        <div class="control-row"><b>Note</b><p>Optional free text — shows up next to the wired edge later.</p></div>
+        <div class="control-row"><b>Save button</b><p>Label changes with the detected type ("save Transition"/"save Intro"/"save Outro").</p></div>
+        <div class="control-row"><b>Empty state</b><p>No songs in the library yet — nothing to connect to.</p></div>
+      </div>
+    </section>
+
+    <!-- ============================================================= 05 SETTINGS ============================================================= -->
+    <section id="settings" class="atlas-section">
+      <div class="atlas-section-head">
+        <span class="atlas-section-eyebrow">05 — device &amp; library-wide preferences</span>
+        <h2>Settings</h2>
+        <p class="atlas-section-desc">Cloud sync status, the venue name, light/dark theme, backup/restore, autoplay behavior, and the one destructive action in the whole app.</p>
+      </div>
+      <div class="stage">
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin-bottom:7px;">Appearance</div>
+        <div class="settings-card" style="margin-bottom:20px;">
+          <div class="settings-row">
+            <div><div class="settings-row-title">Theme</div><div class="settings-row-sub">A device preference — not part of your library, not saved in a backup.</div></div>
+            <div class="segmented"><button>Light</button><button class="active">System</button><button>Dark</button></div>
+          </div>
+        </div>
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin-bottom:7px;">Autoplay</div>
+        <div class="settings-card" style="margin-bottom:20px;">
+          <div class="settings-row"><div><div class="settings-row-title">Autoplay</div><div class="settings-row-sub">picks randomly when nothing's queued</div></div><div class="switch on"><i></i></div></div>
+          <div class="settings-row"><div><div class="settings-row-title">Transition-only</div><div class="settings-row-sub">a dead end stops the set instead of cutting</div></div><div class="switch"><i></i></div></div>
+          <div style="padding:13px 0; font-size:11px; color:var(--muted); line-height:1.55;">This graph has a closed loop — transition-only autoplay can run <b style="color:var(--ink);">forever</b> once it's in one. Up to <span class="mono">58</span> of 63 songs reachable before it must repeat.</div>
+        </div>
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin-bottom:7px;">Reset</div>
+        <div class="settings-card">
+          <div class="settings-row"><div><div class="settings-row-title">Clear all data</div><div class="settings-row-sub">Wipes every song, transition, and set state saved in this browser. Does not undo.</div></div><span class="btn btn-danger btn-sm">Clear…</span></div>
+        </div>
+      </div>
+      <div class="control-grid">
+        <div class="control-row"><b>Supabase sync · Audio uploads status rows</b><p>Read-only ON/OFF indicators — configured in src/config.js, not from this page.</p></div>
+        <div class="control-row"><b>Venue / session name</b><p>Shown in the sidebar footer and included in backups.</p></div>
+        <div class="control-row"><b>Theme segmented control</b><p>Light / System / Dark — System follows the OS live, including if it changes mid-session.</p></div>
+        <div class="control-row"><b>Download a backup</b><p>One JSON file: the whole library plus current set state.</p></div>
+        <div class="control-row"><b>Restore from a backup</b><p>Replaces everything currently in the browser — rejects a file that doesn't look like a real export.</p></div>
+        <div class="control-row"><b>Autoplay switch</b><p>When nothing's manually queued, picks the next song at random from what's wired.</p></div>
+        <div class="control-row"><b>Transition-only switch</b><p>A dead end stops the set instead of cutting to a random unrelated song.</p></div>
+        <div class="control-row"><b>Reachability estimate</b><p>Computed from the graph's own wiring — flags a closed loop vs. an eventual dead end, and how many songs are reachable either way.</p></div>
+        <div class="control-row"><b>Clear all data</b><p>The one two-step destructive action in the app — Clear… then a separate Confirm press.</p></div>
+      </div>
+    </section>
+
+    <footer class="atlas-foot">Static reference — colors/spacing pulled from the app's real design tokens (<code>styles.css</code>) and real component structure where they apply. The countdown sweep, socket picker, context menus, and theme toggle are real CSS/JS; nothing here is wired to actual audio or graph data.</footer>
+  </main>
+</div>
+
+<script>
+(function(){
+  // scroll-spy
+  var links = Array.prototype.slice.call(document.querySelectorAll('[data-nav]'));
+  var sections = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+  function onScroll(){
+    var y = window.scrollY + 140;
+    var current = sections[0];
+    for (var i = 0; i < sections.length; i++) { if (sections[i] && sections[i].offsetTop <= y) current = sections[i]; }
+    links.forEach(function(a){ a.classList.toggle('current', document.querySelector(a.getAttribute('href')) === current); });
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // theme toggle
+  var order = ['system', 'light', 'dark'];
+  var i = 0;
+  var btn = document.getElementById('themeBtn');
+  btn.addEventListener('click', function () {
+    i = (i + 1) % order.length;
+    var mode = order[i];
+    btn.textContent = mode;
+    if (mode === 'system') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', mode);
+  });
+
+  // context menu demo — click to open, click outside or another trigger to close
+  var triggers = Array.prototype.slice.call(document.querySelectorAll('.ctx-demo-trigger'));
+  triggers.forEach(function(t){
+    t.addEventListener('click', function(e){
+      e.stopPropagation();
+      var name = t.getAttribute('data-menu');
+      var panel = document.querySelector('.ctx-menu[data-panel="' + name + '"]');
+      var isOpen = !panel.hidden;
+      document.querySelectorAll('.ctx-menu[data-panel]').forEach(function(p){ p.hidden = true; });
+      panel.hidden = isOpen;
+    });
+  });
+  document.addEventListener('click', function(){
+    document.querySelectorAll('.ctx-menu[data-panel]').forEach(function(p){ p.hidden = true; });
+  });
+
+  // transition preview player (Add Audio) — a real waveform, a real
+  // moving playhead, a real draggable scrub, a real volume popover. The
+  // window is fixed: 3s before the transition + a 4s transition + 3s
+  // after = 10s total, never the whole dropped file — the bracket and
+  // bar coloring mark exactly where the transition itself sits in that
+  // window. No audio file backs this (nothing in this doc has real audio
+  // to decode) — same honest convention as everything else interactive
+  // here, noted in its own caption.
+  (function(){
+    var wave = document.getElementById('xwave');
+    if (!wave) return;
+    var TOTAL = 10, T_START = 3, T_END = 7; // seconds
+    var BARS = 72;
+    var barEls = [];
+    for (var b = 0; b < BARS; b++) {
+      var t = (b / (BARS - 1)) * TOTAL;
+      // a plausible waveform envelope: louder through the transition, a
+      // seeded wobble so it reads as real audio, not uniform noise.
+      var envelope = 0.28 + 0.5 * Math.sin((t / TOTAL) * Math.PI);
+      var inTransition = t >= T_START && t <= T_END;
+      if (inTransition) envelope += 0.22;
+      var seed = Math.sin(b * 12.9898) * 43758.5453;
+      var wobble = (seed - Math.floor(seed)) * 0.4;
+      var h = Math.max(10, Math.min(100, Math.round((envelope + wobble) * 62)));
+      var el = document.createElement('i');
+      el.style.height = h + '%';
+      if (inTransition) el.classList.add('in-transition');
+      wave.appendChild(el);
+      barEls.push(el);
+    }
+    var bracket = document.getElementById('xbracket');
+    var bracketLabel = document.getElementById('xbracketlabel');
+    var pctStart = (T_START / TOTAL) * 100, pctEnd = (T_END / TOTAL) * 100;
+    bracket.style.left = pctStart + '%';
+    bracket.style.width = (pctEnd - pctStart) + '%';
+    bracketLabel.style.left = ((pctStart + pctEnd) / 2) + '%';
+
+    var playBtn = document.getElementById('xplaybtn');
+    var playIcon = document.getElementById('xplayicon');
+    var playhead = document.getElementById('xplayhead');
+    var scrub = document.getElementById('xscrub');
+    var scrubFill = document.getElementById('xscrubfill');
+    var timeNow = document.getElementById('xtimenow');
+    var timeTotal = document.getElementById('xtimetotal');
+    timeTotal.textContent = '0:' + (TOTAL < 10 ? '0' : '') + TOTAL;
+
+    var playing = false, elapsed = 0, raf = null, lastTick = null;
+    function fmt(s) { s = Math.max(0, Math.min(TOTAL, s)); var m = Math.floor(s / 60), r = Math.floor(s % 60); return m + ':' + (r < 10 ? '0' : '') + r; }
+    function render() {
+      var pct = (elapsed / TOTAL) * 100;
+      playhead.style.left = pct + '%';
+      scrubFill.style.width = pct + '%';
+      timeNow.textContent = fmt(elapsed);
+    }
+    function tick(now) {
+      if (!playing) return;
+      if (lastTick == null) lastTick = now;
+      elapsed += (now - lastTick) / 1000;
+      lastTick = now;
+      if (elapsed >= TOTAL) { elapsed = TOTAL; render(); pause(); return; }
+      render();
+      raf = requestAnimationFrame(tick);
+    }
+    function play() {
+      if (elapsed >= TOTAL) elapsed = 0;
+      playing = true; lastTick = null;
+      playIcon.innerHTML = '<rect x="5" y="4" width="5" height="16"></rect><rect x="14" y="4" width="5" height="16"></rect>';
+      playBtn.setAttribute('aria-label', 'Pause');
+      raf = requestAnimationFrame(tick);
+    }
+    function pause() {
+      playing = false;
+      if (raf) cancelAnimationFrame(raf);
+      playIcon.innerHTML = '<polygon points="6,4 20,12 6,20"></polygon>';
+      playBtn.setAttribute('aria-label', 'Play');
+    }
+    playBtn.addEventListener('click', function(){ playing ? pause() : play(); });
+
+    function seekFromClientX(clientX, el) {
+      var rect = el.getBoundingClientRect();
+      var pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      elapsed = pct * TOTAL;
+      render();
+    }
+    [scrub, wave].forEach(function(target){
+      target.addEventListener('pointerdown', function(e){
+        var wasPlaying = playing;
+        if (wasPlaying) pause();
+        seekFromClientX(e.clientX, target);
+        function onMove(ev) { seekFromClientX(ev.clientX, target); }
+        function onUp() {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          if (wasPlaying) play();
+        }
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+      });
+    });
+
+    var volBtn = document.getElementById('xvolbtn');
+    var volPop = document.getElementById('xvolpop');
+    volBtn.addEventListener('click', function(e){ e.stopPropagation(); volPop.hidden = !volPop.hidden; });
+    document.addEventListener('click', function(){ volPop.hidden = true; });
+    volPop.addEventListener('click', function(e){ e.stopPropagation(); });
+  })();
+})();
+</script>
