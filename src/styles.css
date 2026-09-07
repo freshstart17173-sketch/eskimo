@@ -851,25 +851,33 @@ a { color: var(--accent); }
 
 .node-card {
   width: 208px; border-radius: var(--radius); padding: 9px;
-  background: var(--paper); color: var(--ink); border: 1.5px solid var(--line);
-  user-select: none; transition: box-shadow .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
+  background: var(--paper); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .14);
+  user-select: none; transition: box-shadow .16s ease, background .16s ease, transform .16s ease;
   position: relative; transform: scale(1); transform-origin: center;
 }
-/* No `transform: scale(...)` on hover — see the long note above
-   `.connectingto.valid` on why: it changes the card's (and every socket
-   nested inside it) measured bounding box, which React Flow reads live
-   while a connection is being dragged. A card the pointer merely passes
-   over on its way to a real target doesn't need to grow for that to
-   register — the shadow lift alone reads as "hovered" fine. */
+/* Borderless — shadow alone carries "this is a separate object" at every
+   state (rest/hover/active/selected), same recipe the app's own
+   `.modal-card` already uses. Removing the border here is safe against
+   the one real risk that mattered — `box-sizing: border-box` is global
+   (see `*` above), so a border's width was never part of the box React
+   Flow measures live during drag-connect; only the box itself is, and
+   this doesn't touch it. No `transform: scale(...)` on hover — see the
+   long note above `.connectingto.valid` on why: it changes the card's
+   (and every socket nested inside it) measured bounding box, which React
+   Flow reads live while a connection is being dragged. A card the
+   pointer merely passes over on its way to a real target doesn't need to
+   grow for that to register — the shadow lift alone reads as "hovered"
+   fine. */
 .node-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); }
 .node-card.state-active {
-  background: var(--state-playing); color: var(--paper-fixed); border-color: var(--state-playing);
+  background: var(--state-playing); color: var(--paper-fixed);
   animation: pulseRing 2.4s ease-in-out infinite; transform: scale(1.08); z-index: 5;
 }
 /* Selected is a plain UI cursor ("what the detail pane is showing"), not a
-   performance state — a visible accent outline with no color-match tint,
+   performance state — a flat accent ring via box-shadow (not a border,
+   which would fight the border-radius on an otherwise-borderless card),
    clearly distinct from Active's full color-matched fill. */
-.node-card.state-selected { border-color: var(--accent); border-width: 2px; box-shadow: 0 0 0 3px var(--accent-bg); }
+.node-card.state-selected { box-shadow: 0 0 0 3px var(--accent); }
 .node-card.node-hovered { box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }
 .node-card.node-dimmed { opacity: .28; }
 .node-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
