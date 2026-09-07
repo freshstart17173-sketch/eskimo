@@ -59,7 +59,7 @@ export const NowPlayingContext = createContext({ nowPlayingId: null, elapsed: 0,
 // context instead means a hover or a keystroke only re-renders the specific
 // SongNode components that care, as an ordinary React re-render of their own
 // DOM — it never touches React Flow's node graph at all.
-export const HoveredNodeContext = createContext({ hoveredId: null, laterCandidateIds: null });
+export const HoveredNodeContext = createContext({ hoveredId: null });
 export const SearchDimContext = createContext({ searchActive: false, matchIds: null });
 
 // Fixed, per-type socket colors — Blender-node-style (a Geometry socket is
@@ -220,39 +220,29 @@ function SocketDropdown({ typeLabel, options, selectedEdgeId, elapsed, onSelectV
   );
 }
 
-// state is one of null | 'playing' | 'next' | 'later' — the only three
-// highlight treatments the graph uses now (no badge, no black-fill-means-
-// selected ambiguity).
+// state is one of null | 'active' | 'selected' — Active is whatever's
+// really playing; Selected is purely "what was last clicked". No more
+// Playing/Next/Later: a node either is or isn't currently sounding, and
+// either is or isn't what the right-side detail pane is showing.
 export function SongNode({ data }) {
   const {
-    song, state: baseState, inCount, outCount, onEnter, onLeave, playing, onSelect,
+    song, state, inCount, outCount, onEnter, onLeave, playing, onSelect,
     leftAvailable, rightAvailable, leftActive, rightActive, leftEdgeId, rightEdgeId,
     leftOptions, rightOptions, rightCueSeconds, onToggleSocket, onSelectVariant,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
-  const { hoveredId, laterCandidateIds } = useContext(HoveredNodeContext);
+  const { hoveredId } = useContext(HoveredNodeContext);
   const { searchActive, matchIds } = useContext(SearchDimContext);
   const hovered = hoveredId === song.id;
   const dimmed = searchActive && matchIds && !matchIds.has(song.id);
-  // The "later" hover-preview highlight is layered on here, off context,
-  // rather than folded into `baseState` upstream — see the comment on
-  // `stateFor` in PerformPage.jsx for why that dependency has to stay out
-  // of the node-rebuild effect entirely.
-  const state = baseState || (laterCandidateIds && laterCandidateIds.has(song.id) ? 'later' : null);
   const position = (playing && nowPlaying.nowPlayingId === song.id) ? nowPlaying : null;
   const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
-  // Color match: the playing song's own cover art picks the tone here (see
-  // dominantColor.js) instead of the fixed accent blue those state-* classes
-  // paint by default — "next"/"later" get muted versions of that same
-  // color, exactly the relationship the static palette already has between
-  // --state-playing/-next/-later, just recolored per song. No cover (or no
-  // decoded color yet) leaves the CSS classes' fixed blue in charge.
+  // Color match (dominantColor.js) only ever applies to the Active card now
+  // — Selected is a plain UI cursor, not a performance state, so it gets a
+  // plain CSS accent border/background (see .node-card.state-selected)
+  // rather than a cover-derived tint.
   const palette = nowPlaying.palette;
-  const dynamicStyle = !palette ? undefined
-    : state === 'playing' ? { background: palette.playing, borderColor: palette.playing }
-    : state === 'next' ? { background: palette.nextBg, borderColor: palette.next }
-    : state === 'later' ? { background: palette.laterBg, borderColor: palette.later }
-    : undefined;
+  const dynamicStyle = (state === 'active' && palette) ? { background: palette.playing, borderColor: palette.playing } : undefined;
   const onToggle = (side, type) => onToggleSocket(song.id, side, type);
   // Only the song actually playing has a live elapsed clock to count down
   // against — a wired-but-not-yet-playing outro/transition just shows its
@@ -313,10 +303,9 @@ export function SongNode({ data }) {
 // graph doesn't have one card whose socket looks like an entirely
 // different control.
 export function EndNode({ data }) {
-  const { state, queued } = data;
-  const cls = ['end-node', state && 'state-' + state].filter(Boolean).join(' ');
+  const { queued } = data;
   return (
-    <div className={cls}>
+    <div className="end-node">
       <div className="node-socket-row">
         <Handle
           type="target" position={Position.Left} id="left-none"

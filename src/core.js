@@ -64,42 +64,55 @@ export function emptySession() {
     // because this is the one already-persisted bucket both PerformPage
     // and GraphPane already share.
     startPos: null, endPos: null,
+    // Which songs actually have a node placed on the graph canvas — null
+    // means "not migrated yet" (PerformPage seeds it from every song that
+    // already exists, once, on first load) rather than "empty", so an
+    // existing library's graph isn't wiped the moment this field ships.
+    // Once set, it's authoritative: a song added later via Upload/Library
+    // does NOT automatically get a node here too — a library is meant to
+    // hold far more songs than any one set actually uses, and dumping every
+    // one of them onto the canvas at once was reported directly as making
+    // it impossible to build a readable playlist. Placing a song (the
+    // canvas's "Add node here") or removing one just drops/adds its id.
+    canvasIds: null,
   };
 }
 
 // The graph-as-playlist-editor's live wiring (TODO.md has the full spec).
 // A sparse map keyed by songId — most songs in a library won't participate.
-// One direction of truth: a connection is always written from its source's
-// `nextSongId`/`endMode`/`endEdgeId`, and the destination's `startMode`/
-// `startEdgeId` are kept in sync by the same write, never set independently.
-// `startSongId` is the one place Start Set differs from every other node:
-// it has no `endMode`/`nextSongId` of its own (it isn't a song, nothing
-// ever plays "from" it in the queue sense), so "which song is Start
-// currently wired to" needs its own pointer rather than reusing the
-// per-song wiring fields. The destination song's own `startMode`/
-// `startEdgeId` (already how Outro→Intro wiring works) still say *how* it
-// begins — this only says *which* song that is.
-export function emptyActivePlaylist() { return { id: null, name: '', nodes: {}, startSongId: null }; }
+// One direction of truth: an ordinary connection is always written from its
+// source's `nextSongId`/`endMode`/`endEdgeId`, and the destination's
+// `startMode`/`startEdgeId` are kept in sync by the same write, never set
+// independently. `startSongId`/`startMode`/`startEdgeId` are Start Set's own,
+// entirely separate fields — it has no `endMode`/`nextSongId` (it isn't a
+// song, nothing ever plays "from" it in the queue sense), and critically it
+// does NOT share the destination song's `startMode`/`startEdgeId` the way an
+// earlier version of this once did. This is a genuinely non-linear editor —
+// a song can just as easily be reached by Start jumping straight to it as by
+// some other song's Outro/Transition leading into it, and those two paths
+// can legitimately want different arrival styles (Start cutting straight in
+// vs. another song's outro flowing into this one's own intro). Sharing one
+// field between them meant wiring Start to a song silently overwrote (or got
+// silently overwritten by) whatever a completely unrelated incoming wire
+// into that same song had already chosen — reported directly as a bug: wire
+// Start to song A's None, separately wire song B's Outro to A's Intro, and
+// the two "fight" over A's one shared field instead of both simply working.
+export function emptyActivePlaylist() { return { id: null, name: '', nodes: {}, startSongId: null, startMode: 'none', startEdgeId: null }; }
 
 // Wires Start Set to `songId` — v1 single-slot, same as every other socket:
 // dragging a new connection from Start silently replaces whichever song
-// was wired before. Writes the destination's startMode/startEdgeId exactly
-// like a normal Outro→Intro/None wire would, so the song's own left-side
-// socket shows the same "active" state regardless of which end (another
-// song's Outro, or Start itself) put it there.
+// was wired before. Deliberately never touches `nodes[songId]` — Start's
+// own arrival style lives entirely on the playlist's own startMode/
+// startEdgeId fields (see emptyActivePlaylist's comment above) so it can
+// never collide with an unrelated ordinary wire into the same song.
 export function wireStart(playlist, songId, startMode, startEdgeId) {
-  const nodes = { ...playlist.nodes, [songId]: { ...playlistNode(playlist, songId), startMode, startEdgeId: startEdgeId || null } };
-  return { ...playlist, nodes, startSongId: songId };
+  return { ...playlist, startSongId: songId, startMode, startEdgeId: startEdgeId || null };
 }
-// Disconnects Start Set, clearing the previously-wired song's left socket
-// back to None rather than leaving it claiming a start method that Start
-// no longer actually points at.
+// Disconnects Start Set. Nothing to clean up on any song's own node entry —
+// Start never wrote to one (see wireStart) — just clear Start's own pointer.
 export function unwireStart(playlist) {
   if (!playlist.startSongId) return playlist;
-  const songId = playlist.startSongId;
-  const nodes = { ...playlist.nodes };
-  if (nodes[songId]) nodes[songId] = { ...nodes[songId], startMode: 'none', startEdgeId: null };
-  return { ...playlist, nodes, startSongId: null };
+  return { ...playlist, startSongId: null, startMode: 'none', startEdgeId: null };
 }
 
 function playlistNode(playlist, songId) {
@@ -177,8 +190,11 @@ export function removeSongFromPlaylist(playlist, songId) {
     const node = playlist.nodes[id];
     nodes[id] = node.nextSongId === songId ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null } : node;
   }
-  const startSongId = playlist.startSongId === songId ? null : playlist.startSongId;
-  return { ...playlist, nodes, startSongId };
+  const wasStart = playlist.startSongId === songId;
+  const startSongId = wasStart ? null : playlist.startSongId;
+  const startMode = wasStart ? 'none' : playlist.startMode;
+  const startEdgeId = wasStart ? null : playlist.startEdgeId;
+  return { ...playlist, nodes, startSongId, startMode, startEdgeId };
 }
 
 // The tick loop's deterministic auto-continue: what activePlaylist says

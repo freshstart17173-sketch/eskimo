@@ -131,10 +131,19 @@ export function Playhead({ pct, onSeek }) {
   }, []);
 
   const shownPct = dragPct != null ? dragPct : pct;
+  // `pct` only actually changes once a second (it's driven by the set
+  // clock's own 1Hz tick) — a plain width jump every second reads as a
+  // visibly stepping playhead. A short CSS transition smooths those steps
+  // into continuous motion for free, with no per-frame JS at all — long
+  // enough to erase the step, short enough that a deliberate seek or a
+  // skip to a new song still reads as landing right where it should, not
+  // visibly crawling there. Off entirely during an active drag so a scrub
+  // tracks the pointer with zero lag.
+  const transition = dragPct == null ? 'width .3s ease-out, left .3s ease-out' : 'none';
   return (
     <div className="playhead-track" ref={trackRef} onPointerDown={onPointerDown}>
-      <div className="playhead-fill" style={{ width: shownPct + '%' }} />
-      <div className="playhead-scrubber" style={{ left: shownPct + '%' }} />
+      <div className="playhead-fill" style={{ width: shownPct + '%', transition }} />
+      <div className="playhead-scrubber" style={{ left: shownPct + '%', transition }} />
     </div>
   );
 }

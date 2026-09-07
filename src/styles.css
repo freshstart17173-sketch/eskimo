@@ -156,6 +156,17 @@ a { color: var(--accent); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 @keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* The canvas's "Add node" picker — a plain search list over the library's
+   unplaced songs, not an upload form (see AddNodeModal, PerformPage.jsx). */
+.add-node-results { max-height: 280px; overflow-y: auto; margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+.add-node-result { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 5px; text-align: left; width: 100%; }
+.add-node-result:hover { background: var(--panel); }
+.add-node-result-art { width: 30px; height: 30px; flex: none; border-radius: 4px; }
+.add-node-result-text { min-width: 0; display: flex; flex-direction: column; }
+.add-node-result-title { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-node-result-artist { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-node-empty { font-size: 12px; color: var(--faint); font-style: italic; padding: 10px 4px; }
+
 /* The hover-✕ on an active wire (a real transition or a plain wired
    sequence link) — deliberately its own small dedicated target rather
    than the wire itself being clickable, same reasoning as every other
@@ -363,6 +374,30 @@ a { color: var(--accent); }
    --------------------------------------------------------------- */
 .perform-layout { flex: 1; min-height: 0; display: flex; }
 .graph-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; position: relative; }
+
+/* The right-side detail pane — the only place a Selected (not necessarily
+   Active) node's full specifics show now that clicking a node no longer
+   starts anything on its own. */
+.detail-pane {
+  width: 260px; flex: none; border-left: 1px solid var(--line-soft); background: var(--paper);
+  padding: 16px 14px; overflow-y: auto; position: relative;
+}
+.detail-pane-close { position: absolute; top: 10px; right: 10px; }
+.detail-pane-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding-right: 20px; }
+.detail-pane-art { width: 44px; height: 44px; flex: none; border-radius: 5px; }
+.detail-pane-title { font-weight: 700; font-size: 14px; line-height: 1.3; }
+.detail-pane-artist { font-size: 12px; color: var(--muted); }
+.detail-pane-tags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 12px; }
+.detail-pane-play { width: 100%; justify-content: center; margin-bottom: 16px; }
+.detail-pane-section { margin-bottom: 12px; }
+.detail-pane-section-title {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--faint);
+  margin-bottom: 3px;
+}
+.detail-pane-count { font-family: var(--font-mono); text-transform: none; letter-spacing: 0; }
+.detail-pane-row { font-size: 12.5px; color: var(--ink); }
+.detail-pane-cue { color: var(--muted); }
 .sequence-pane {
   width: 320px; flex: none; border-left: 1px solid var(--line-soft); background: var(--paper);
   display: flex; flex-direction: column; min-height: 0;
@@ -530,14 +565,6 @@ a { color: var(--accent); }
 [data-tooltip-above]::after { top: auto; bottom: calc(100% + 7px); transform: translateX(-50%) translateY(3px); }
 [data-tooltip-above]:hover::after, [data-tooltip-above]:focus-visible::after { transform: translateX(-50%) translateY(0); }
 
-.legend { display: flex; align-items: center; gap: 9px; font-size: 10.5px; color: var(--faint); }
-.legend span { display: inline-flex; align-items: center; }
-/* three plain squares, color is the whole point — no shape variation to read */
-.swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
-.swatch-playing { background: var(--state-playing); }
-.swatch-next { background: var(--state-next); }
-.swatch-later { background: var(--state-later); }
-
 .toolbar-btn {
   display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
   padding: 6px 10px; border-radius: var(--radius); background: var(--panel); color: var(--muted);
@@ -546,14 +573,6 @@ a { color: var(--accent); }
 .toolbar-btn.active { background: var(--ink); color: var(--paper); }
 .toolbar-spacer { margin-left: auto; }
 
-/* Deliberately loud and set apart from the rest of the toolbar — this ends
-   the set, so it should never blend in with routine navigation buttons or
-   sit somewhere a stray click during normal graph use could land on it. */
-.toolbar-end-set-btn {
-  display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
-  padding: 6px 12px; border-radius: var(--radius); background: #d32f2f; color: #fff;
-}
-.toolbar-end-set-btn:hover { filter: brightness(1.1); }
 .toolbar-start-set-btn {
   display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
   padding: 6px 12px; border-radius: var(--radius); background: #2e7d32; color: #fff;
@@ -572,8 +591,13 @@ a { color: var(--accent); }
    rather than a whole card of its own. */
 .player-bar {
   display: flex; align-items: center; gap: 12px; padding: 8px 14px;
-  background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+  background: var(--panel); flex: none;
 }
+/* Sits at the very bottom of the page now (below the graph/detail-pane
+   row in document order) rather than as a strip above the graph — a top
+   border separates it from the canvas above instead of the bottom border
+   a top-of-page strip used. */
+.player-bar-bottom { border-top: 1px solid var(--line); border-bottom: none; }
 .player-bar-now { display: flex; align-items: center; gap: 8px; min-width: 0; flex: none; width: 170px; }
 .player-bar-art { width: 32px; height: 32px; flex: none; border-radius: 4px; }
 .player-bar-text { min-width: 0; }
@@ -583,13 +607,36 @@ a { color: var(--accent); }
 .player-bar-time:last-of-type { text-align: right; }
 .player-bar-scrub { flex: 1; min-width: 80px; }
 .player-bar .playhead-track { background: rgba(19, 19, 19, .12); margin-top: 0; }
-.player-bar-volume { display: flex; align-items: center; gap: 6px; color: var(--muted); flex: none; }
-.player-bar-volume input[type="range"] { width: 70px; accent-color: var(--accent); }
-.player-bar-next { display: flex; align-items: center; gap: 6px; flex: none; width: 170px; justify-content: flex-end; min-width: 0; }
-.player-bar-next-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); }
+/* The volume control collapses to a plain icon and only opens a slider on
+   click (see VolumeControl, PerformPage.jsx) — "most things should
+   disappear until clicked" applied to the one always-open control this bar
+   used to have. Sits at the far edge of the bar, its own popover anchored
+   above it so it never gets clipped by the page's bottom edge. */
+.player-bar-volume { position: relative; flex: none; margin-left: auto; }
+.player-bar-volume-popover {
+  position: absolute; bottom: calc(100% + 8px); right: -4px; z-index: 20;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .16); padding: 10px 8px;
+}
+.player-bar-volume-popover input[type="range"] {
+  writing-mode: vertical-lr; direction: rtl; width: 6px; height: 80px; accent-color: var(--accent);
+}
+.player-bar-next { display: flex; align-items: center; gap: 6px; flex: none; max-width: 260px; min-width: 0; }
+.player-bar-hop-type {
+  font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); white-space: nowrap; flex: none;
+}
 .player-bar-art-sm { width: 22px; height: 22px; flex: none; border-radius: 3px; }
 .player-bar-next-title { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-bar-next-end { font-style: italic; color: var(--muted); }
 .player-bar-next-empty { font-size: 11px; color: var(--faint); font-style: italic; }
+/* A small filling dot standing in for "how far into the crossfade we are" —
+   deliberately tiny (this is a glance-at indicator, not a second playhead);
+   `--pct` is set inline per-render. */
+.player-bar-crossfade {
+  flex: none; width: 20px; height: 20px; border-radius: 50%; position: relative;
+  background: conic-gradient(var(--accent) var(--pct), var(--line) 0);
+}
 
 /* ---------------------------------------------------------------
    Graph canvas (React Flow) — themed to match the flat/paper design
@@ -628,7 +675,7 @@ a { color: var(--accent); }
   display: flex; flex-direction: column; gap: 2px; margin-top: 9px; padding-top: 8px;
   border-top: 1px dashed var(--line);
 }
-.state-playing .node-socket-section { border-top-color: rgba(252, 252, 252, .25); }
+.state-active .node-socket-section { border-top-color: rgba(252, 252, 252, .25); }
 /* The two label/dot columns — kept compact so the fixed three rows per
    side never take much vertical space; a dropdown never lives in here,
    it drops to its own full-width line below (see .node-socket-dropdown-row). */
@@ -658,9 +705,9 @@ a { color: var(--accent); }
 }
 .node-socket-row-active .node-socket-label { color: var(--ink); font-weight: 700; }
 .node-socket-row-unavailable .node-socket-label { color: var(--faint); font-weight: 500; }
-.state-playing .node-socket-label { color: rgba(252, 252, 252, .6); }
-.state-playing .node-socket-row-active .node-socket-label { color: var(--paper-fixed); }
-.state-playing .node-socket-row-unavailable .node-socket-label { color: rgba(252, 252, 252, .3); }
+.state-active .node-socket-label { color: rgba(252, 252, 252, .6); }
+.state-active .node-socket-row-active .node-socket-label { color: var(--paper-fixed); }
+.state-active .node-socket-row-unavailable .node-socket-label { color: rgba(252, 252, 252, .3); }
 
 /* One full-width line per side that currently has 2+ produced candidates
    for its active slot (see socketDataById's `*Options`) — deliberately
@@ -672,17 +719,17 @@ a { color: var(--accent); }
 .node-socket-dropdown-caption {
   font-size: 9px; font-weight: 700; color: var(--muted); white-space: nowrap; flex: none;
 }
-.state-playing .node-socket-dropdown-caption { color: rgba(252, 252, 252, .6); }
+.state-active .node-socket-dropdown-caption { color: rgba(252, 252, 252, .6); }
 .node-socket-select-wrap { position: relative; flex: 1; min-width: 0; }
 .node-socket-select {
   display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0;
   font-size: 10px; padding: 3px 5px; border-radius: 4px; text-align: left;
   border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer;
 }
-.state-playing .node-socket-select { background: rgba(252, 252, 252, .12); border-color: rgba(252, 252, 252, .35); color: var(--paper-fixed); }
+.state-active .node-socket-select { background: rgba(252, 252, 252, .12); border-color: rgba(252, 252, 252, .35); color: var(--paper-fixed); }
 .node-socket-select-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node-socket-select-chevron { flex: none; font-size: 8px; color: var(--muted); }
-.state-playing .node-socket-select-chevron { color: rgba(252, 252, 252, .5); }
+.state-active .node-socket-select-chevron { color: rgba(252, 252, 252, .5); }
 
 /* The open listbox — an absolutely positioned overlay so it doesn't push
    the node's own layout around, matching how a native <select> popup
@@ -709,7 +756,7 @@ a { color: var(--accent); }
    needing to read the dropdown first. */
 .socket-countdown-ring { flex: none; }
 .socket-countdown-track { stroke: var(--line); stroke-width: 2.4; }
-.state-playing .socket-countdown-track { stroke: rgba(252, 252, 252, .25); }
+.state-active .socket-countdown-track { stroke: rgba(252, 252, 252, .25); }
 
 /* One dot style, everywhere, full stop — no socket looks like an
    exception. Every *available* socket (active or not) renders identically:
@@ -817,24 +864,26 @@ a { color: var(--accent); }
    over on its way to a real target doesn't need to grow for that to
    register — the shadow lift alone reads as "hovered" fine. */
 .node-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); }
-.node-card.state-playing {
+.node-card.state-active {
   background: var(--state-playing); color: var(--paper-fixed); border-color: var(--state-playing);
   animation: pulseRing 2.4s ease-in-out infinite; transform: scale(1.08); z-index: 5;
 }
-.node-card.state-next { background: var(--state-next-bg); border-color: var(--state-next); }
-.node-card.state-later { background: var(--state-later-bg); border-color: var(--state-later); }
+/* Selected is a plain UI cursor ("what the detail pane is showing"), not a
+   performance state — a visible accent outline with no color-match tint,
+   clearly distinct from Active's full color-matched fill. */
+.node-card.state-selected { border-color: var(--accent); border-width: 2px; box-shadow: 0 0 0 3px var(--accent-bg); }
 .node-card.node-hovered { box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }
 .node-card.node-dimmed { opacity: .28; }
 .node-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .node-title { font-weight: 600; font-size: 13px; line-height: 1.3; }
 .node-artist { font-size: 11px; margin-bottom: 6px; color: var(--muted); line-height: 1.3; }
-.state-playing .node-artist { color: rgba(252, 252, 252, .7); }
+.state-active .node-artist { color: rgba(252, 252, 252, .7); }
 .node-art { width: 26px; height: 26px; flex: none; border-radius: 3px; }
 .node-tags-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .node-tags { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.state-playing .tag { border-color: rgba(252, 252, 252, .55); color: var(--paper-fixed); }
+.state-active .tag { border-color: rgba(252, 252, 252, .55); color: var(--paper-fixed); }
 .node-io { font-family: var(--font-mono); font-size: 9.5px; color: var(--faint); letter-spacing: .01em; white-space: nowrap; line-height: 1; }
-.state-playing .node-io { color: rgba(252, 252, 252, .55); }
+.state-active .node-io { color: rgba(252, 252, 252, .55); }
 
 /* tiny animated waveform — only the Playing node gets this, a quiet "this
    one is actually live" signal instead of a static badge */
@@ -862,7 +911,6 @@ a { color: var(--accent); }
   background: var(--paper); color: var(--ink); border: 1.5px solid var(--line); cursor: default;
   transition: box-shadow .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
 }
-.end-node.state-next { background: var(--state-next-bg); border-color: var(--state-next); }
 .end-node-title { display: flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; }
 .end-node-hint { font-size: 10px; margin-top: 2px; color: var(--faint); }
 

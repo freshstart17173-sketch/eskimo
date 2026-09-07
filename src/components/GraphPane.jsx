@@ -152,7 +152,7 @@ export default function GraphPane({
   songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId,
   onConnect, isValidConnection, onDisconnectSong, onDisconnectStart,
   stateFor, ioById,
-  hoveredId, setHoveredId, matchIds, searchActive, laterCandidateIds,
+  hoveredId, setHoveredId, matchIds, searchActive,
   onDragSongPosition, endQueued, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
   onPaneContextMenu, onNodeContextMenu,
@@ -186,7 +186,7 @@ export default function GraphPane({
       data: {
         song: s, state, inCount: io.inCount, outCount: io.outCount,
         onEnter: () => setHoveredId(id), onLeave: () => setHoveredId(null), onSelect: () => onSelectSong(id),
-        onToggleSocket, onSelectVariant, ...socketData, playing: state === 'playing',
+        onToggleSocket, onSelectVariant, ...socketData, playing: state === 'active',
       },
       style: SONG_STYLE,
     };
@@ -195,7 +195,7 @@ export default function GraphPane({
     const pos = positions[END] || { x: 1250, y: 20 };
     return {
       id: END, type: 'end', position: pos, draggable: true,
-      data: { state: stateFor(END), queued: endQueued },
+      data: { queued: endQueued },
       style: END_STYLE,
     };
   }
@@ -248,7 +248,13 @@ export default function GraphPane({
       // (reading 'x')" from exactly this line.
       if (n.id !== END && n.id !== START && !songs[n.id]) return n;
       const updated = n.id === END ? endNodeFor() : n.id === START ? startNodeFor() : nodeFor(n.id);
-      return { ...updated, position: n.position };
+      // Preserve position AND React Flow's own multi-select flag the same
+      // way — both are live, RF-owned state this effect must never stomp:
+      // `selected` fed a drag-selection box built for exactly this (moving
+      // several nodes together), and losing it mid-selection to the very
+      // next data refresh (every playback tick, while a set is running)
+      // would clear a box-select before a drag could ever use it.
+      return { ...updated, position: n.position, selected: n.selected };
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [songs, stateFor, ioById, socketDataById, endQueued, activePlaylist.startSongId, nowPlayingId, onSelectSong]);
@@ -328,8 +334,13 @@ export default function GraphPane({
       }
     });
     if (activePlaylist.startSongId && songs[activePlaylist.startSongId]) {
-      const destNode = activePlaylist.nodes[activePlaylist.startSongId];
-      const startMode = (destNode && destNode.startMode) || 'none';
+      // Start's own arrival choice — activePlaylist.startMode, NOT the
+      // destination song's node.startMode. They're deliberately independent
+      // fields now (see wireStart's comment in core.js): a song can be fed
+      // an Intro by some other song's Outro while Start still cuts straight
+      // into it with None, or vice versa, without either wire clobbering
+      // the other's own choice.
+      const startMode = activePlaylist.startMode || 'none';
       edgesOut.push({
         id: 'link-start', source: START, target: activePlaylist.startSongId,
         sourceHandle: 'start-out', targetHandle: 'left-' + startMode,
@@ -345,6 +356,14 @@ export default function GraphPane({
   const onNodeDragStop = useCallback((_, node) => {
     onDragSongPosition(node.id, node.position.x, node.position.y);
   }, [onDragSongPosition]);
+  // Dragging a multi-node selection box-move together only fires
+  // onNodeDragStop for the one node the gesture actually grabbed — every
+  // other node that rode along needs its own new position persisted too,
+  // or it would snap back the moment anything else on the canvas triggers
+  // the position-sync effect below.
+  const onSelectionDragStop = useCallback((_, nodes) => {
+    nodes.forEach(n => onDragSongPosition(n.id, n.position.x, n.position.y));
+  }, [onDragSongPosition]);
 
   // The color-match feature (see dominantColor.js): derived once here, off
   // the playing song's own cover, and read by every node through context —
@@ -357,11 +376,7 @@ export default function GraphPane({
     () => ({ nowPlayingId, elapsed: nowElapsedSec, duration: nowDurationSec, palette }),
     [nowPlayingId, nowElapsedSec, nowDurationSec, palette]
   );
-  // laterCandidateIds rides along in the same context as hoveredId (it's
-  // itself hover-derived — see the long comment on `stateFor` in
-  // PerformPage.jsx for why this must reach SongNode this way and never
-  // through the node-rebuild effect/`data`).
-  const hoveredNodeValue = useMemo(() => ({ hoveredId, laterCandidateIds }), [hoveredId, laterCandidateIds]);
+  const hoveredNodeValue = useMemo(() => ({ hoveredId }), [hoveredId]);
   const searchDimValue = useMemo(() => ({ searchActive, matchIds }), [searchActive, matchIds]);
 
   const [hoveredEdgeId, setHoveredEdgeId] = useState(null);
@@ -379,6 +394,7 @@ export default function GraphPane({
           edges={rfEdges}
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
+          onSelectionDragStop={onSelectionDragStop}
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
           onPaneContextMenu={onPaneContextMenu}
@@ -390,7 +406,21 @@ export default function GraphPane({
           nodesConnectable
           connectionMode={ConnectionMode.Loose}
           connectionRadius={40}
-          elementsSelectable={false}
+          elementsSelectable
+          deleteKeyCode={null}
+          // Left-drag on empty canvas draws a selection box by default (see
+          // onSelectionDragStop above); panning moves to holding Shift while
+          // dragging instead. Reported directly as a real usability bug: a
+          // plain click-drag panning the canvas by default meant a stray
+          // right-click-menu dismissal had "no way to undo it" — the pane's
+          // own default gesture was fighting the menu instead of just
+          // closing it. selectionKeyCode is turned off (null) since Shift's
+          // one job here is panOnDrag's activation key, not also a second,
+          // conflicting way to trigger the selection box.
+          panOnDrag={false}
+          selectionOnDrag
+          selectionKeyCode={null}
+          panActivationKeyCode="Shift"
           minZoom={0.25}
           maxZoom={2.5}
           colorMode={isDark ? 'dark' : 'light'}
