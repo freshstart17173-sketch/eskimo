@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { uid, fmtTime, clamp, pseudoCuePoints, pickDetectedSongs, uploadAudioIfConfigured, occludedTransitions } from '../core.js';
 import { detectMatch } from '../audioDetect.js';
 import { Field, Dropzone, SongPicker } from './shared.jsx';
+import TransitionPreviewPlayer from './TransitionPreviewPlayer.jsx';
 
 export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUpload, onLoadExample }) {
   const [file, setFile] = useState(null);
@@ -144,7 +145,14 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
         </Field>
         {previewUrl && (
           <Field label="Listen before you save it">
-            <div className="audio-preview"><audio controls src={previewUrl} /></div>
+            {detected && (leftSong || rightSong) ? (
+              <TransitionPreviewPlayer
+                file={file} leftSong={leftSong} rightSong={rightSong}
+                outSeconds={cue ? cue.outSeconds : null} inSeconds={cue ? cue.inSeconds : null}
+              />
+            ) : (
+              <div className="audio-preview"><audio controls src={previewUrl} /></div>
+            )}
           </Field>
         )}
 
