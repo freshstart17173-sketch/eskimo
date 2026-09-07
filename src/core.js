@@ -672,8 +672,14 @@ export function queueTailId(nowPlayingId, queue) {
   return tail ? (tail.id === END ? null : tail.id) : nowPlayingId;
 }
 
-export function hopEndingLabel(e) { return e === 'outro' ? 'outro' : 'cut'; }
-export function hopStartingLabel(s) { return s === 'intro' ? 'intro' : 'cut'; }
+// Display labels only — the underlying mode/ending/starting values stay
+// 'cut' internally (renaming those would ripple through every hop object
+// in session/queue state for no real benefit); "cut" read as a leftover
+// pre-rename word here specifically because these two feed user-visible
+// text (the player bar's hop-type readout, hopSummary below) and never
+// got the same None rename the socket labels themselves already had.
+export function hopEndingLabel(e) { return e === 'outro' ? 'outro' : 'none'; }
+export function hopStartingLabel(s) { return s === 'intro' ? 'intro' : 'none'; }
 export function hopSummary(hop) {
   if (hop.id === END) return hopEndingLabel(hop.ending);
   if (hop.mode === 'transition') return 'transition';
