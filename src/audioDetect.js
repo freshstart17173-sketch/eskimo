@@ -41,7 +41,7 @@ const WINDOW_SEC = 0.05; // ~50ms RMS windows — coarse but resistant to bit-le
 const MATCH_THRESHOLD = 0.7;
 
 let sharedAudioCtx = null;
-function getAudioContext() {
+export function getAudioContext() {
   if (!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return sharedAudioCtx;
 }
@@ -172,7 +172,7 @@ export async function fetchEdgesRanged(url, edgeSeconds = EDGE_SECONDS) {
 }
 
 // Mono-mixed RMS envelope over fixed-size windows.
-function rmsEnvelope(buffer, startSample, endSample, windowSize) {
+export function rmsEnvelope(buffer, startSample, endSample, windowSize) {
   const channels = [];
   for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
   const n = Math.max(0, endSample - startSample);
