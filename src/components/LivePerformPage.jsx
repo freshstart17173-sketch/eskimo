@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
   END, getVisibleEdges, queueTailId, transitionCandidates, cutCandidates, fmtTime, clamp,
 } from '../core.js';
-import { engine, performAdvance } from '../audioEngine.js';
+import { useTransportControls } from '../playbackControls.js';
 import { Icon, ICONS, ConfirmModal, SongPicker, AlbumArt, usePalette } from './shared.jsx';
 
 // A dedicated, non-graph live-performance screen — the node graph is great
@@ -54,6 +54,7 @@ export default function LivePerformPage({ songs, edges, session, setSession }) {
   const hasStarted = session.nowPlayingId !== null;
   const visibleEdges = useMemo(() => getVisibleEdges(edges), [edges]);
   const findEdge = useCallback((pred) => visibleEdges.find(pred), [visibleEdges]);
+  const { startSet, togglePlaying, skipNow, resumeSet } = useTransportControls({ songs, visibleEdges, setSession });
   const fromId = useMemo(() => (hasStarted ? queueTailId(session.nowPlayingId, session.queue) : null), [hasStarted, session.nowPlayingId, session.queue]);
   const usedIds = useMemo(() => new Set([session.nowPlayingId, ...session.queue.map(q => q.id)]), [session.nowPlayingId, session.queue]);
   const nowSong = hasStarted ? songs[session.nowPlayingId] : null;
@@ -118,27 +119,12 @@ export default function LivePerformPage({ songs, edges, session, setSession }) {
     setPendingStart(null);
   }
 
-  function startSet(songId, starting) {
-    const song = songs[songId];
-    const introEdge = starting === 'intro' ? findEdge(e => e.type === 'intro' && e.r === songId) : null;
-    engine.startMain(song, introEdge);
-    setSession(prev => ({
-      ...prev, nowPlayingId: songId, startMethod: starting,
-      queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false,
-    }));
+  // startSet/togglePlaying/skipNow/resumeSet come from useTransportControls
+  // above — the same functions PerformPage.jsx uses, so the graph and this
+  // flat live screen can never quietly diverge on what any of them do.
+  function pickStart(songId, starting) {
+    startSet(songId, starting);
     setStartPickId(null);
-  }
-  function togglePlaying() {
-    setSession(prev => {
-      const isPlaying = !prev.isPlaying;
-      if (isPlaying) engine.resume(); else engine.pause();
-      return { ...prev, isPlaying };
-    });
-  }
-  function skipNow() { setSession(prev => performAdvance(prev, songs, visibleEdges)); }
-  function resumeSet() {
-    engine.stopAll();
-    setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, autoHistory: [] }));
   }
   function requestEndSet() {
     setEndSetEnding(hasOutroForPlaying ? 'outro' : 'cut');
@@ -165,7 +151,7 @@ export default function LivePerformPage({ songs, edges, session, setSession }) {
                 <button className={'seq-toggle' + (startPickMode === 'cut' ? ' active' : '')} onClick={() => setStartPickMode('cut')}>Cut</button>
                 <button className={'seq-toggle' + (startPickMode === 'intro' ? ' active' : '')} onClick={() => setStartPickMode('intro')}>Intro</button>
               </div>
-              <button className="btn btn-primary" style={{ width: '100%', marginTop: 9 }} onClick={() => startSet(startPickId, startPickMode)}>Start playing</button>
+              <button className="btn btn-primary" style={{ width: '100%', marginTop: 9 }} onClick={() => pickStart(startPickId, startPickMode)}>Start playing</button>
             </>
           )}
         </div>

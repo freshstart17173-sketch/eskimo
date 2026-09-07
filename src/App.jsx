@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed } from './core.js';
-import { engine, performAdvance } from './audioEngine.js';
+import { engine, performAdvance, prefetchHop, PREFETCH_LOOKAHEAD_SEC } from './audioEngine.js';
 import Sidebar from './components/Sidebar.jsx';
 
 // Lazy — each page's own module (and, for Perform, @xyflow/react + dagre +
@@ -101,6 +101,10 @@ export default function App() {
         const effectiveHead = prev.queue[0] || playlistNextHop(prev.activePlaylist, prev.nowPlayingId);
         const triggerAt = transitionTriggerElapsed(effectiveHead, edges, duration);
         if (elapsed >= triggerAt || elapsed >= duration - 0.05) return performAdvance(prev, songs, getVisibleEdges(edges));
+        // Warm the buffer cache for the upcoming hop once its cue point is
+        // within reach — see prefetchHop's own comment (audioEngine.js) for
+        // why this is safe to call every tick in that window.
+        if (triggerAt - elapsed <= PREFETCH_LOOKAHEAD_SEC) prefetchHop(effectiveHead, prev.nowPlayingId, edges, songs);
         return { ...prev, timeLeft: Math.max(0, duration - elapsed) };
       });
     }, 1000);

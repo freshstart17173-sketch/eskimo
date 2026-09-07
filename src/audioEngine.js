@@ -265,12 +265,54 @@ class AudioEngine {
 
 export const engine = new AudioEngine();
 
+// Warms the buffer cache for whatever a hop is about to need, ahead of the
+// actual cue point — called by App.jsx's tick loop once the trigger is
+// within PREFETCH_LOOKAHEAD_SEC. This doesn't fix the ~1s tick-granularity
+// timing slop (see docs/playback-model.md, Finding 2 — that needs a real
+// scheduler, not a contained patch), but it does remove the *decode
+// latency* half of the "seamless" transition gap (Finding 1): a fragment
+// that's already sitting decoded in `bufferCache` by the time performAdvance
+// actually fires starts playing on the same tick instead of after an
+// awaited fetch+decode round trip. loadBuffer already dedupes by URL, so
+// calling this every tick while inside the lookahead window is harmless —
+// only the first call for a given URL does real work.
+export const PREFETCH_LOOKAHEAD_SEC = 6;
+export function prefetchHop(hop, nowPlayingId, edges, songs) {
+  if (!hop) return;
+  if (hop.id === END) {
+    const edge = (hop.edgeId && edges.find((e) => e.id === hop.edgeId)) || edges.find((e) => e.type === 'outro' && e.l === nowPlayingId);
+    if (edge && edge.audioUrl) engine.loadBuffer(edge.audioUrl).catch(() => null);
+    return;
+  }
+  const destSong = songs[hop.id];
+  if (hop.mode === 'transition') {
+    const edge = edges.find((e) => e.id === hop.edgeId);
+    if (edge && edge.audioUrl) engine.loadBuffer(edge.audioUrl).catch(() => null);
+  } else if (hop.ending === 'outro') {
+    const edge = (hop.edgeId && edges.find((e) => e.id === hop.edgeId)) || edges.find((e) => e.type === 'outro' && e.l === nowPlayingId);
+    if (edge && edge.audioUrl) engine.loadBuffer(edge.audioUrl).catch(() => null);
+  }
+  if (destSong && destSong.audioUrl) engine.loadBuffer(destSong.audioUrl).catch(() => null);
+}
+
 // Shared by both the set-clock's automatic tick and the manual skip button
-// (App.jsx and PerformPage.jsx respectively) — one place that both decides
-// the next session state (advanceSession, core.js — unchanged) and performs
-// the matching real-audio handoff, so the two call sites can never disagree
-// about what a hop actually does.
-export function performAdvance(prevSession, songs, edges) {
+// (App.jsx and PerformPage.jsx/LivePerformPage.jsx respectively) — one place
+// that both decides the next session state (advanceSession, core.js —
+// unchanged) and performs the matching real-audio handoff, so the two call
+// sites can never disagree about what a hop actually does.
+//
+// `forceCut` is the one deliberate exception to "never disagree": a manual
+// Skip still advances to exactly the same destination the graph's wiring
+// would have picked (so the session and the Next list stay honest about
+// what's actually next), but it must NOT wait for or play a wired
+// Transition/Outro's produced clip — the whole point of Skip is "just play
+// the next song, right now, plainly", not the seamless cued handoff the
+// timer's automatic path exists for. Before this flag existed, Skip called
+// through to the exact same transition-clip logic as the timed cue-point
+// handoff, so skipping a song mid-transition-setup would still play out the
+// transition's audio first — visibly not what "skip" should mean.
+export function performAdvance(prevSession, songs, edges, opts = {}) {
+  const { forceCut = false } = opts;
   const nowPlayingId = prevSession.nowPlayingId;
   const explicitHop = prevSession.queue[0] || null;
   // No manual queue entry — fall back to the graph's own wiring (the
@@ -292,18 +334,22 @@ export function performAdvance(prevSession, songs, edges) {
   }
   if (hop) {
     if (hop.id === END) {
-      const outroEdge = hop.ending === 'outro' ? findOutroEdge(hop.edgeId) : null;
-      engine.handleHandoff({ hop, destSong: null, edges, ending: hop.ending, outroEdge });
+      const ending = forceCut ? 'cut' : hop.ending;
+      const outroEdge = ending === 'outro' ? findOutroEdge(hop.edgeId) : null;
+      engine.handleHandoff({ hop, destSong: null, edges, ending, outroEdge });
     } else {
       const destSong = songs[hop.id];
-      const outroEdge = hop.mode === 'cut' && hop.ending === 'outro' ? findOutroEdge(hop.edgeId) : null;
-      const introEdge = hop.mode === 'cut' && hop.starting === 'intro' ? edges.find((e) => e.type === 'intro' && e.r === hop.id) : null;
-      engine.handleHandoff({ hop, destSong, edges, ending: hop.ending, starting: hop.starting, outroEdge, introEdge });
+      const mode = forceCut ? 'cut' : hop.mode;
+      const ending = forceCut ? 'cut' : hop.ending;
+      const starting = forceCut ? 'cut' : hop.starting;
+      const outroEdge = mode === 'cut' && ending === 'outro' ? findOutroEdge(hop.edgeId) : null;
+      const introEdge = mode === 'cut' && starting === 'intro' ? edges.find((e) => e.type === 'intro' && e.r === hop.id) : null;
+      engine.handleHandoff({ hop: { ...hop, mode }, destSong, edges, ending, starting, outroEdge, introEdge });
     }
   } else if (prevSession.autoplay && next.nowPlayingId && next.nowPlayingId !== nowPlayingId) {
     const destSong = songs[next.nowPlayingId];
     const picked = next.autoHistory[next.autoHistory.length - 1];
-    const mode = picked ? picked.mode : 'cut';
+    const mode = forceCut ? 'cut' : (picked ? picked.mode : 'cut');
     const introEdge = mode === 'cut' ? edges.find((e) => e.type === 'intro' && e.r === next.nowPlayingId) : null;
     engine.handleHandoff({ hop: { mode }, destSong, edges, starting: introEdge ? 'intro' : 'cut', introEdge });
   } else if (!next.isPlaying) {

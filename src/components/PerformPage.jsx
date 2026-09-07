@@ -7,7 +7,8 @@ import {
   introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, hopSummary,
   addTransitionConnection, removeTransitionConnection, autoconnectNodeTransitions, autoconnectFullGraph,
 } from '../core.js';
-import { engine, performAdvance } from '../audioEngine.js';
+import { engine } from '../audioEngine.js';
+import { useTransportControls } from '../playbackControls.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
 import GraphPane from './GraphPane.jsx';
 import { Icon, ICONS, AlbumArt } from './shared.jsx';
@@ -65,6 +66,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 
   const hasStarted = session.nowPlayingId !== null;
   const visibleEdges = useMemo(() => getVisibleEdges(edges), [edges]);
+  const { startSet, togglePlaying, skipNow, resumeSet } = useTransportControls({ songs, visibleEdges, setSession });
   const transitionEdgesRaw = useMemo(() => visibleEdges.filter(e => e.type === 'transition'), [visibleEdges]);
 
   const findEdge = useCallback((pred) => visibleEdges.find(pred), [visibleEdges]);
@@ -155,17 +157,8 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     const introEdge = introEdgeFor(visibleEdges, id);
     startSet(id, introEdge ? 'intro' : 'cut');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleEdges]);
+  }, [visibleEdges, startSet]);
 
-  function startSet(songId, starting) {
-    const song = songs[songId];
-    const introEdge = starting === 'intro' ? findEdge(e => e.type === 'intro' && e.r === songId) : null;
-    engine.startMain(song, introEdge);
-    setSession(prev => ({
-      ...prev, nowPlayingId: songId, startMethod: starting,
-      queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition',
-    }));
-  }
   // The toolbar's "Start set" button — reads whatever's actually wired to
   // the Start Set node on the graph (a real, persistent connection, not a
   // one-shot trigger) and starts there. Mirrors "End set" being the one
@@ -177,21 +170,23 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   }
   // Dragging or clicking the playhead — `fraction` is 0-1 along the bar.
   // Restarts the real audio deck at the new offset when Now Playing has
-  // one (engine.seekMain), and always updates the wall-clock `timeLeft`
-  // regardless, so a song with no uploaded master still scrubs correctly
-  // via its own fallback countdown.
+  // one (engine.seekMain) and updates the wall-clock `timeLeft` to match.
+  // When a produced clip (transition/outro/intro) is what's actually
+  // sounding right now, engine.seekMain can't touch it (there's no "main
+  // deck" to seek yet) and returns false — in that case `timeLeft` must be
+  // left alone too, or the displayed countdown would silently drift out of
+  // sync with whatever's really playing until the next song's own master
+  // starts and resets it. The one case that still needs the manual
+  // `timeLeft` update despite `seekMain` returning false is a song with no
+  // uploaded master at all (nowSong.audioUrl is falsy) — there's no real
+  // deck to desync from, so the UI's own wall-clock countdown is the only
+  // thing scrubbing ever moves.
   function seekPlayhead(fraction) {
     if (!nowSong) return;
     const offsetSec = clamp(fraction, 0, 1) * nowSong.durationSec;
-    engine.seekMain(session.nowPlayingId, offsetSec);
+    const seeked = engine.seekMain(session.nowPlayingId, offsetSec);
+    if (!seeked && nowSong.audioUrl) return;
     setSession(prev => ({ ...prev, timeLeft: Math.max(0, nowSong.durationSec - offsetSec) }));
-  }
-  function togglePlaying() {
-    setSession(prev => {
-      const isPlaying = !prev.isPlaying;
-      if (isPlaying) engine.resume(); else engine.pause();
-      return { ...prev, isPlaying };
-    });
   }
   // The "Set ended" screen's primary action — a dead end (nothing queued,
   // nothing wired, autoplay off) ends the set the same way an explicit End
@@ -205,12 +200,6 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     if (!session.nowPlayingId) return;
     startSet(session.nowPlayingId, session.startMethod || 'cut');
   }
-  function resumeSet() {
-    engine.stopAll();
-    setSession(prev => ({ ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null, queue: [], timeLeft: 0, nextMode: 'transition', autoHistory: [] }));
-  }
-  // the manual skip button — same rule the set-clock's timer uses (performAdvance, audioEngine.js)
-  function skipNow() { setSession(prev => performAdvance(prev, songs, visibleEdges)); }
 
   // ---------------- layout: always manual (stored x/y) — "Arrange for me" is a one-shot action, not a mode ----------------
   // This used to be a persistent toggle: while "on", every node's position

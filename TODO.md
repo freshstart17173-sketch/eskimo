@@ -1057,18 +1057,43 @@ rebuilt around it directly, not patched:
   transition's out-point onward — never a hard cut between "the graph"
   and "what's actually sounding."
 - **Pause** pauses normally (resumes exactly where it left off, whichever
-  of original/transition audio is currently sounding).
-- **Skip** just plays the next song normally from its own start — it does
-  not force a transition.
-- **Back** goes back to the previous song.
+  of original/transition audio is currently sounding). Already correct in
+  the current model — `engine.pause()` suspends the whole AudioContext
+  clock rather than tracking play/pause per node, so whatever's actually
+  sounding (main deck or a fragment) genuinely freezes and resumes.
+- **Skip just plays the next song normally from its own start — it does
+  not force a transition.** ✅ Done in the *current* (pre-rewrite) player
+  too, not just planned for v2 — see `docs/playback-model.md` Finding 3:
+  `performAdvance` now takes `{ forceCut: true }` for a manual skip, which
+  still advances to the graph-wired destination but always as a plain cut,
+  never the transition's produced clip.
+- **Back** goes back to the previous song. Still entirely unimplemented —
+  see `docs/playback-model.md` Finding 4 for exactly what's missing
+  (no general play-history log; `session.autoHistory` only covers pure
+  autoplay picks) and the open product question this needs answered
+  first: does Back **resume** the previous song from where it had gotten
+  to, or **restart** it from 0? Don't build this without picking one.
 - **Must support starting playback from any node deep in the graph**, and
   it has to sound *identical* to having played there naturally from the
   start (right lead-in state, not literally fast-forwarding through
-  everything before it).
+  everything before it). Explicitly a v2/multi-input-model question, not a
+  bug in the current player — see `docs/playback-model.md` §2's note on
+  why a direct start is its own entry mode rather than an attempt to
+  replay "as if arrived via some specific transition."
 - **Reconceive "Set Start" as essentially a play button** — a way to start
   playback from anywhere without clicking into a node first — rather than
   a wiring concept.
 - **Reconceive "Set End" as essentially a stop button**, symmetrically.
+- **Sample-accurate lookahead scheduling** — the deeper reason "playing the
+  right audio at the right time" keeps surfacing as a live bug, not just a
+  v2 concern: the current player reacts to a 1-second polling tick and
+  always calls `source.start(ctx.currentTime, ...)` — "start right now" —
+  instead of pre-scheduling a fragment's start at an exact future
+  `AudioContext` time. See `docs/playback-model.md` Finding 2. A buffer
+  prefetch (Finding 1, `prefetchHop`/`PREFETCH_LOOKAHEAD_SEC` in
+  `audioEngine.js`) already removes the fetch/decode-latency part of the
+  gap; the remaining ~1s-or-worse timing slop needs a real scheduler, which
+  is a natural fit for this rewrite rather than a patch to the old one.
 
 ### Done this pass (round 5 — color match, right-click menus, a real live-playback bug, graph-only UI)
 Fixed a serious, real live-playback bug the user caught by ear: an
