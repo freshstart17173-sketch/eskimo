@@ -16,8 +16,22 @@ const SettingsPage = lazy(() => import('./components/Settings.jsx'));
 // Merge onto a fresh default rather than trusting the saved shape wholesale —
 // older saved sessions predate fields like autoplay/autoHistory, and a
 // missing field should fall back cleanly instead of crashing downstream.
+//
+// isPlaying is forced false regardless of what was persisted: a reload
+// tears down the AudioContext entirely, so if the tab closed mid-set
+// there is genuinely nothing sounding anymore — claiming isPlaying:true
+// here would be the session lying about what's audible, which is exactly
+// the class of bug (session vs. engine disagreeing about the truth) this
+// whole rewrite exists to eliminate. It also used to be the seed of a
+// real race: the tick would immediately start running against an engine
+// with nothing anchored (see docs/playback-model.md's reload-seek
+// finding), so a seek right after reload could get silently overwritten
+// by the tick's stale wall-clock fallback. Forcing it false means no tick
+// runs at all until the user genuinely presses Play again — see the
+// mount effect below (restores a cosmetic position only) and
+// togglePlaying (playbackControls.js, restores a real one on demand).
 const loaded = Store.load();
-const INITIAL = loaded ? { ...freshState(), ...loaded, session: { ...emptySession(), ...(loaded.session || {}) } } : freshState();
+const INITIAL = loaded ? { ...freshState(), ...loaded, session: { ...emptySession(), ...(loaded.session || {}), isPlaying: false } } : freshState();
 
 export default function App() {
   const [songs, setSongs] = useState(INITIAL.songs);
@@ -40,6 +54,26 @@ export default function App() {
         if (Array.isArray(remote.playlists)) setPlaylists(remote.playlists);
       }
     });
+  }, []);
+
+  // ---- restore a cosmetic (not real) position after a reload ----
+  // isPlaying was just forced false above regardless of what was
+  // persisted, but nowPlayingId/timeLeft still describe wherever the set
+  // actually was — worth showing correctly (the scrub bar, the countdown
+  // rings) rather than snapping to 0 until Play is pressed again. This is
+  // deliberately NOT an attempt to resume real audio: that needs an
+  // actual buffer load and a fresh user gesture, both of which
+  // togglePlaying (playbackControls.js) handles the moment Play is
+  // actually pressed. Runs once, before the tick loop below ever
+  // considers `session.nowPlayingId` (isPlaying is false, so it won't
+  // anyway) — see engine.restoreCosmeticPosition's own comment and
+  // docs/playback-model.md's reload-seek finding for why this exists.
+  useEffect(() => {
+    if (session.nowPlayingId) {
+      const song = songs[session.nowPlayingId];
+      if (song) engine.restoreCosmeticPosition(song, song.durationSec - session.timeLeft);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---- debounced persistence: local write is instant, remote push is best-effort ----

@@ -68,13 +68,33 @@ export function useTransportControls({ songs, visibleEdges, setSession }) {
     startSet(songId, starting);
   }, [startSet, setSession]);
 
+  // Turning playback on usually just means resuming the AudioContext —
+  // whatever was already anchored (a real deck or a 'silent' cosmetic
+  // one) keeps sounding/counting down right where it was. The one
+  // exception is right after a reload: nothing real ever got a chance to
+  // load (App.jsx's mount effect only restores a cosmetic position, on
+  // purpose — see its own comment), so the anchor sitting there is the
+  // wrong *kind* for a song that actually has uploaded audio. Detected by
+  // comparing what kind the anchor should be (real audio exists ->
+  // 'main', otherwise 'silent') against what's actually there; a mismatch
+  // means reconstruct it for real, at the persisted position, inside this
+  // very click so the browser's autoplay gesture requirement is satisfied
+  // — never silently do nothing the way a plain engine.resume() would.
   const togglePlaying = useCallback(() => {
     setSession(prev => {
       const isPlaying = !prev.isPlaying;
-      if (isPlaying) engine.resume(); else engine.pause();
+      if (isPlaying) {
+        const song = songs[prev.nowPlayingId];
+        const expectedKind = song && song.audioUrl ? 'main' : 'silent';
+        const hasCorrectAnchor = engine._current && engine._current.kind === expectedKind && engine._current.songId === prev.nowPlayingId;
+        if (song && !hasCorrectAnchor) engine.startMain(song, null, song.durationSec - prev.timeLeft);
+        else engine.resume();
+      } else {
+        engine.pause();
+      }
       return { ...prev, isPlaying };
     });
-  }, [setSession]);
+  }, [songs, setSession]);
 
   // Skip forces a plain cut to whatever's next (see performAdvance's
   // `forceCut`) — it must never wait for or play a wired transition/outro's

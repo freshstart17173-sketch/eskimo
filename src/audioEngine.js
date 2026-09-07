@@ -385,7 +385,15 @@ class AudioEngine {
 
   // Starts the very first song of a set. `introEdge` (real audio optional)
   // plays first when the DJ chose "Intro" as the starting method.
-  async startMain(song, introEdge) {
+  // `offsetSec` (default 0) is the one exception to "a fresh start is
+  // always offset 0" — togglePlaying (playbackControls.js) reuses this to
+  // resume a song mid-way through, at a persisted position, after a
+  // reload left nothing real anchored to resume from (see
+  // restoreCosmeticPosition below); every other caller only ever passes 0
+  // implicitly. `introEdge` is naturally skipped by callers resuming
+  // mid-song (they pass null) — replaying an intro clip when picking back
+  // up partway through wouldn't make sense.
+  async startMain(song, introEdge, offsetSec = 0) {
     const token = ++this._playToken;
     this._stopCurrentSound();
     if (!song || !song.audioUrl) {
@@ -396,7 +404,7 @@ class AudioEngine {
       // as its own `kind` (not 'main') so getMainElapsed/seekMain/the
       // scheduler correctly keep treating this as "no real deck" — this is
       // purely a clock reference for the cosmetic countdown.
-      if (song) this._current = { kind: 'silent', songId: song.id, startCtxTime: this.ensureContext().currentTime, offsetSec: 0, durationSec: song.durationSec || 210 };
+      if (song) this._current = { kind: 'silent', songId: song.id, startCtxTime: this.ensureContext().currentTime, offsetSec, durationSec: song.durationSec || 210 };
       return false;
     }
     if (introEdge && introEdge.audioUrl) {
@@ -409,8 +417,23 @@ class AudioEngine {
     }
     const buffer = await this.loadBuffer(song.audioUrl).catch(() => null);
     if (token !== this._playToken || !buffer) return false;
-    this._startMain(buffer, song.id, 0);
+    this._startMain(buffer, song.id, offsetSec);
     return true;
+  }
+
+  // A reload leaves session.isPlaying/nowPlayingId persisted with nothing
+  // real anchored to match — real audio can't (and shouldn't try to)
+  // resume without a fresh user gesture, so App.jsx forces isPlaying back
+  // to false on load rather than let the session lie about what's audible
+  // (see docs/playback-model.md's reload-seek finding). This still
+  // restores a cheap, cosmetic-only position (kind: 'silent', no buffer,
+  // no user-gesture requirement) purely so the scrub bar/countdown rings
+  // show where the set actually was instead of snapping to 0 until Play
+  // is pressed again. Never overwrites a real anchor that's already
+  // there — this only ever runs once, right after a fresh load.
+  restoreCosmeticPosition(song, offsetSec) {
+    if (!song || this._current) return;
+    this._current = { kind: 'silent', songId: song.id, startCtxTime: this.ensureContext().currentTime, offsetSec, durationSec: song.durationSec || 210 };
   }
 
   // The real-audio side of a hop the session model already decided on
