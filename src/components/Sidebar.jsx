@@ -3,7 +3,6 @@ import { Icon, ICONS } from './shared.jsx';
 
 export default function Sidebar({ tab, setTab, songCount, edgeCount, venueName }) {
   const items = [
-    { id: 'live', label: 'Live', icon: ICONS.play },
     { id: 'perform', label: 'Graph', icon: ICONS.perform },
     { id: 'library', label: 'Library', icon: ICONS.library },
     { id: 'upload', label: 'Upload Song', icon: ICONS.upload },
@@ -19,10 +18,8 @@ export default function Sidebar({ tab, setTab, songCount, edgeCount, venueName }
       {items.map(it => (
         <button
           key={it.id}
-          className={'nav-btn' + (tab === it.id ? ' active' : '') + (it.disabled ? ' nav-btn-disabled' : '')}
-          onClick={() => { if (!it.disabled) setTab(it.id); }}
-          disabled={it.disabled}
-          data-tooltip={it.disabled ? 'Node graph — temporarily disabled, see Live' : undefined}
+          className={'nav-btn' + (tab === it.id ? ' active' : '')}
+          onClick={() => setTab(it.id)}
         >
           <Icon path={it.icon} size={15} />
           {it.label}

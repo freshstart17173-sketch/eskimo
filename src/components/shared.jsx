@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fmtBytes } from '../core.js';
 import { resolveAudioUrl, isLocalAudioMarker } from '../localAudioStore.js';
 import { extractDominantColor, derivePalette } from '../dominantColor.js';
@@ -67,6 +67,7 @@ export const ICONS = {
   hand: <><path d="M8 13V5a1.5 1.5 0 0 1 3 0v6"></path><path d="M11 11V4a1.5 1.5 0 0 1 3 0v7"></path><path d="M14 11V6a1.5 1.5 0 0 1 3 0v8"></path><path d="M8 12l-1.5-1.5a1.5 1.5 0 0 0-2.3 1.9L7 17a6 6 0 0 0 5.5 3.3h1a6 6 0 0 0 6-6v-3"></path></>,
   search: <><circle cx="10.5" cy="10.5" r="6.5"></circle><line x1="20" y1="20" x2="15.5" y2="15.5"></line></>,
   skip: <><polygon points="5,4 15,12 5,20" fill="currentColor"></polygon><rect x="17" y="4" width="2.5" height="16" fill="currentColor"></rect></>,
+  skipBack: <><polygon points="19,4 9,12 19,20" fill="currentColor"></polygon><rect x="4.5" y="4" width="2.5" height="16" fill="currentColor"></rect></>,
   stop: <rect x="5" y="5" width="14" height="14" fill="currentColor"></rect>,
   volume: <><polygon points="3,9 8,9 13,4 13,20 8,15 3,15" fill="currentColor"></polygon><path d="M16.5 8.5a5 5 0 0 1 0 7"></path></>,
 };
@@ -153,29 +154,6 @@ export function CoverPicker({ url, onFile, size = 48 }) {
 // Escape cancels and the Cancel button gets initial focus (the safer
 // default action) — a keyboard user landing here can always back out
 // without hunting for a mouse-only close target.
-export function ConfirmModal({ title, children, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger, onConfirm, onCancel }) {
-  const cancelRef = useRef(null);
-  const titleId = useId();
-  useEffect(() => {
-    cancelRef.current && cancelRef.current.focus();
-    function onKeyDown(e) { if (e.key === 'Escape') onCancel(); }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
-  return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-title" id={titleId}>{title}</div>
-        {children}
-        <div className="modal-actions">
-          <button ref={cancelRef} className="btn btn-ghost btn-sm" onClick={onCancel}>{cancelLabel}</button>
-          <button className={'btn btn-sm ' + (danger ? 'btn-danger' : 'btn-primary')} onClick={onConfirm}>{confirmLabel}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function Field({ label, children }) {
   return (
     <div className="field">

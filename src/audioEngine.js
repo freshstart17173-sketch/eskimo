@@ -296,10 +296,10 @@ export function prefetchHop(hop, nowPlayingId, edges, songs) {
 }
 
 // Shared by both the set-clock's automatic tick and the manual skip button
-// (App.jsx and PerformPage.jsx/LivePerformPage.jsx respectively) — one place
-// that both decides the next session state (advanceSession, core.js —
-// unchanged) and performs the matching real-audio handoff, so the two call
-// sites can never disagree about what a hop actually does.
+// (App.jsx and PerformPage.jsx respectively) — one place that both decides
+// the next session state (advanceSession, core.js — unchanged) and
+// performs the matching real-audio handoff, so the two call sites can
+// never disagree about what a hop actually does.
 //
 // `forceCut` is the one deliberate exception to "never disagree": a manual
 // Skip still advances to exactly the same destination the graph's wiring

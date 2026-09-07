@@ -66,7 +66,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 
   const hasStarted = session.nowPlayingId !== null;
   const visibleEdges = useMemo(() => getVisibleEdges(edges), [edges]);
-  const { startSet, togglePlaying, skipNow, resumeSet } = useTransportControls({ songs, visibleEdges, setSession });
+  const { startSet, jumpToSong, togglePlaying, skipNow, goBack, resumeSet } = useTransportControls({ songs, visibleEdges, setSession });
   const transitionEdgesRaw = useMemo(() => visibleEdges.filter(e => e.type === 'transition'), [visibleEdges]);
 
   const findEdge = useCallback((pred) => visibleEdges.find(pred), [visibleEdges]);
@@ -155,9 +155,9 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // whatever's been visually laid out in the graph from this new point on.
   const playSelected = useCallback((id) => {
     const introEdge = introEdgeFor(visibleEdges, id);
-    startSet(id, introEdge ? 'intro' : 'cut');
+    jumpToSong(id, introEdge ? 'intro' : 'cut');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleEdges, startSet]);
+  }, [visibleEdges, jumpToSong]);
 
   // The toolbar's "Start set" button — reads whatever's actually wired to
   // the Start Set node on the graph (a real, persistent connection, not a
@@ -166,7 +166,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   function triggerStartSet() {
     const startSongId = activePlaylist.startSongId;
     if (!startSongId || !songs[startSongId]) return;
-    startSet(startSongId, activePlaylist.startMode === 'intro' ? 'intro' : 'cut');
+    jumpToSong(startSongId, activePlaylist.startMode === 'intro' ? 'intro' : 'cut');
   }
   // Dragging or clicking the playhead — `fraction` is 0-1 along the bar.
   // Restarts the real audio deck at the new offset when Now Playing has
@@ -743,6 +743,9 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             </div>
           </div>
 
+          <button className="icon-btn" onClick={goBack} aria-label="Back" data-tooltip="Back">
+            <Icon path={ICONS.skipBack} filled size={16} />
+          </button>
           <button className="icon-btn" onClick={togglePlaying} aria-label={session.isPlaying ? 'Pause' : 'Play'}>
             <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={16} />
           </button>

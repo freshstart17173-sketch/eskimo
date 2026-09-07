@@ -98,6 +98,13 @@ export function emptySession() {
     autoplay: false, // when true and nothing's manually queued, pickAutoplayNext chooses
     transitionOnly: false, // true = a dead end stops the set instead of cutting to a random song
     autoHistory: [], // songs autoplay has actually played, most recent last — for the bottom queue bar
+    // Every song Now Playing has actually been on this session, most
+    // recent last — what the Back button pops from. Separate from
+    // autoHistory above: that one is display-only and autoplay-specific;
+    // this one is pushed on *every* nowPlayingId change regardless of how
+    // it happened (a wired hop, a manual commit, autoplay), since Back has
+    // to work no matter which of those got you here.
+    history: [],
     activePlaylist: emptyActivePlaylist(), // the graph's live, always-editable wiring — see TODO.md
     // Start/End's own dragged canvas position — null means "use the
     // default spawn spot". These aren't songs, so they have nowhere else
@@ -632,18 +639,12 @@ export function inOutCounts(edges, songId) {
 }
 export function getVisibleEdges(edges) { return edges.filter(e => e.verified); }
 
-// The two candidate lists the manual Next picker can show, gated by the
-// Playing card's single ending-mode toggle — Transition mode offers each
-// *produced transition* as its own candidate (a song with two transitions
-// built to it shows as two candidates, not one grouped item); Cut/Outro
-// mode offers every other song in the library, since a hard cut or an
-// outro can reach anywhere, not just what's been produced. Shared between
-// building the real Next list and previewing what a hover would lead to.
+// Every produced transition off `fromId` — each one its own candidate (a
+// song with two transitions built to it shows as two, not one grouped
+// item), used both for the availability check below and for building a
+// manual Next commit.
 export function transitionCandidates(visibleEdges, fromId, excludeIds) {
   return visibleEdges.filter(e => e.type === 'transition' && e.l === fromId && !excludeIds.has(e.r));
-}
-export function cutCandidates(songs, excludeIds) {
-  return Object.keys(songs).filter(id => !excludeIds.has(id));
 }
 
 // ---------------------------------------------------------------------------
@@ -753,18 +754,23 @@ export function transitionTriggerElapsed(queueHead, edges, nowSongDurationSec) {
 
 export function advanceSession(prev, songs, visibleEdges) {
   if (!prev.nowPlayingId) return prev;
+  // Every real hop — however it happened (wired, manually queued, a
+  // forced-cut skip) — pushes onto `history`, so Back always has
+  // somewhere to return to regardless of which path got you here. Not
+  // pushed on the END branches below since nowPlayingId doesn't change.
+  const history = [...prev.history, prev.nowPlayingId].slice(-50);
   const head = prev.queue[0];
   if (head) {
     if (head.id === END) return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0 };
     const nextSong = songs[head.id];
-    return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210 };
+    return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210, history };
   }
   if (prev.autoplay) {
     const pick = pickAutoplayNext(songs, visibleEdges, prev.nowPlayingId, prev.transitionOnly);
     if (pick) {
       const nextSong = songs[pick.id];
       return {
-        ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210,
+        ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210, history,
         autoHistory: [...prev.autoHistory, { id: pick.id, mode: pick.mode }].slice(-40),
       };
     }
@@ -801,14 +807,6 @@ export function removeSongCascade(songs, edges, songId) {
   delete nextSongs[songId];
   const nextEdges = edges.filter(e => e.l !== songId && e.r !== songId);
   return { songs: nextSongs, edges: nextEdges };
-}
-
-// What the Next list is reachable *from* — the tail of whatever's already
-// queued, or Now Playing itself when nothing's queued yet. null once an
-// End Set is queued (there's nothing to plan past it).
-export function queueTailId(nowPlayingId, queue) {
-  const tail = queue.length ? queue[queue.length - 1] : null;
-  return tail ? (tail.id === END ? null : tail.id) : nowPlayingId;
 }
 
 // Display labels only — the underlying mode/ending/starting values stay
