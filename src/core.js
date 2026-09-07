@@ -22,25 +22,67 @@ const STORAGE_KEY = 'djflow:v3';
 // feature (App.jsx's loadExample) — the app itself never calls these on its
 // own initiative, only in direct response to that explicit click.
 // ---------------------------------------------------------------------------
+// Two real, recognizable tracklists (titles/durations only — plain factual
+// metadata, no issue reproducing that) so the example graph actually looks
+// like someone's library instead of five made-up placeholder songs. Cover
+// art is deliberately NOT the real album photos: this fixture ships in
+// committed source (this file is public on GitHub, and the built app
+// deploys publicly too), so embedding an actual copyrighted photograph
+// here would be redistributing it, not just using it privately the way
+// ripping your own CDs into a personal library app would be. The two
+// swatches below are simple original shapes inspired by each album's own
+// color story (a flat purple field; an off-white field with a red accent
+// block) — enough to demo the color-match feature without reproducing
+// anyone's actual artwork. BPM/Key weren't supplied, so these are round
+// illustrative placeholders, not verified figures — don't rely on them
+// for actual mixing.
+const PIERRE4_COVER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Crect width='300' height='300' fill='%236a5490'/%3E%3C/svg%3E";
+const YEEZUS_COVER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Crect width='300' height='300' fill='%23f0f0ee'/%3E%3Crect x='190' y='55' width='95' height='95' fill='%23d32f1e' transform='rotate(10 237 102)'/%3E%3C/svg%3E";
+
 export function sampleSongsForTests() {
-  return {
-    hd: { id: 'hd', title: 'Horizon Drift', artist: 'Nomi Sato', x: 40, y: 360, bpm: 124, key: 'A min', durationSec: 214 },
-    cb: { id: 'cb', title: 'Concrete Bloom', artist: 'Ledger', x: 320, y: 300, bpm: 128, key: 'F# min', durationSec: 198 },
-    gs: { id: 'gs', title: 'Glass Static', artist: 'Rook & Vale', x: 620, y: 440, bpm: 126, key: 'G min', durationSec: 231 },
-    lr: { id: 'lr', title: 'Late Return', artist: 'Nomi Sato', x: 900, y: 480, bpm: 120, key: 'D min', durationSec: 205 },
-    wr: { id: 'wr', title: 'Wire & Rust', artist: 'Rook & Vale', x: 900, y: 600, bpm: 129, key: 'D min', durationSec: 187 },
-  };
+  // The Life of Pi'erre 4 — Pi'erre Bourne. All 16 tracks, transitioning
+  // into each other in tracklist order (see sampleEdgesForTests).
+  const pierre4 = [
+    ['Poof', 183], ['Try Again', 147], ['Feds', 188], ['Be Mine', 258],
+    ['Ballad', 181], ['Routine', 166], ['Lovers', 184], ['How High', 250],
+    ['Romeo Must Die', 161], ['Racer', 295], ['Stereotypes', 188], ['Doublemint', 188],
+    ['Horoscopes', 147], ['Juice', 143], ['Guillotine', 180], ['Speed Dial', 151],
+  ];
+  // Yeezus — Kanye West. All 10 tracks, placed on the canvas unwired (no
+  // transitions specified between them) — a second library's worth of
+  // songs to wire up by hand or with Autoconnect.
+  const yeezus = [
+    ['On Sight', 156], ['Black Skinhead', 188], ['I Am a God', 231], ['New Slaves', 256],
+    ['Hold My Liquor', 326], ['I’m In It', 234], ['Blood on the Leaves', 360], ['Guilt Trip', 243],
+    ['Send It Up', 178], ['Bound 2', 229],
+  ];
+  const songs = {};
+  const cols = 8, colSpacing = 260, rowSpacing = 220;
+  pierre4.forEach(([title, durationSec], i) => {
+    songs['p' + (i + 1)] = {
+      id: 'p' + (i + 1), title, artist: "Pi'erre Bourne",
+      x: 40 + (i % cols) * colSpacing, y: 40 + Math.floor(i / cols) * rowSpacing,
+      bpm: 140, key: 'F min', durationSec, coverUrl: PIERRE4_COVER,
+    };
+  });
+  yeezus.forEach(([title, durationSec], i) => {
+    songs['y' + (i + 1)] = {
+      id: 'y' + (i + 1), title, artist: 'Kanye West',
+      x: 40 + (i % 5) * colSpacing, y: 520 + Math.floor(i / 5) * rowSpacing,
+      bpm: 110, key: 'C min', durationSec, coverUrl: YEEZUS_COVER,
+    };
+  });
+  return songs;
 }
 export function sampleEdgesForTests() {
-  return [
-    { id: 'e1', type: 'intro', r: 'hd', verified: true },
-    { id: 'e2', type: 'transition', l: 'hd', r: 'cb', verified: true },
-    { id: 'e4', type: 'transition', l: 'cb', r: 'gs', verified: true },
-    { id: 'e5', type: 'outro', l: 'cb', verified: true },
-    { id: 'e6', type: 'transition', l: 'gs', r: 'lr', verified: true },
-    { id: 'e13', type: 'transition', l: 'gs', r: 'wr', verified: true },
-    { id: 'e14', type: 'outro', l: 'gs', verified: true },
+  const edges = [
+    { id: 'e-p-intro', type: 'intro', r: 'p1', verified: true },
+    { id: 'e-p-outro', type: 'outro', l: 'p16', verified: true },
   ];
+  for (let i = 1; i < 16; i++) {
+    edges.push({ id: 'e-p' + i + '-' + (i + 1), type: 'transition', l: 'p' + i, r: 'p' + (i + 1), verified: true });
+  }
+  return edges;
 }
 
 export function emptySession() {
