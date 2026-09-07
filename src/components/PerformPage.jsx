@@ -701,7 +701,6 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         {selectedSong && (
           <DetailPane
             song={selectedSong} socketData={socketDataById[selectedId]} io={ioById[selectedId] || { inCount: 0, outCount: 0 }}
-            isActive={selectedId === session.nowPlayingId}
             onPlay={() => playSelected(selectedId)}
             onClose={() => setSelectedId(null)}
           />
@@ -896,7 +895,7 @@ function AddNodeModal({ songs, onPick, onCancel }) {
 // here starts playback except the one explicit Play button, matching the
 // Selected-vs-Active split this replaces the old always-on-canvas socket
 // dropdowns' implicit "click a socket to see it" behavior with.
-function DetailPane({ song, socketData, io, isActive, onPlay, onClose }) {
+function DetailPane({ song, socketData, io, onPlay, onClose }) {
   const sd = socketData || {
     leftActive: 'none', rightActive: 'none', leftEdgeId: null, rightEdgeId: null,
     leftOptions: [], rightOptions: [], rightCueSeconds: null,
@@ -920,7 +919,7 @@ function DetailPane({ song, socketData, io, isActive, onPlay, onClose }) {
         <span className="tag">{fmtTime(song.durationSec)}</span>
       </div>
       <button className="btn btn-primary detail-pane-play" onClick={onPlay}>
-        <Icon path={ICONS.play} filled size={13} /> {isActive ? 'Restart from here' : 'Play'}
+        <Icon path={ICONS.play} filled size={13} /> Play
       </button>
       <div className="detail-pane-section">
         <div className="detail-pane-section-title">Input <span className="detail-pane-count">↓{io.inCount}</span></div>
