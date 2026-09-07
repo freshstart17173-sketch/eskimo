@@ -27,7 +27,18 @@ import { resolveAudioUrl } from './localAudioStore.js';
 
 const EDGE_SECONDS = 10; // how much of each clip's head/tail we compare
 const WINDOW_SEC = 0.05; // ~50ms RMS windows — coarse but resistant to bit-level noise
-const MATCH_THRESHOLD = 0.55; // normalized cross-correlation floor to call it a match
+// Raised from 0.55 after measuring both sides directly with a real
+// (synthetic but non-periodic) splice: a genuine byte-exact overlap scores
+// 0.84-0.95 here, while an unrelated pairing can still drift up to ~0.5-0.6
+// by pure chance (two independent amplitude envelopes both trending
+// "smoothly", or a percussive one echoing its own general shape elsewhere
+// in the same track) — 0.55 was inside that noise band, letting an
+// upload's *irrelevant* side (e.g. an outro's own new tail material,
+// compared against some other song's head) occasionally read as a
+// confident second match and get misclassified as a Transition instead of
+// a plain Outro/Intro. 0.7 sits well clear of every false positive
+// measured (~0.6 max) while every genuine match measured cleared 0.8.
+const MATCH_THRESHOLD = 0.7;
 
 let sharedAudioCtx = null;
 function getAudioContext() {
@@ -209,7 +220,18 @@ function zScore(arr) {
 export function bestCorrelation(a, b) {
   if (a.length === 0 || b.length === 0) return { score: 0, lag: 0 };
   const na = zScore(a), nb = zScore(b);
-  const maxLag = Math.min(na.length, nb.length) - 1;
+  // The valid lag range is NOT symmetric when the two envelopes differ in
+  // length (the ordinary case: a's the dropped clip's own edge, trimmed to
+  // its actual short length; b's the reference song's edge, usually the
+  // full EDGE_SECONDS window) — sliding a's start across b's whole length
+  // needs lag from -(na.length-1) up to +(nb.length-1), not ±min(na,nb)-1.
+  // Confirmed as a real bug, not a hunch: a genuine, byte-exact splice
+  // between a 5s dropped clip and a 14s reference song scored 0.84 at its
+  // true lag (160) but that lag sat outside the old ±99 (min(100,200)-1)
+  // window, so the search never even considered it and returned some
+  // spurious in-range lag with a much weaker score instead.
+  const minLag = -(na.length - 1);
+  const maxLag = nb.length - 1;
   // A lag near the search's extremes only overlaps a handful of windows —
   // on z-scored (zero-mean, unit-variance) data, a handful of points can
   // score deceptively high by pure chance, which a flat `count < 4` floor
@@ -230,7 +252,7 @@ export function bestCorrelation(a, b) {
   const MIN_OVERLAP_SEC = 1;
   const minCount = Math.min(Math.min(na.length, nb.length), Math.max(4, Math.round(MIN_OVERLAP_SEC / WINDOW_SEC)));
   let best = -Infinity, bestLag = 0;
-  for (let lag = -maxLag; lag <= maxLag; lag++) {
+  for (let lag = minLag; lag <= maxLag; lag++) {
     let sum = 0, count = 0;
     for (let i = 0; i < na.length; i++) {
       const j = i + lag;

@@ -811,14 +811,68 @@ Replaced with an absolute ~1-second floor instead (see `audioDetect.js`) —
 comfortably under any normal "bar or two," while still filtering the tiny-
 window flukes the guard existed for. Detection now clears the confidence
 threshold confidently on a short synthetic overlap; the exact computed
-cue-point timestamp was off by a few seconds in that same synthetic test,
-which looks like an artifact of the test signal being too perfectly
-periodic (giving the correlation search several similarly-good false
-alignments) rather than a real bug — but it's genuinely unverified against
-real recorded audio. **Confirm short-overlap cue-point precision against
-a real short clip before trusting it for a live set.**
+cue-point timestamp was off by a few seconds in that same synthetic test —
+**correction, see round 7 below: this was a real bug (`bestCorrelation`'s
+lag range), not a test-signal artifact as guessed here.**
+
+### Done this pass (round 7 — a real non-periodic detection test; found and fixed the actual cue-point bug)
+Built a proper non-periodic synthetic test per explicit request (random-
+walk/sparse-hit amplitude envelope over white noise, seeded — see
+`.scratch/gen_signals.py` in that session, not checked in) specifically to
+avoid the round-6 test's flaw (a smoothly periodic signal can alias against
+itself at the wrong lag and *look* like a detection bug when it isn't).
+Verified self-similarity was low before trusting it, then built three
+cases with byte-exact overlaps and known ground truth: an outro (song's
+own last 2s + 3s new), an intro (3s new + song's own first 2s), and a
+transition (songA's last 2s + 2s new + songB's first 2s).
+
+This surfaced a real, previously-undiagnosed bug: `bestCorrelation`
+(`audioDetect.js`) capped its lag search at `±(min(a.length, b.length)-1)`
+— symmetric around zero — but the two envelopes it compares are almost
+never the same length (the dropped clip's own short edge vs. a reference
+song's usually-full 10s edge window), so the *correct* lag routinely fell
+outside that range entirely on the longer side. Measured directly: a
+byte-exact splice scored 0.84 at its true lag (160) but that lag sat
+outside the old ±99 window, so the search returned some unrelated in-range
+lag with a much weaker score instead. This is almost certainly what
+produced round 6's "cue point is off by a few seconds" result, not the
+periodicity theory recorded there. Fixed by searching the full valid
+range, `-(a.length-1)` to `+(b.length-1)`.
+
+With that fixed, **every splice-point measurement across all three cases
+was exact (0 error against ground truth)**: outro outSeconds, transition's
+both cue points, and intro's inSeconds. Per the explicit pass condition —
+"the test passes if the original + outro is seamless" — **this passes**:
+playing the song up to the detected outSeconds and then the outro clip
+from its own start reconstructs the original audio exactly, with neither
+a gap nor a repeated segment, byte-for-byte.
+
+Also found, and partially addressed, a second and more concerning issue
+while doing this: the *type* classification (does this also match on the
+other side, making it a Transition instead of a plain Outro/Intro) has a
+real false-positive risk baked into a "best score over ~200-300 candidate
+lags" search — trying that many lags means even unrelated audio
+occasionally clears a flat confidence threshold purely by chance (an
+"look-elsewhere" statistical effect, not something a threshold tweak fully
+closes). Measured a genuine match consistently scoring 0.84-1.0 and a
+false one still reaching 0.80 in testing. Raised `MATCH_THRESHOLD` from
+0.55 to 0.7, which fixed the outro case's misclassification but did not
+fully close the intro case's — **this needs a real fix, not another
+threshold nudge: require the winning lag to beat the best score at every
+*other* lag (excluding a small window around the winner) by a real margin,
+the way audio fingerprinting tools disambiguate a genuine match from
+coincidental noise, rather than just clearing an absolute floor.** This is
+very likely the root cause behind the user's separate "type auto-detect
+isn't reliable" complaint (round 6) — the splice-point math was never the
+problem, the same-side-vs-other-side classification was.
 
 ### Next up — requested, not yet built
+- **Type-classification robustness** (see round 7 above) — a margin-over-
+  runner-up check in `bestCorrelation`/`detectMatch`, not another threshold
+  tweak. Concrete finding to build from: a genuine match scores 0.84+, a
+  coincidental false one can still reach 0.80, so absolute thresholds alone
+  can't fully separate them — the winning lag needs to be a clear outlier
+  among all lags tried, not just clear a floor.
 - **A real preview player for Add Audio.** The current `<audio controls>`
   is too small to actually tell whether a detected transition is right —
   the user wants something purpose-built: show the detected in/out points
