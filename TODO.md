@@ -57,10 +57,11 @@ below; the old three-state model is gone from that screen entirely):
   shows (inputs/outputs/specifics, plus the one Play button that can make
   it Active). Selecting never starts or changes playback by itself.
 
-**LivePerformPage (the separate non-graph "Live" screen) was NOT touched
-by that rework** and may still carry the older Playing/Next/Later
-language internally — worth auditing if that screen gets picked back up,
-but it's a distinct page from the Graph tab and wasn't in scope here.
+**LivePerformPage (the separate non-graph "Live" screen) has been removed
+entirely** (player-rewrite round, see below) — dropped by direct
+instruction rather than folded into the Active/Selected rework. There is
+now exactly one perform screen (the Graph tab); nothing carries the older
+Playing/Next/Later language anymore.
 
 - **Cut** — a hard edge with no fragment. **Renamed to "None" everywhere** as of the graph-editor rework below (label and code both) — "cut" reads as a DJ term for something that isn't really a DJ move here, it's just "nothing built."
 
@@ -1025,8 +1026,8 @@ naturally build on each other:
 - **Harden the cover/color-match system** defensively so a bug in
   updating a cover can't break anything else on the page.
 
-### Next up — graph interactions + a real player rewrite (requested this
-round, not yet built; fold in once the current socket-mockup pass is done)
+### Next up — graph interactions (the player rewrite below has shipped —
+see "Done this pass (round 9 — the player rewrite)")
 
 Graph/canvas interactions:
 - **Rename "Arrange for me" → "Autoarrange"**, and have it favor a
@@ -1048,52 +1049,108 @@ Graph/canvas interactions:
   by selection and still means the entire graph regardless of what's
   selected.
 
-Player rewrite — the model is simpler than what's built and should be
-rebuilt around it directly, not patched:
+Player rewrite — ✅ **done, see "Done this pass (round 9)" below for the
+full account.** Kept here for context on what was asked for and how each
+point landed:
 - This is a **combinatorially-assembled playlist**, not a fixed track
   list. If song A transitions into song B: play A's own audio normally up
   to the wired transition's in-point, then play the transition audio
   seamlessly, then seamlessly resume into B's own audio from the
   transition's out-point onward — never a hard cut between "the graph"
-  and "what's actually sounding."
+  and "what's actually sounding." Already correct pre-rewrite; the
+  rewrite's Plan model (`docs/playback-model.md` §6) made the handoff
+  itself sample-accurate on top of this, rather than changing the model.
 - **Pause** pauses normally (resumes exactly where it left off, whichever
   of original/transition audio is currently sounding). Already correct in
   the current model — `engine.pause()` suspends the whole AudioContext
   clock rather than tracking play/pause per node, so whatever's actually
   sounding (main deck or a fragment) genuinely freezes and resumes.
 - **Skip just plays the next song normally from its own start — it does
-  not force a transition.** ✅ Done in the *current* (pre-rewrite) player
-  too, not just planned for v2 — see `docs/playback-model.md` Finding 3:
-  `performAdvance` now takes `{ forceCut: true }` for a manual skip, which
-  still advances to the graph-wired destination but always as a plain cut,
-  never the transition's produced clip.
-- **Back** goes back to the previous song. Still entirely unimplemented —
-  see `docs/playback-model.md` Finding 4 for exactly what's missing
-  (no general play-history log; `session.autoHistory` only covers pure
-  autoplay picks) and the open product question this needs answered
-  first: does Back **resume** the previous song from where it had gotten
-  to, or **restart** it from 0? Don't build this without picking one.
-- **Must support starting playback from any node deep in the graph**, and
-  it has to sound *identical* to having played there naturally from the
-  start (right lead-in state, not literally fast-forwarding through
-  everything before it). Explicitly a v2/multi-input-model question, not a
-  bug in the current player — see `docs/playback-model.md` §2's note on
-  why a direct start is its own entry mode rather than an attempt to
-  replay "as if arrived via some specific transition."
+  not force a transition.** ✅ Done pre-rewrite already — see
+  `docs/playback-model.md` Finding 3: `performAdvance` takes
+  `{ forceCut: true }` for a manual skip, which still advances to the
+  graph-wired destination but always as a plain cut, never the
+  transition's produced clip.
+- **Back** goes back to the previous song. ✅ Done — restart semantics
+  only (no resume-vs-restart ambiguity, resolved by direct instruction):
+  within the first few seconds of the current song, Back goes to the
+  previous song and restarts it from 0; otherwise it restarts the current
+  song from 0. Always a plain cut, exactly like Skip. See
+  `docs/playback-model.md` §6 and `playbackControls.js`'s `goBack`/
+  `session.history`.
+- **Must support starting playback from any node deep in the graph** —
+  ✅ done as the obvious version (Intro-or-cut from offset 0, via the
+  detail pane's Play/Start Set), which turned out to be all that was
+  asked for. The *deeper* version speculated here — reconstructing "as if
+  arrived via some specific transition" — was explicitly dropped, not
+  deferred, once asked directly: v2's multi-input model would make a
+  destination's single arrival identity ambiguous anyway (`docs/
+  playback-model.md` §2's note on why a direct start is its own entry
+  mode).
 - **Reconceive "Set Start" as essentially a play button** — a way to start
   playback from anywhere without clicking into a node first — rather than
-  a wiring concept.
+  a wiring concept. Not part of this rewrite; still open if picked back up.
 - **Reconceive "Set End" as essentially a stop button**, symmetrically.
-- **Sample-accurate lookahead scheduling** — the deeper reason "playing the
-  right audio at the right time" keeps surfacing as a live bug, not just a
-  v2 concern: the current player reacts to a 1-second polling tick and
-  always calls `source.start(ctx.currentTime, ...)` — "start right now" —
-  instead of pre-scheduling a fragment's start at an exact future
-  `AudioContext` time. See `docs/playback-model.md` Finding 2. A buffer
-  prefetch (Finding 1, `prefetchHop`/`PREFETCH_LOOKAHEAD_SEC` in
-  `audioEngine.js`) already removes the fetch/decode-latency part of the
-  gap; the remaining ~1s-or-worse timing slop needs a real scheduler, which
-  is a natural fit for this rewrite rather than a patch to the old one.
+  Same — still open.
+- **Sample-accurate lookahead scheduling** — ✅ done. The player no longer
+  reacts to a 1-second polling tick to decide *when* a hop happens: the
+  instant a hop's destination is known and its buffers are decoded, the
+  whole chain of `.start()`/`.stop()` calls is scheduled against exact
+  future `AudioContext` times (the "Plan" model). The tick loop's only
+  remaining job is noticing a fired plan and syncing display state after
+  the fact — see `docs/playback-model.md` §6 (Findings 1 & 2, now fixed)
+  and §7 for the matching rework of every progress-bar/countdown-ring
+  display that used to be driven by the old 1Hz `session.timeLeft`.
+
+### Done this pass (round 9 — the player rewrite: sample-accurate scheduling, Back, and every jumpy progress display)
+
+The user asked for the deepest possible dive on the playback engine —
+"the progress bars... too jumpy, unreliable, and sometimes stall along
+with the audio", explicitly for a live-performance context where accuracy
+and low latency matter, plus a real Back control ("just restart, and if
+in the first few seconds, go back"). Full research-then-design-then-build
+pass, split into seven committed chunks:
+
+- **Dropped the Live screen entirely** (`LivePerformPage.jsx` and its nav
+  entry), by direct mid-round instruction — one perform screen now, not
+  two independently-maintained ones.
+- **Back + a real play-history stack** (`session.history`, `goBack`/
+  `jumpToSong` in `playbackControls.js`) — restart-only semantics, no
+  resume ambiguity, always a plain cut like Skip.
+- **The "Plan" model** (`audioEngine.js`: `_plan`, `scheduleHop`,
+  `cancelPlan`, `consumePlan`) — replaced reactive "poll once a second,
+  then `start(now)`" scheduling with sample-accurate future-time
+  `AudioContext` scheduling, researched against MDN's Web Audio best
+  practices and the "tale of two clocks" pattern rather than assumed.
+  `App.jsx`'s tick loop was cut over to a purely cosmetic role: notice a
+  fired plan, sync display state — never decide *when* a hop happens for
+  a real deck anymore.
+- **`engine.getPlaybackPosition()`** — one authoritative "what's actually
+  playing right now" query, sourced from `ctx.currentTime` against the
+  Plan/main-deck state, including a ctx-anchored fallback for songs with
+  no uploaded master (so even a silent/demo song gets an accurate,
+  jank-immune countdown instead of a wall-clock guess).
+- **`usePlaybackFrame`** — a `requestAnimationFrame` hook reading that
+  query every frame and writing straight to refs/DOM, matching the
+  already-correct `LiveWaveform` pattern. Wired into the bottom scrub bar
+  (`Playhead`, rewritten off React state onto refs) and the graph's
+  per-socket `CountdownRing` — both now move smoothly every frame instead
+  of stepping once a second. The `node-position` elapsed/duration text was
+  deliberately left on the 1Hz value; a text counter ticking once a second
+  reads as normal, unlike a bar or ring visibly stepping.
+- **A real bug found via this rewrite, not assumed away**: scrubbing a
+  song with no uploaded master updated `session.timeLeft` directly, but
+  `seekMain`/`getMainElapsed` only recognized real ('main'-kind) decks —
+  so the seek never touched the engine's own ctx anchor, and the tick's
+  reactive fallback (still keyed off `session.timeLeft`) could race in and
+  overwrite the seek with a stale value before React's own state caught
+  up. Fixed by extending both to treat a silent deck's ctx anchor the same
+  authoritative way a real deck's already was.
+- Every chunk verified against real Web Audio behavior via Playwright
+  (synthetic audio, monkey-patched `AudioBufferSourceNode.start`/`stop`
+  call recording, real playback timing samples across consecutive
+  animation frames) — not just code review — before being committed to
+  `main`. Full design writeup and status: `docs/playback-model.md` §6–7.
 
 ### Done this pass (round 5 — color match, right-click menus, a real live-playback bug, graph-only UI)
 Fixed a serious, real live-playback bug the user caught by ear: an

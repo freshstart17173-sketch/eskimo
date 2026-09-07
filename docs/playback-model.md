@@ -167,7 +167,7 @@ worst-case version of the gap. It does **not** fix the underlying
 reactive-timing slop — see Finding 2, which is the real remaining
 architectural item.
 
-### Finding 2 — ~1 second (or worse) scheduling slop (HIGH, architectural, not fixed)
+### Finding 2 — ~1 second (or worse) scheduling slop (HIGH, architectural, FIXED)
 
 The tick loop only checks `elapsed >= triggerAt` once per second
 (`setInterval(..., 1000)` in `App.jsx`), and every handoff calls
@@ -179,12 +179,14 @@ past that. This is the direct cause of "not playing the right audio at the
 right time" — the trigger itself is approximate before any network/decode
 latency from Finding 1 even applies.
 
-**Status: not fixed.** Fixing this properly means moving off `setInterval`
-+ reactive `start(now)` entirely, toward pre-scheduling the next fragment's
-`start()` call at an exact computed `AudioContext` time once the current
-deck's remaining time drops under some lookahead window. That's a real
-scheduler rewrite, not a contained bug fix — flagged in `TODO.md` rather
-than silently attempted inside this pass.
+**Status: fixed — see §6.** `audioEngine.js`'s `scheduleHop`/`_plan` model
+replaced the reactive `setInterval` + `start(now)` path entirely: the
+instant a hop's destination is known and its buffers are decoded, the
+whole chain of `.start()`/`.stop()` calls is scheduled against exact
+future `AudioContext` times, not decided reactively once a second. The
+tick loop's only remaining job is noticing, after the fact, that a
+scheduled plan has fired and syncing `session` state to match — see §6's
+"why this also answers is it a UI problem or a logic problem".
 
 ### Finding 3 — Skip played the wired transition's audio instead of a plain cut (CONFIRMED BUG, FIXED)
 
@@ -205,7 +207,7 @@ wiring picked (so the Next list stays honest) but always performs it as a
 plain cut — no fragment, no cue-point wait. `src/audioEngine.js`,
 `src/playbackControls.js`.
 
-### Finding 4 — no "Back" control exists at all (CONFIRMED GAP, NOT IMPLEMENTED — needs a design decision)
+### Finding 4 — no "Back" control exists at all (CONFIRMED GAP, FIXED — see §6)
 
 Neither `PerformPage.jsx` nor `LivePerformPage.jsx` expose any previous/
 back action. `session.autoHistory` looks like it could serve this but
@@ -280,17 +282,18 @@ re-derive this same audit from scratch.
   no longer desyncs `timeLeft` during a fragment (Finding 5).
 - `src/components/LivePerformPage.jsx` — uses the shared hook.
 
-## 5. Open items (not implemented — need a decision or a dedicated pass)
+## 5. Open items
 
-- **Back/previous control** (Finding 4) — **resolved by direct instruction,
-  see §6.** No longer an open question.
-- **Sample-accurate lookahead scheduling** (Findings 1 & 2) — **design
-  finished, see §6**; not yet implemented.
-- **A real regression suite** (Finding 7) — scenarios in §2 above are
-  written to be testable as stated, independent of whichever
-  implementation ends up satisfying them.
+- **Back/previous control** (Finding 4) — **implemented, see §6.**
+- **Sample-accurate lookahead scheduling** (Findings 1 & 2) — **implemented,
+  see §6** (the Plan model in `audioEngine.js`) **and §7** (the rAF
+  presentation layer built on top of it).
+- **A real regression suite** (Finding 7) — still not built. Verification
+  has continued to be ad hoc Playwright scripts written per round and
+  discarded, same caveat as before — the scenarios in §2 remain testable
+  as stated, independent of whichever suite eventually covers them.
 
-## 6. Round 2 — sample-accurate scheduling, and Back/Start resolved (design, not yet implemented)
+## 6. Round 2 — sample-accurate scheduling, and Back/Start resolved (implemented)
 
 ### Back and Start, simplified by direct instruction
 
@@ -436,14 +439,23 @@ sounding.
 
 ### Status
 
-Design only — validated against current Web Audio guidance, not yet
-implemented. Next step is rewriting `audioEngine.js` around this Plan
-model and cutting the tick loop over to the cosmetic-only role described
-above.
+**Implemented.** `audioEngine.js` carries the Plan model exactly as
+designed above (`_plan`, `scheduleHop`, `cancelPlan`, `consumePlan`,
+`_createSource`); `App.jsx`'s tick loop was cut over to the cosmetic-only
+role — it schedules/reschedules a plan when the known hop changes, and
+otherwise only notices a fired plan and syncs `session` state
+(`syncSessionFromFiredPlan`) or updates the displayed countdown, never
+deciding "should a hop happen" itself for a real deck. Back/Start ship as
+`playbackControls.js`'s `goBack`/`jumpToSong`/`startSet`, matching the
+pseudocode above exactly (`BACK_RESTART_THRESHOLD_SEC = 5`,
+`session.history`, always a plain cut via the same `forceCut` path as
+Skip). Verified directly against real Web Audio behavior via Playwright
+(monkey-patched `AudioBufferSourceNode.start`/`stop` call recording, and
+real playback timing checks), not just code review.
 
 Sources: [MDN — Web Audio API best practices](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Best_practices) · [web.dev — A tale of two clocks](https://web.dev/articles/audio-scheduling) · [MDN — AudioBufferSourceNode.start()](https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode/start)
 
-## 7. Round 3 — every timing-driven visual, in depth (design, not yet implemented)
+## 7. Round 3 — every timing-driven visual, in depth (implemented)
 
 Scope for this round: not just the scheduling model, but **every UI
 element that claims to show playback position** — progress bars, the
@@ -454,21 +466,25 @@ sufficient if the *display* built on top of it is still coarse.
 
 ### Inventory — every place playback position is shown
 
-| Element | File | Driven by |
+| Element | File | Driven by (at the time of this audit) |
 |---|---|---|
 | Bottom player bar scrub (`Playhead`) | `SequencePane.jsx` | `session.timeLeft` (prop `pct`) |
-| Live-screen progress bars (`LiveCard`/`ProgressBar`) | `LivePerformPage.jsx` | `session.timeLeft` (via `elapsed`) |
 | Per-socket countdown ring (`CountdownRing`) | `GraphNodes.jsx` | `position.elapsed` (context, from `session`) |
 | Elapsed/duration text (`node-position`) | `GraphNodes.jsx` | same `position` context |
 | Live spectrum bars (`LiveWaveform`) | `GraphNodes.jsx` | **`requestAnimationFrame` reading `engine.getLevels()` directly — not session state** |
+
+(The Live screen's own progress bars, `LivePerformPage.jsx`'s
+`LiveCard`/`ProgressBar`, were in this inventory at the time of the
+audit — the whole screen was dropped by direct instruction before this
+round shipped, so there's nothing left to fix there; see Status below.)
 
 That last row is the important one: **one component already does this
 correctly**, and it's not an accident — its own comment explains exactly
 why (a real reading off the analyser, updated every frame via direct
 `style.height` writes through refs, deliberately bypassing React state
-for a value that changes 60 times a second). The fix for the other four
-rows is to bring them in line with a pattern the codebase already trusts,
-not invent a new one.
+for a value that changes 60 times a second). The fix for the other rows
+is to bring them in line with a pattern the codebase already trusts, not
+invent a new one.
 
 ### Root cause of "jumpy, unreliable, sometimes stalls"
 
@@ -607,9 +623,46 @@ Output-device routing (`AudioContext.setSinkId`, choosing a specific
 audio interface) would matter for a real live rig but is a separate
 feature request, not a correctness fix — not addressed here.
 
+**Found during this round's end-to-end verification, out of scope for
+it:** `session.isPlaying`/`nowPlayingId` are persisted (`Store.save`), but
+nothing re-establishes the engine's own ctx anchor from that persisted
+state on load — a browser refresh mid-set leaves `session` claiming a
+song is playing while `engine._current` is genuinely `null` (audio can't
+autoplay across a reload without a user gesture anyway, so this isn't a
+new gap). In that specific state — before the user has pressed Play/Skip/
+Back again to re-establish a real anchor — seeking still lands on the
+tick's wall-clock fallback (`getMainElapsed` correctly returns `null` when
+`_current` is `null`, same as always), and a periodic tick that captured
+its own `prev` snapshot before the seek's `setSession` commits can
+overwrite the seek with a value computed from that stale snapshot. This
+is a distinct, narrower issue from Finding 2/5 above — it requires
+`_current` to be `null` outright, not just "not `nowPlayingId`'s own
+buffer" — and only reachable via a mid-set page reload, not from any
+control this round touched. Whether reload should attempt to reconstruct
+a 'silent'-kind anchor from persisted session state (there is nothing to
+reconstruct for a real 'main' deck — the actual audio is simply gone) is
+a product decision, not a quick patch, so it's logged here rather than
+patched into scope.
+
 ### Status
 
-Design only. A future Tauri/desktop build doesn't change any of this —
-Web Audio's own scheduling and clock are already immune to the browser
+**Implemented.** `engine.getPlaybackPosition()` (Layer A) and
+`usePlaybackFrame` (Layer B, `playbackControls.js`) ship as designed
+above. `Playhead` (`SequencePane.jsx`) and `CountdownRing`
+(`GraphNodes.jsx`) both read it every animation frame and write straight
+to their own DOM/SVG attributes through refs — the CSS-transition
+band-aids on `Playhead` were removed, since the value itself is now
+genuinely continuous rather than stepping once a second. The Live
+screen's own progress bars are moot (screen dropped, see the inventory
+note above). `node-position`'s elapsed/duration text was deliberately
+left on the once-a-second context value — a text counter ticking at 1Hz
+reads as a normal player, unlike a bar or ring visibly stepping, so
+there was nothing to fix there. Verified via Playwright against the real
+engine: a 20-frame sample of a scrub bar's fill width, and separately of
+a countdown ring's stroke-dasharray, both show smooth per-frame movement
+with no 1Hz stepping.
+
+A future Tauri/desktop build doesn't change any of this — Web Audio's
+own scheduling and clock are already immune to the browser
 timer-throttling concerns this section addresses, so nothing here is a
 web-specific workaround being designed around.

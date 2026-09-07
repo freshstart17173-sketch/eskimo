@@ -36,8 +36,7 @@ class AudioEngine {
     this._playToken = 0;
     this._volume = 1; // survives a context not existing yet (set before any audio has played)
     // The one pending sample-accurate schedule, if any — see scheduleHop's
-    // own comment (docs/playback-model.md sec 6). Not yet wired into the
-    // live tick/hop flow; this is the primitive itself.
+    // own comment (docs/playback-model.md sec 6). Driven by App.jsx's tick.
     this._plan = null;
     this._planToken = 0;
   }
@@ -213,8 +212,7 @@ class AudioEngine {
 
   // ---------------------------------------------------------------------
   // Sample-accurate scheduling (the "Plan" model — docs/playback-model.md
-  // sec 6). Not yet wired into the live tick/hop-decision flow — that's
-  // the next step. This is the primitive itself: given a hop, compute the
+  // sec 6), driven by App.jsx's tick. Given a hop, compute the
   // exact chain of AudioContext-time-scheduled start()/stop() calls and
   // commit them once every buffer involved is decoded, however far in
   // advance of the actual cue point that turns out to be. The audio
