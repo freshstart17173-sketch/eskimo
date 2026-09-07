@@ -1012,6 +1012,36 @@ a { color: var(--accent); }
 .waveform-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
 .waveform-marker-label { position: absolute; top: 0; transform: translateX(-50%); font-size: 9px; font-family: var(--font-mono); background: var(--ink); color: var(--paper); padding: 2px 4px; border-radius: 0; white-space: nowrap; }
 
+/* Add Audio's "Listen before you save it" — always exactly the window
+   the requirement asks for (edgeSeconds of original audio, the dropped
+   clip itself, edgeSeconds of original audio again), never the whole
+   dropped file. The dropped clip's own span is colored/bracketed
+   distinctly from the original audio on either side so it's visible
+   before it's ever heard (see TransitionPreviewPlayer.jsx). Scrub/volume
+   deliberately reuse existing recipes (icon-btn, .player-bar-volume*)
+   rather than inventing new ones for a page that already has them. */
+.transition-preview { background: var(--panel); border-radius: var(--radius); padding: 12px 12px 8px; margin-top: 6px; }
+.transition-preview-wave {
+  position: relative; height: 52px; display: flex; align-items: center; gap: 1.5px; cursor: pointer; user-select: none;
+}
+.transition-preview-bar { flex: 1; min-width: 0; border-radius: 1px; background: var(--line); }
+.transition-preview-bar.in-transition { background: var(--accent); }
+.transition-preview-bracket { position: absolute; bottom: -2px; height: 3px; background: var(--accent); border-radius: 2px; pointer-events: none; }
+.transition-preview-bracket-label {
+  position: absolute; bottom: 9px; font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  color: var(--accent-ink); white-space: nowrap; transform: translateX(-50%); pointer-events: none;
+}
+.transition-preview-playhead {
+  position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--ink);
+  pointer-events: none; box-shadow: 0 0 0 2px rgba(19, 19, 19, .15);
+}
+.transition-preview-controls { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.transition-preview-time { font-size: 10px; color: var(--muted); width: 26px; flex: none; }
+.transition-preview-time:last-of-type { text-align: right; }
+.transition-preview-scrub { flex: 1; height: 4px; border-radius: 2px; background: var(--line-soft); position: relative; cursor: pointer; }
+.transition-preview-scrub-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: var(--ink); border-radius: 2px; pointer-events: none; }
+.transition-preview-note { font-size: 10px; color: var(--faint); margin-top: 8px; line-height: 1.5; }
+
 /* ---------------------------------------------------------------
    Queue bar — the live, scrollable strip along the bottom of the graph.
    Shows Playing + the whole committed/autoplayed sequence so you can grab
