@@ -1025,6 +1025,51 @@ naturally build on each other:
 - **Harden the cover/color-match system** defensively so a bug in
   updating a cover can't break anything else on the page.
 
+### Next up — graph interactions + a real player rewrite (requested this
+round, not yet built; fold in once the current socket-mockup pass is done)
+
+Graph/canvas interactions:
+- **Rename "Arrange for me" → "Autoarrange"**, and have it favor a
+  horizontal (left-to-right) layout over vertical — change the dagre
+  layout direction bias, not just the label.
+- **Remove "Delete song" from the right-click context menu entirely** —
+  there's no case where it should be offered there.
+- **Selection box should do real multi-select**, like a normal app: every
+  node inside the drag box becomes individually selected, not just
+  encircled by a bounding box with no per-node selection state.
+- **Multi-select behavior**: with multiple nodes selected, `selectedId`
+  effectively becomes the whole set, but the detail pane does **not**
+  change to show anything for a multi-selection — it stays showing
+  whatever it was already showing (or empty), since it's a single-song
+  view by design.
+- **Context menu adapts to a multi-selection** and applies to every
+  selected node: e.g. "Autoconnect transitions" (the per-node action) runs
+  across all selected nodes' transitions; "Autoconnect all" is unaffected
+  by selection and still means the entire graph regardless of what's
+  selected.
+
+Player rewrite — the model is simpler than what's built and should be
+rebuilt around it directly, not patched:
+- This is a **combinatorially-assembled playlist**, not a fixed track
+  list. If song A transitions into song B: play A's own audio normally up
+  to the wired transition's in-point, then play the transition audio
+  seamlessly, then seamlessly resume into B's own audio from the
+  transition's out-point onward — never a hard cut between "the graph"
+  and "what's actually sounding."
+- **Pause** pauses normally (resumes exactly where it left off, whichever
+  of original/transition audio is currently sounding).
+- **Skip** just plays the next song normally from its own start — it does
+  not force a transition.
+- **Back** goes back to the previous song.
+- **Must support starting playback from any node deep in the graph**, and
+  it has to sound *identical* to having played there naturally from the
+  start (right lead-in state, not literally fast-forwarding through
+  everything before it).
+- **Reconceive "Set Start" as essentially a play button** — a way to start
+  playback from anywhere without clicking into a node first — rather than
+  a wiring concept.
+- **Reconceive "Set End" as essentially a stop button**, symmetrically.
+
 ### Done this pass (round 5 — color match, right-click menus, a real live-playback bug, graph-only UI)
 Fixed a serious, real live-playback bug the user caught by ear: an
 outro-ending hop (either the graph's own wiring or "End set → Outro") used
