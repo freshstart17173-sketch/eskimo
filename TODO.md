@@ -40,20 +40,28 @@ benefit of studio-quality transitions built in advance. A big enough graph
 means any song is a click away from anywhere else in it; enough closed
 loops means the whole thing can auto-play as an infinite seamless set.
 
-## Terminology glossary — exactly three states, in this order
+## Terminology glossary
 
-**Playing → Next → Later.** Standard DJ words are kept as-is (Transition,
-Intro, Outro, BPM, Key, Cue); only the app's own states are simplified to
-these three, used consistently in code, UI copy, and this document:
+Standard DJ words are kept as-is (Transition, Intro, Outro, BPM, Key, Cue).
 
-- **Playing** — the song live right now.
-- **Next** — reachable-now candidates (the graph's accent-outlined nodes,
-  the Sequence pane's card list); clicking one commits it immediately as
-  the thing that will actually play after Playing — there's no separate
-  staging step (round 4).
-- **Later** — a hover-only preview (not a staged plan) of what picking a
-  given Next candidate would lead to — a one-move lookahead, not an open
-  chain, and nothing is committed by it.
+**The Graph tab (PerformPage) now uses exactly two states — Active vs
+Selected** (replaced Playing/Next/Later as of the node-redesign round
+below; the old three-state model is gone from that screen entirely):
+
+- **Active** — the song actually sounding right now (`session.nowPlayingId`).
+  Only ever changes via a real playback action (Start, the detail pane's
+  Play, a skip, or the wired hand-off), never as a side effect of clicking
+  around the canvas.
+- **Selected** — purely "what was last clicked" in the graph
+  (`selectedId`, PerformPage.jsx) — decides what the right-side detail pane
+  shows (inputs/outputs/specifics, plus the one Play button that can make
+  it Active). Selecting never starts or changes playback by itself.
+
+**LivePerformPage (the separate non-graph "Live" screen) was NOT touched
+by that rework** and may still carry the older Playing/Next/Later
+language internally — worth auditing if that screen gets picked back up,
+but it's a distinct page from the Graph tab and wasn't in scope here.
+
 - **Cut** — a hard edge with no fragment. **Renamed to "None" everywhere** as of the graph-editor rework below (label and code both) — "cut" reads as a DJ term for something that isn't really a DJ move here, it's just "nothing built."
 
 ## Graph model — decided, don't revisit
@@ -912,6 +920,110 @@ problem, the same-side-vs-other-side classification was.
   reproduce, but it's genuinely untested against real recorded audio.
   **Don't treat short-overlap cue-point precision as fully verified —
   confirm it against a real short-overlap upload before relying on it.**
+
+### Done this pass (round 8 — node redesign, part 1: Selected/Active model, canvas placement, wiring fixes)
+
+A single very large "redesign the nodes" request came in with many parts.
+This round covers the foundational interaction-model pieces; the visual
+socket/dropdown redesign itself (see "Next up" below) is still queued.
+
+- **Selected vs Active, for real.** Active (`session.nowPlayingId`) is
+  whatever's actually sounding; Selected (`selectedId`, PerformPage.jsx) is
+  purely "what was last clicked" and never has a playback side effect on
+  its own. A new right-side **detail pane** (`DetailPane`, PerformPage.jsx)
+  shows the selected song's cover/BPM/key/duration and its socket state,
+  with one Play button that's the only thing that starts or jumps
+  playback. Verified end-to-end with Playwright: selecting a node never
+  plays it; clicking Play on an arbitrary node mid-set correctly hands off
+  and the set keeps following *that* node's own wiring afterward.
+- **Playing/Next/Later is gone from the Graph tab** — `stateFor` now
+  returns only `'active' | 'selected' | null`; removed the legend swatches,
+  `nextRows`/`laterRows`/`nextCandidateIds`/`laterCandidateIds`, and the
+  hover-preview "later" system entirely (see the glossary above).
+- **Toolbar simplified to Start / Pause / Stop.** The separate "End Set"
+  button and its confirm modal are gone — ending gracefully was already
+  just a consequence of a song's own wiring leading into the End node
+  (`playlistNextHop`); the manual trigger was a redundant, riskier way to
+  do the same thing, and the user explicitly didn't like it as a distinct
+  control.
+- **The graph no longer force-loads every library song as a node.**
+  `session.canvasIds` tracks which songs actually have a placed node
+  (migrated once from whatever's already on-screen, so nothing existing
+  gets wiped). The pane's right-click "Add node here" now searches and
+  places an *existing* library song (no upload form — a real
+  misunderstanding from an earlier request, now corrected) at the clicked
+  spot; a node's own context menu gained "Remove from graph" (takes it off
+  the canvas, disconnects its wires, leaves the song itself untouched in
+  the Library — separate from "Delete song").
+- **Canvas click/drag behavior fixed.** Left-drag on empty canvas now
+  draws a selection box by default (`onSelectionDragStop` persists every
+  node that moved together); panning moved to holding Shift while
+  dragging. Fixes a real reported bug: the old default (plain drag pans)
+  meant dismissing a right-click menu had no way to "undo" itself — the
+  pane's own default gesture fought the menu instead of just closing it.
+- **Start Set wiring bug, root-caused and fixed.** Reported directly: wire
+  Start Set to song A's None socket, then separately wire song B's Outro
+  into A's Intro socket, and the two silently fought over one shared field
+  (`nodes[A].startMode`) — whichever wire was drawn second won, and the
+  other's own choice was lost even though its *pointer* (`startSongId` /
+  `nextSongId`) was still intact. This is a genuinely non-linear editor —
+  a song can be reached by Start jumping straight to it *and* by another
+  song's Outro/Transition leading into it, and those two paths can
+  legitimately want different arrival styles. Fixed by giving Start its
+  own independent `activePlaylist.startMode`/`startEdgeId` fields instead
+  of writing into the destination song's shared node entry (`wireStart`/
+  `unwireStart`, core.js); `socketDataById` now merges both sources for
+  display, preferring the ordinary wire's mode when one exists. Verified
+  via the actual drag-and-drop UI (not just the data layer) that both
+  wires now persist and each drives its own real behavior correctly.
+- **Player bar moved to the bottom of the page**, volume collapsed to an
+  icon that only reveals its slider on click (most controls should
+  disappear until clicked), and it now shows what kind of hop
+  (transition / outro→cut / cut→intro / etc, via the existing `hopSummary`
+  helper) is coming up between Now Playing and whatever's next. The
+  playhead (`Playhead`, SequencePane.jsx, reused here) got a short CSS
+  transition so its 1Hz tick reads as smooth motion instead of visibly
+  stepping, without any per-frame JS.
+
+### Next up — the rest of the node redesign, not yet built
+Still queued from the same original request, roughly in the order they'd
+naturally build on each other:
+- **Socket rows → one dropdown per side, styled as a progress bar.**
+  Bigger labels; collapse the current 3-stacked-rows-per-side
+  (None/Intro/Transition, None/Outro/Transition) into a single dropdown
+  per side that IS a progress bar — a countdown color for an upcoming
+  trigger, a progress color for one actively playing. Opening it should
+  list *every* intro/outro/transition candidate (not just same-type
+  variants), each with its own countdown. Left/right dropdowns must stay
+  on the same horizontal level (explicit correction: don't stagger them —
+  scroll a long list instead).
+- **A bottom-of-node timeline bar** marking every associated cue's actual
+  in/out point, so the whole node's timing is readable at a glance.
+- **A better collective name for "intro/outro/transition"** — user asked
+  for a proposal, not yet made.
+- **Wire `occludedTransitions` (core.js) into the new dropdown UI** so a
+  transition that would clash with an already-wired outro/intro (cue
+  points overlap) shows as unavailable/flagged, vs. one that doesn't
+  overlap and is fine.
+- **Smoother spectrum bars** (`LiveWaveform`, GraphNodes.jsx) — the
+  playhead got its smoothing pass this round (see above); the live
+  waveform bars still update via direct per-frame style writes off
+  `engine.getLevels` and haven't been revisited.
+- **A written v2 plan: multi-input/output sockets.** One output draggable
+  to multiple inputs; a single socket accepting multiple inputs, with
+  random selection among them for now. Explicitly a planning/documentation
+  task per the user's own framing ("prepare and plan"), not yet written
+  up here.
+- **Research/recommend an approach for many transitions between the same
+  songs** without the visual clutter multiple produced transitions between
+  one pair currently creates (GraphPane.jsx's `fannedBezierPath` already
+  fans them apart geometrically — worth writing up whether that's actually
+  sufficient or something like grouping/collapsing multi-edges is needed).
+- **Sample album covers for the example graph** (`sampleSongsForTests`,
+  core.js) so the color-match feature is visible in the guided first-run
+  example, not just once real cover art is uploaded.
+- **Harden the cover/color-match system** defensively so a bug in
+  updating a cover can't break anything else on the page.
 
 ### Done this pass (round 5 — color match, right-click menus, a real live-playback bug, graph-only UI)
 Fixed a serious, real live-playback bug the user caught by ear: an
