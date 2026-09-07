@@ -96,7 +96,7 @@ function Card({ row, onClick, onMouseEnter, onMouseLeave, onFocusRow, readOnly }
 // real audio deck, via `onSeek` — on release, the same "preview while
 // dragging, commit on drop" pattern most scrubbers use, rather than
 // restarting the audio buffer on every pixel of movement.
-function Playhead({ pct, onSeek }) {
+export function Playhead({ pct, onSeek }) {
   const trackRef = useRef(null);
   const [dragPct, setDragPct] = useState(null);
   const draggingRef = useRef(false);

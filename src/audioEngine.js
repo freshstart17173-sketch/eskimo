@@ -20,7 +20,7 @@
 // every currently scheduled node, whichever deck or fragment is
 // sounding) rather than tracking play/pause per node.
 
-import { END, advanceSession, playlistNextHop } from './core.js';
+import { END, advanceSession, playlistNextHop, clamp } from './core.js';
 import { resolveAudioUrl } from './localAudioStore.js';
 
 const bufferCache = new Map();
@@ -33,12 +33,25 @@ class AudioEngine {
     this._freqData = null;
     this._current = null; // { source, gain, buffer, kind: 'main'|'clip', songId?, startCtxTime, offsetSec, resolve? }
     this._playToken = 0;
+    this._volume = 1; // survives a context not existing yet (set before any audio has played)
   }
+
+  // A plain master-bus volume control, independent of anything else the
+  // engine is doing — the player's own volume slider, not a per-transition
+  // loudness concern. Stored on the instance (not just the GainNode) so it
+  // survives ensureContext() not having run yet, e.g. a volume drag before
+  // any audio has ever played.
+  setVolume(v) {
+    this._volume = clamp(v, 0, 1);
+    if (this.master) this.master.gain.value = this._volume;
+  }
+  getVolume() { return this._volume; }
 
   ensureContext() {
     if (!this.ctx) {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this.master = this.ctx.createGain();
+      this.master.gain.value = this._volume;
       // A tap on the master bus for the Playing node's live waveform — an
       // AnalyserNode just observes whatever passes through it, so wiring it
       // inline between master and the destination doesn't change what's

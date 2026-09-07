@@ -4,7 +4,7 @@ import { Icon, ICONS } from './shared.jsx';
 export default function Sidebar({ tab, setTab, songCount, edgeCount, venueName }) {
   const items = [
     { id: 'live', label: 'Live', icon: ICONS.play },
-    { id: 'perform', label: 'Graph', icon: ICONS.perform, disabled: true },
+    { id: 'perform', label: 'Graph', icon: ICONS.perform },
     { id: 'library', label: 'Library', icon: ICONS.library },
     { id: 'upload', label: 'Upload Song', icon: ICONS.upload },
     { id: 'addAudio', label: 'Add Audio', icon: ICONS.addAudio },

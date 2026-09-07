@@ -11,7 +11,8 @@ import { engine, performAdvance } from '../audioEngine.js';
 import { analyzeAudio } from '../audioAnalyze.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
 import GraphPane from './GraphPane.jsx';
-import { Icon, ICONS, ConfirmModal, Field, Dropzone, CoverPicker } from './shared.jsx';
+import { Icon, ICONS, ConfirmModal, Field, Dropzone, CoverPicker, AlbumArt } from './shared.jsx';
+import { Playhead } from './SequencePane.jsx';
 
 // The Provider wrapper lives here (not App.jsx) so @xyflow/react — React
 // Flow, dagre's graph layout, Fuse.js search, this whole module — only
@@ -37,6 +38,10 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // SequencePane (rather than living as that component's own state) so a
   // click on the graph can select a song too, not just the search box.
   const [startPickId, setStartPickId] = useState(null);
+  // The player bar's volume slider — reads the engine's own stored value on
+  // mount so it doesn't reset to 100% every time this page remounts.
+  const [volume, setVolumeState] = useState(() => engine.getVolume());
+  const handleVolumeChange = useCallback((v) => { engine.setVolume(v); setVolumeState(v); }, []);
   // Right-click context menus (empty canvas vs. a specific node) — one
   // piece of state, null when closed, `{ kind: 'pane'|'node', screenX,
   // screenY, flowX, flowY, nodeId, nodeType }` when open. `screenX/Y`
@@ -681,6 +686,10 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       mixingEdgeId = committedEdge ? committedEdge.id : null;
     }
   }
+  // The player bar's "Next" preview — whatever queueHead already resolved
+  // to (a manual commit or the graph's own wiring), regardless of the
+  // 8-second crossfade lookahead mixingIntoSong is gated behind.
+  const nextSong = queueHead && queueHead.id !== END ? songs[queueHead.id] : null;
 
   if (Object.keys(songs).length === 0) {
     return (
@@ -761,14 +770,54 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         )}
       </div>
 
-      {/* Side panel (SequencePane) and bottom queue bar deliberately not
-          rendered — the graph itself (click-to-play/commit, the Start/End/
-          Stop toolbar buttons, and the node/canvas right-click menus) now
-          covers everything they did, so live-set behavior can be exercised
-          and verified through the graph alone rather than two parallel,
-          easy-to-drift interfaces. Both components are still intact and
-          reachable if that trade turns out wrong — nothing about them was
-          deleted, only this render call. */}
+      {/* The old side panel and bottom queue bar stay unused — the graph
+          itself (click-to-play/commit, the toolbar buttons, and the node/
+          canvas right-click menus) already covers picking what plays — but
+          a live set still needs an always-visible "what's on, what's next,
+          and the regular transport" strip that doesn't require reading the
+          canvas at all. */}
+      {hasStarted && (
+        <div className="player-bar">
+          <div className="player-bar-now">
+            <AlbumArt className="player-bar-art" url={nowSong.coverUrl} />
+            <div className="player-bar-text">
+              <div className="player-bar-title">{nowSong.title}</div>
+              <div className="player-bar-artist">{nowSong.artist}</div>
+            </div>
+          </div>
+
+          <button className="icon-btn" onClick={togglePlaying} aria-label={session.isPlaying ? 'Pause' : 'Play'}>
+            <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={16} />
+          </button>
+          <button className="icon-btn" onClick={skipNow} aria-label="Skip to next" data-tooltip="Skip to next">
+            <Icon path={ICONS.skip} filled size={16} />
+          </button>
+
+          <span className="mono-num player-bar-time">{fmtTime(elapsed)}</span>
+          <div className="player-bar-scrub"><Playhead pct={cueBarPct} onSeek={seekPlayhead} /></div>
+          <span className="mono-num player-bar-time">{fmtTime(nowSong.durationSec)}</span>
+
+          <div className="player-bar-volume" data-tooltip={Math.round(volume * 100) + '%'}>
+            <Icon path={ICONS.volume} size={14} />
+            <input
+              type="range" min="0" max="1" step="0.01" value={volume}
+              onChange={(e) => handleVolumeChange(Number(e.target.value))}
+              aria-label="Volume"
+            />
+          </div>
+
+          <div className="player-bar-next">
+            <span className="player-bar-next-label">Next</span>
+            {nextSong ? (
+              <>
+                <AlbumArt className="player-bar-art-sm" url={nextSong.coverUrl} />
+                <span className="player-bar-next-title">{nextSong.title}</span>
+              </>
+            ) : <span className="player-bar-next-empty">nothing queued</span>}
+          </div>
+        </div>
+      )}
+
       <div className="perform-layout">
         <div className="graph-pane">
           <GraphPane
