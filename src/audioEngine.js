@@ -113,8 +113,12 @@ class AudioEngine {
 
   // Stops whatever's audibly playing (main deck or an in-flight fragment)
   // without cancelling a handoff chain that's still awaiting buffers —
-  // callers that need that too go through stopAll().
+  // callers that need that too go through stopAll(). Always cancels any
+  // pending Plan too: its scheduled times were computed against whichever
+  // deck is being stopped right now, so they're meaningless (and would
+  // collide with whatever plays next) the moment that deck goes away.
   _stopCurrentSound() {
+    this.cancelPlan();
     const c = this._current;
     if (c) {
       try { c.source.onended = null; } catch (e) { /* already stopped */ }
@@ -177,6 +181,10 @@ class AudioEngine {
     if (!c || c.kind !== 'main' || c.songId !== songId) return false;
     const ctx = this.ensureContext();
     const clamped = Math.max(0, Math.min(offsetSec, c.buffer.duration));
+    // Any pending plan's scheduled times were computed against this deck's
+    // old startCtxTime/offsetSec — meaningless (and wrong) the moment
+    // either changes, so it has to go, not just the sound itself.
+    this.cancelPlan();
     try { c.source.onended = null; c.source.stop(); c.source.disconnect(); } catch (e) { /* already stopped */ }
     this._startMain(c.buffer, songId, clamped);
     return true;
@@ -246,6 +254,7 @@ class AudioEngine {
   // should treat this exactly like scheduling never happened, since
   // nothing was committed to the audio graph.
   async scheduleHop(hopDecision) {
+    if (!hopDecision) { this.cancelPlan(); return null; }
     const current = this._current;
     if (!current || current.kind !== 'main') return null;
     const planToken = ++this._planToken;
@@ -286,17 +295,35 @@ class AudioEngine {
       stepTime += buffer.duration;
     }
 
-    let destStartCtxTime = null;
+    let destStartCtxTime = null, destNode = null;
     if (destBuffer) {
-      const node = this._createSource(destBuffer);
-      node.start(stepTime, hopDecision.destOffsetSec || 0);
-      pendingNodes.push(node);
+      destNode = this._createSource(destBuffer);
+      destNode.start(stepTime, hopDecision.destOffsetSec || 0);
+      pendingNodes.push(destNode);
       destStartCtxTime = stepTime;
     }
 
-    const plan = { triggerCtxTime, destStartCtxTime, destSongId: hopDecision.destSongId || null, pendingNodes };
+    const plan = {
+      triggerCtxTime, destStartCtxTime, destSongId: hopDecision.destSongId || null,
+      destNode, destBuffer, destOffsetSec: hopDecision.destOffsetSec || 0, pendingNodes,
+    };
     this._plan = plan;
     return plan;
+  }
+
+  // Called once a caller (the tick, currently) notices the plan's
+  // destination has actually started sounding — ctx.currentTime has
+  // passed destStartCtxTime — so it can be promoted to `_current` exactly
+  // as if `_startMain` had been called for it directly. Without this,
+  // getMainElapsed/seekMain/the next scheduleHop call would have no way
+  // to recognize the new main deck as real, sounding audio.
+  consumePlan(plan) {
+    if (this._plan === plan) this._plan = null;
+    if (!plan.destNode) return; // an End-Set hop with no destination — nothing to promote
+    this._current = {
+      source: plan.destNode, buffer: plan.destBuffer, kind: 'main',
+      songId: plan.destSongId, startCtxTime: plan.destStartCtxTime, offsetSec: plan.destOffsetSec,
+    };
   }
 
   // Starts the very first song of a set. `introEdge` (real audio optional)
@@ -389,11 +416,22 @@ export const engine = new AudioEngine();
 // awaited fetch+decode round trip. loadBuffer already dedupes by URL, so
 // calling this every tick while inside the lookahead window is harmless —
 // only the first call for a given URL does real work.
+// Prefers the hop's own edgeId — the specific outro variant actually
+// wired/selected (see playlistNextHop/confirmEndSet) — over a blind
+// "first outro on this song" scan, which would play the wrong audio the
+// moment a song has more than one outro variant to choose from. Shared by
+// performAdvance and buildHopDecision so there's exactly one place that
+// resolves "which outro edge did this hop actually mean" — two separate
+// copies of this same lookup is exactly how they'd eventually disagree.
+function findOutroEdgeFor(edges, nowPlayingId, edgeId) {
+  return (edgeId && edges.find((e) => e.id === edgeId)) || edges.find((e) => e.type === 'outro' && e.l === nowPlayingId);
+}
+
 export const PREFETCH_LOOKAHEAD_SEC = 6;
 export function prefetchHop(hop, nowPlayingId, edges, songs) {
   if (!hop) return;
   if (hop.id === END) {
-    const edge = (hop.edgeId && edges.find((e) => e.id === hop.edgeId)) || edges.find((e) => e.type === 'outro' && e.l === nowPlayingId);
+    const edge = findOutroEdgeFor(edges, nowPlayingId, hop.edgeId);
     if (edge && edge.audioUrl) engine.loadBuffer(edge.audioUrl).catch(() => null);
     return;
   }
@@ -402,10 +440,73 @@ export function prefetchHop(hop, nowPlayingId, edges, songs) {
     const edge = edges.find((e) => e.id === hop.edgeId);
     if (edge && edge.audioUrl) engine.loadBuffer(edge.audioUrl).catch(() => null);
   } else if (hop.ending === 'outro') {
-    const edge = (hop.edgeId && edges.find((e) => e.id === hop.edgeId)) || edges.find((e) => e.type === 'outro' && e.l === nowPlayingId);
+    const edge = findOutroEdgeFor(edges, nowPlayingId, hop.edgeId);
     if (edge && edge.audioUrl) engine.loadBuffer(edge.audioUrl).catch(() => null);
   }
   if (destSong && destSong.audioUrl) engine.loadBuffer(destSong.audioUrl).catch(() => null);
+}
+
+// Converts a `hop` (the same {id, mode, ending, starting, edgeId} shape
+// used throughout the app) into what scheduleHop actually needs: an exact
+// cue point on the CURRENT main deck's own timeline, the fragment(s) that
+// play at it, and the destination. Falls back to `currentBufferDurationSec`
+// (the real decoded buffer's own length, not the data model's durationSec
+// field) as the cue point whenever there's no earlier real one — a plain
+// cut fires at the song's natural end, which still benefits from being
+// scheduled precisely in advance rather than reactively (the destination's
+// buffer still has to be fetched/decoded from somewhere, same as any other
+// hop). Returns null only when the hop itself can't be resolved to a real
+// destination at all (autoplay dead ends, a hop naming a deleted song).
+export function buildHopDecision(hop, nowPlayingId, songs, edges, currentBufferDurationSec) {
+  if (!hop) return null;
+  if (hop.id === END) {
+    if (hop.ending !== 'outro') return { cueOffsetSec: currentBufferDurationSec, fragmentUrls: [], destSongId: null, destUrl: null, destOffsetSec: 0 };
+    const edge = findOutroEdgeFor(edges, nowPlayingId, hop.edgeId);
+    const cueOffsetSec = edge && edge.outSeconds != null ? edge.outSeconds : currentBufferDurationSec;
+    return { cueOffsetSec, fragmentUrls: edge && edge.audioUrl ? [edge.audioUrl] : [], destSongId: null, destUrl: null, destOffsetSec: 0 };
+  }
+  const destSong = songs[hop.id];
+  if (!destSong) return null;
+  if (hop.mode === 'transition') {
+    const edge = edges.find((e) => e.id === hop.edgeId);
+    const cueOffsetSec = edge && edge.outSeconds != null ? edge.outSeconds : currentBufferDurationSec;
+    return {
+      cueOffsetSec, fragmentUrls: edge && edge.audioUrl ? [edge.audioUrl] : [],
+      destSongId: hop.id, destUrl: destSong.audioUrl || null, destOffsetSec: edge && edge.inSeconds != null ? edge.inSeconds : 0,
+    };
+  }
+  // cut, possibly with an outro leaving the old song and/or an intro
+  // starting the new one — same up-to-three-piece chain handleHandoff's
+  // sequential version plays, just scheduled all at once instead.
+  const outroEdge = hop.ending === 'outro' ? findOutroEdgeFor(edges, nowPlayingId, hop.edgeId) : null;
+  const introEdge = hop.starting === 'intro' ? edges.find((e) => e.type === 'intro' && e.r === hop.id) : null;
+  const cueOffsetSec = outroEdge && outroEdge.outSeconds != null ? outroEdge.outSeconds : currentBufferDurationSec;
+  const fragmentUrls = [outroEdge ? outroEdge.audioUrl : null, introEdge ? introEdge.audioUrl : null].filter(Boolean);
+  return { cueOffsetSec, fragmentUrls, destSongId: hop.id, destUrl: destSong.audioUrl || null, destOffsetSec: 0 };
+}
+
+// The tick's job once it notices a scheduled Plan already fired in real
+// audio (ctx.currentTime has passed plan.destStartCtxTime): bring session
+// state into agreement with what's already true, never the other way
+// around. Pure and pulled out of the tick itself specifically so it's
+// directly testable without needing a live AudioContext or React — the
+// actual scheduling already happened; this only has to get the
+// bookkeeping right (which queue entry to consume, the history push, the
+// real elapsed-since-fired time for the new countdown).
+export function syncSessionFromFiredPlan(prevSession, plan, songs, ctxCurrentTime) {
+  if (!prevSession.isPlaying || !prevSession.nowPlayingId) return prevSession;
+  const wasQueued = prevSession.queue[0] && prevSession.queue[0].id === plan.destSongId;
+  const history = [...prevSession.history, prevSession.nowPlayingId].slice(-50);
+  if (plan.destSongId == null) {
+    return { ...prevSession, isPlaying: false, setEnded: true, queue: [], timeLeft: 0, history };
+  }
+  const destSong = songs[plan.destSongId];
+  const destDuration = destSong ? destSong.durationSec : 210;
+  return {
+    ...prevSession, nowPlayingId: plan.destSongId, history,
+    queue: wasQueued ? prevSession.queue.slice(1) : prevSession.queue,
+    timeLeft: Math.max(0, destDuration - (ctxCurrentTime - plan.destStartCtxTime)),
+  };
 }
 
 // Shared by both the set-clock's automatic tick and the manual skip button
@@ -438,24 +539,17 @@ export function performAdvance(prevSession, songs, edges, opts = {}) {
     ? advanceSession({ ...prevSession, queue: [wiredHop] }, songs, edges)
     : advanceSession(prevSession, songs, edges);
 
-  // Prefers the hop's own edgeId — the specific outro variant actually
-  // wired/selected (see playlistNextHop/confirmEndSet) — over a blind
-  // "first outro on this song" scan, which would play the wrong audio the
-  // moment a song has more than one outro variant to choose from.
-  function findOutroEdge(edgeId) {
-    return (edgeId && edges.find((e) => e.id === edgeId)) || edges.find((e) => e.type === 'outro' && e.l === nowPlayingId);
-  }
   if (hop) {
     if (hop.id === END) {
       const ending = forceCut ? 'cut' : hop.ending;
-      const outroEdge = ending === 'outro' ? findOutroEdge(hop.edgeId) : null;
+      const outroEdge = ending === 'outro' ? findOutroEdgeFor(edges, nowPlayingId, hop.edgeId) : null;
       engine.handleHandoff({ hop, destSong: null, edges, ending, outroEdge });
     } else {
       const destSong = songs[hop.id];
       const mode = forceCut ? 'cut' : hop.mode;
       const ending = forceCut ? 'cut' : hop.ending;
       const starting = forceCut ? 'cut' : hop.starting;
-      const outroEdge = mode === 'cut' && ending === 'outro' ? findOutroEdge(hop.edgeId) : null;
+      const outroEdge = mode === 'cut' && ending === 'outro' ? findOutroEdgeFor(edges, nowPlayingId, hop.edgeId) : null;
       const introEdge = mode === 'cut' && starting === 'intro' ? edges.find((e) => e.type === 'intro' && e.r === hop.id) : null;
       engine.handleHandoff({ hop: { ...hop, mode }, destSong, edges, ending, starting, outroEdge, introEdge });
     }

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed } from './core.js';
-import { engine, performAdvance, prefetchHop, PREFETCH_LOOKAHEAD_SEC } from './audioEngine.js';
+import { engine, performAdvance, prefetchHop, PREFETCH_LOOKAHEAD_SEC, buildHopDecision, syncSessionFromFiredPlan } from './audioEngine.js';
 import Sidebar from './components/Sidebar.jsx';
 
 // Lazy — each page's own module (and, for Perform, @xyflow/react + dagre +
@@ -60,52 +60,95 @@ export default function App() {
     return () => clearTimeout(saveTimer.current);
   }, [songs, edges, session, venueName, isDemo, playlists]);
 
-  // ---- the set clock: ticks Now Playing's countdown, then hands off via
-  // performAdvance (audioEngine.js) — the same function a manual "Next
-  // song" click uses — once transitionTriggerElapsed says it's time, so
-  // the timer and the button can never disagree about what happens next.
-  // That trigger point is the committed transition's real cue point when
-  // one exists — not the full song length — so the handoff actually
-  // happens where the produced transition was built to happen.
+  // ---- the set clock. Two different mechanisms depending on whether Now
+  // Playing has real, sounding audio right now — see docs/playback-model.md
+  // sec 6 for the full design:
   //
-  // Elapsed comes from the real AudioContext clock (engine.getMainElapsed)
-  // whenever Now Playing actually has uploaded audio sounding right now —
-  // sample-accurate, immune to tab-throttling drift, and genuinely paused
-  // by togglePlaying's ctx.suspend() rather than just stopping a counter.
-  // A song with no uploaded master falls back to measuring real wall-clock
-  // time between ticks (not a fixed "-1 per tick", which would drift if
-  // this interval's period ever changed) — so the two paths always agree
-  // on what "elapsed" means even though only one of them is real audio.
-  // Kept at the same 1000ms cadence as before (not faster): each tick
-  // producing a new session object resets the save-effect's 400ms
-  // debounce below, so a tick period shorter than that would starve it
-  // and nothing would ever actually persist while a set is playing. ----
+  // Real audio: a hop is scheduled against AudioContext's own clock the
+  // moment it's known (engine.scheduleHop), not reactively once this tick
+  // notices a cue point has arrived — the browser's audio thread carries
+  // out the splice at its exact precomputed time regardless of anything
+  // happening here afterward. This tick's only job for that case is
+  // noticing, after the fact, that a scheduled hop already fired
+  // (ctx.currentTime has passed it) and syncing session state to match,
+  // plus keeping the displayed countdown numbers current in the meantime.
+  // It is never the thing deciding *when* real audio happens anymore.
+  //
+  // No real audio for Now Playing (nothing uploaded): there's no
+  // AudioContext clock to schedule against, so this falls back to exactly
+  // the reactive wall-clock path this tick used unconditionally before —
+  // measure real time between ticks, hand off via performAdvance once
+  // elapsed crosses the trigger point.
+  //
+  // Kept at the same 1000ms cadence as before: each tick producing a new
+  // session object resets the save-effect's 400ms debounce below, so a
+  // shorter period would starve it and nothing would persist while a set
+  // plays. sessionRef mirrors the latest session so this can read it
+  // without going through setSession's updater — scheduling is a real
+  // side effect (creates/cancels Web Audio nodes), and an updater function
+  // must stay pure since React can invoke it more than once. ----
   const lastTickAtRef = useRef(Date.now());
+  const sessionRef = useRef(session);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+  const scheduledHopKeyRef = useRef(null);
   useEffect(() => {
     lastTickAtRef.current = Date.now();
     const t = setInterval(() => {
       const now = Date.now();
       const dtSec = Math.max(0, (now - lastTickAtRef.current) / 1000);
       lastTickAtRef.current = now;
-      setSession(prev => {
-        if (!prev.isPlaying || !prev.nowPlayingId) return prev;
-        const nowSong = songs[prev.nowPlayingId];
-        const duration = nowSong ? nowSong.durationSec : 210;
+      const prev = sessionRef.current;
+      if (!prev.isPlaying || !prev.nowPlayingId) return;
+      const nowSong = songs[prev.nowPlayingId];
+      const duration = nowSong ? nowSong.durationSec : 210;
+      const visibleEdges = getVisibleEdges(edges);
+      const effectiveHead = prev.queue[0] || playlistNextHop(prev.activePlaylist, prev.nowPlayingId);
+
+      // A previously scheduled hop already fired in real audio — sync
+      // session state to match what's already true, then let the next
+      // tick schedule whatever comes after (once state has settled).
+      const plan = engine._plan;
+      if (plan && engine.ctx && engine.ctx.currentTime >= plan.destStartCtxTime) {
+        const ctxNow = engine.ctx.currentTime;
+        engine.consumePlan(plan);
+        scheduledHopKeyRef.current = null;
+        setSession(p => syncSessionFromFiredPlan(p, plan, songs, ctxNow));
+        return;
+      }
+
+      const hasRealMainDeck = engine._current && engine._current.kind === 'main' && engine._current.songId === prev.nowPlayingId;
+
+      if (!hasRealMainDeck) {
+        // No real audio to schedule against for Now Playing — exactly the
+        // reactive wall-clock path this tick always used before.
         const engineElapsed = engine.getMainElapsed(prev.nowPlayingId);
         const elapsed = engineElapsed != null ? engineElapsed : Math.max(0, (duration - prev.timeLeft) + dtSec);
-        // A wired-but-not-manually-queued hop needs to trigger at its own
-        // cue point too, same as an explicit commit — otherwise a graph
-        // connection would silently wait for the full song length instead
-        // of the transition's actual built cue point.
-        const effectiveHead = prev.queue[0] || playlistNextHop(prev.activePlaylist, prev.nowPlayingId);
         const triggerAt = transitionTriggerElapsed(effectiveHead, edges, duration);
-        if (elapsed >= triggerAt || elapsed >= duration - 0.05) return performAdvance(prev, songs, getVisibleEdges(edges));
-        // Warm the buffer cache for the upcoming hop once its cue point is
-        // within reach — see prefetchHop's own comment (audioEngine.js) for
-        // why this is safe to call every tick in that window.
+        if (elapsed >= triggerAt || elapsed >= duration - 0.05) { setSession(p => performAdvance(p, songs, visibleEdges)); return; }
         if (triggerAt - elapsed <= PREFETCH_LOOKAHEAD_SEC) prefetchHop(effectiveHead, prev.nowPlayingId, edges, songs);
-        return { ...prev, timeLeft: Math.max(0, duration - elapsed) };
-      });
+        setSession(p => (p.isPlaying && p.nowPlayingId ? { ...p, timeLeft: Math.max(0, duration - elapsed) } : p));
+        return;
+      }
+
+      // Real audio is playing: keep the schedule up to date and update the
+      // displayed countdown off the real clock. Re-schedule whenever there
+      // is no pending plan at all (nothing scheduled yet, or one was just
+      // cancelled externally by a seek/skip/startSet) or the known hop
+      // itself changed (rewired mid-set, a fresh manual commit) —
+      // scheduleHop's own token guards against this racing an in-flight
+      // buffer load. Scheduling itself never depends on this tick firing
+      // on time — a late tick only delays *noticing* a hop already
+      // happened, never delays the hop.
+      const key = effectiveHead ? [effectiveHead.id, effectiveHead.mode, effectiveHead.edgeId || '', effectiveHead.ending || '', effectiveHead.starting || ''].join('|') : null;
+      if (!engine._plan || key !== scheduledHopKeyRef.current) {
+        scheduledHopKeyRef.current = key;
+        if (key) engine.scheduleHop(buildHopDecision(effectiveHead, prev.nowPlayingId, songs, edges, engine._current.buffer.duration));
+        else engine.cancelPlan();
+      }
+      const elapsedNow = engine.getMainElapsed(prev.nowPlayingId);
+      if (elapsedNow != null) {
+        setSession(p => (p.isPlaying && p.nowPlayingId === prev.nowPlayingId ? { ...p, timeLeft: Math.max(0, duration - elapsedNow) } : p));
+      }
     }, 1000);
     return () => clearInterval(t);
   }, [songs, edges]);
