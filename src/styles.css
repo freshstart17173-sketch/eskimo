@@ -565,7 +565,7 @@ a { color: var(--accent); }
 
 .toolbar-btn {
   display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
-  padding: 6px 10px; border-radius: var(--radius); background: var(--panel); color: var(--muted);
+  padding: 6px 10px; border-radius: var(--radius); background: var(--panel); color: var(--ink);
 }
 .toolbar-btn:hover { background: rgba(19, 19, 19, .08); }
 .toolbar-btn.active { background: var(--ink); color: var(--paper); }
@@ -923,7 +923,7 @@ a { color: var(--accent); }
    coordinates from the click event), so it sits exactly under the cursor
    regardless of canvas pan/zoom. */
 .context-menu {
-  position: fixed; min-width: 170px; background: var(--paper); border: 1px solid var(--line);
+  position: fixed; min-width: 170px; background: var(--paper);
   border-radius: var(--radius); padding: 4px; box-shadow: 0 10px 28px rgba(0, 0, 0, .22); z-index: 200;
   display: flex; flex-direction: column; gap: 1px;
 }
