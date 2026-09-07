@@ -34,6 +34,11 @@ class AudioEngine {
     this._current = null; // { source, gain, buffer, kind: 'main'|'clip', songId?, startCtxTime, offsetSec, resolve? }
     this._playToken = 0;
     this._volume = 1; // survives a context not existing yet (set before any audio has played)
+    // The one pending sample-accurate schedule, if any — see scheduleHop's
+    // own comment (docs/playback-model.md sec 6). Not yet wired into the
+    // live tick/hop flow; this is the primitive itself.
+    this._plan = null;
+    this._planToken = 0;
   }
 
   // A plain master-bus volume control, independent of anything else the
@@ -184,6 +189,114 @@ class AudioEngine {
   getMainElapsed(songId) {
     if (!this.ctx || !this._current || this._current.kind !== 'main' || this._current.songId !== songId) return null;
     return this._current.offsetSec + Math.max(0, this.ctx.currentTime - this._current.startCtxTime);
+  }
+
+  // ---------------------------------------------------------------------
+  // Sample-accurate scheduling (the "Plan" model — docs/playback-model.md
+  // sec 6). Not yet wired into the live tick/hop-decision flow — that's
+  // the next step. This is the primitive itself: given a hop, compute the
+  // exact chain of AudioContext-time-scheduled start()/stop() calls and
+  // commit them once every buffer involved is decoded, however far in
+  // advance of the actual cue point that turns out to be. The audio
+  // hardware fires each one at its own precise scheduled time regardless
+  // of anything happening on the main thread afterward — that's the whole
+  // point: nothing here is "start now", every call carries its own real
+  // future AudioContext time.
+  // ---------------------------------------------------------------------
+
+  // A source node with nothing scheduled yet — callers decide the exact
+  // start (and optionally stop) time. Split out from _startMain/
+  // _playClipToEnd (which still call .start(ctx.currentTime, ...)
+  // themselves for the "right now" cases) so scheduleHop can create nodes
+  // without committing to when they'll fire until the whole chain's math
+  // is worked out.
+  _createSource(buffer) {
+    const ctx = this.ensureContext();
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const gain = ctx.createGain();
+    source.connect(gain); gain.connect(this.master);
+    return source;
+  }
+
+  // Cancels whatever's pending in the current plan — any node scheduled
+  // to start in the future that hasn't started yet. Calling stop() on a
+  // node before its scheduled start time cancels it outright (it never
+  // plays at all), per the AudioBufferSourceNode spec — this does NOT
+  // touch whatever's already actually sounding right now (the current
+  // main deck, or a fragment already mid-playback), only steps of the
+  // plan still waiting in the future.
+  cancelPlan() {
+    if (!this._plan) return;
+    const plan = this._plan;
+    this._plan = null;
+    for (const node of plan.pendingNodes) {
+      try { node.stop(); } catch (e) { /* already started, or already stopped */ }
+    }
+  }
+
+  // `hopDecision`: { cueOffsetSec, fragmentUrls: [url, ...], destSongId,
+  // destUrl, destOffsetSec }. `cueOffsetSec` is measured on the CURRENT
+  // main deck's own buffer timeline (an edge's outSeconds, or the full
+  // duration for a plain cut with no earlier cue) — everything else is
+  // computed relative to it. Returns the committed Plan, or null if there
+  // was nothing real to schedule against (no main deck playing yet) or
+  // the hop was superseded (a newer call, a seek, a stop) before the
+  // needed buffers finished loading — in the latter case the caller
+  // should treat this exactly like scheduling never happened, since
+  // nothing was committed to the audio graph.
+  async scheduleHop(hopDecision) {
+    const current = this._current;
+    if (!current || current.kind !== 'main') return null;
+    const planToken = ++this._planToken;
+    this.cancelPlan();
+
+    const fragmentUrls = (hopDecision.fragmentUrls || []).filter(Boolean);
+    const urlsToLoad = [...fragmentUrls, ...(hopDecision.destUrl ? [hopDecision.destUrl] : [])];
+    const buffers = await Promise.all(urlsToLoad.map((url) => this.loadBuffer(url).catch(() => null)));
+    // Superseded while awaiting buffers — a newer scheduleHop call, a
+    // seek, or a stop already happened. Bail without touching the graph;
+    // whichever call superseded this one owns the current state now.
+    if (planToken !== this._planToken) return null;
+    if (this._current !== current) return null;
+
+    const fragmentBuffers = buffers.slice(0, fragmentUrls.length);
+    const destBuffer = hopDecision.destUrl ? buffers[buffers.length - 1] : null;
+    // A fragment or the destination failed to load (network error, bad
+    // file) — bail rather than schedule a chain with a silent gap where
+    // real audio was supposed to be; the caller's existing reactive path
+    // is the fallback for this rare case, same as today.
+    if (fragmentUrls.length && fragmentBuffers.some((b) => !b)) return null;
+    if (hopDecision.destUrl && !destBuffer) return null;
+
+    const triggerCtxTime = current.startCtxTime + (hopDecision.cueOffsetSec - current.offsetSec);
+    const pendingNodes = [];
+
+    // A time already in the past (buffers took longer to load than the
+    // remaining lead time) still stops/starts immediately rather than
+    // throwing — graceful degradation back toward today's reactive
+    // behavior for that rare case, not a hard failure.
+    try { current.source.stop(triggerCtxTime); } catch (e) { /* already stopped */ }
+
+    let stepTime = triggerCtxTime;
+    for (const buffer of fragmentBuffers) {
+      const node = this._createSource(buffer);
+      node.start(stepTime);
+      pendingNodes.push(node);
+      stepTime += buffer.duration;
+    }
+
+    let destStartCtxTime = null;
+    if (destBuffer) {
+      const node = this._createSource(destBuffer);
+      node.start(stepTime, hopDecision.destOffsetSec || 0);
+      pendingNodes.push(node);
+      destStartCtxTime = stepTime;
+    }
+
+    const plan = { triggerCtxTime, destStartCtxTime, destSongId: hopDecision.destSongId || null, pendingNodes };
+    this._plan = plan;
+    return plan;
   }
 
   // Starts the very first song of a set. `introEdge` (real audio optional)
