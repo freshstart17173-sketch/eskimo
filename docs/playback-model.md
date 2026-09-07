@@ -623,26 +623,36 @@ Output-device routing (`AudioContext.setSinkId`, choosing a specific
 audio interface) would matter for a real live rig but is a separate
 feature request, not a correctness fix — not addressed here.
 
-**Found during this round's end-to-end verification, out of scope for
-it:** `session.isPlaying`/`nowPlayingId` are persisted (`Store.save`), but
-nothing re-establishes the engine's own ctx anchor from that persisted
-state on load — a browser refresh mid-set leaves `session` claiming a
-song is playing while `engine._current` is genuinely `null` (audio can't
-autoplay across a reload without a user gesture anyway, so this isn't a
-new gap). In that specific state — before the user has pressed Play/Skip/
-Back again to re-establish a real anchor — seeking still lands on the
-tick's wall-clock fallback (`getMainElapsed` correctly returns `null` when
-`_current` is `null`, same as always), and a periodic tick that captured
-its own `prev` snapshot before the seek's `setSession` commits can
-overwrite the seek with a value computed from that stale snapshot. This
-is a distinct, narrower issue from Finding 2/5 above — it requires
-`_current` to be `null` outright, not just "not `nowPlayingId`'s own
-buffer" — and only reachable via a mid-set page reload, not from any
-control this round touched. Whether reload should attempt to reconstruct
-a 'silent'-kind anchor from persisted session state (there is nothing to
-reconstruct for a real 'main' deck — the actual audio is simply gone) is
-a product decision, not a quick patch, so it's logged here rather than
-patched into scope.
+**Found during this round's end-to-end verification, fixed in the next
+round:** `session.isPlaying`/`nowPlayingId` are persisted (`Store.save`),
+but nothing re-established the engine's own ctx anchor from that
+persisted state on load — a browser refresh mid-set left `session`
+claiming a song was playing while `engine._current` was genuinely `null`.
+In that state, seeking landed on the tick's wall-clock fallback, and a
+periodic tick that captured its own `prev` snapshot before the seek's
+`setSession` committed could overwrite it with a value computed from that
+stale snapshot.
+
+**Fixed:** `App.jsx` now forces `isPlaying: false` on every load,
+regardless of what was persisted — a reload tears down the AudioContext
+entirely, so nothing is genuinely audible right after one, and the
+session shouldn't claim otherwise. With `isPlaying` false the tick's own
+loop never runs at all until a real Play press, which is what removes the
+race outright (not just narrows it) rather than reconstructing engine
+state speculatively on every load. A one-shot mount effect
+(`engine.restoreCosmeticPosition`) still restores the correct resting
+position for the scrub bar/countdown rings immediately — the same
+lightweight ctx-anchored `'silent'` kind already used for a song with no
+uploaded master, so it costs nothing beyond one plain object when
+`nowPlayingId` is set, and nothing at all when it isn't. `togglePlaying`
+(`playbackControls.js`) now checks whether the anchor sitting there is
+the right *kind* for what's actually wired (real audio needs `'main'`,
+not the cosmetic `'silent'` one) and reconstructs it for real, at the
+persisted offset, inside the click itself — satisfying the browser's
+autoplay-gesture requirement rather than a plain `engine.resume()`
+silently doing nothing. `startMain` gained an optional `offsetSec` param
+(default 0) so resuming mid-song reuses the exact same path a fresh start
+already takes.
 
 ### Status
 
