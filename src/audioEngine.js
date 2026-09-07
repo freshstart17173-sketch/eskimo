@@ -120,7 +120,7 @@ class AudioEngine {
   _stopCurrentSound() {
     this.cancelPlan();
     const c = this._current;
-    if (c) {
+    if (c && c.source) {
       try { c.source.onended = null; } catch (e) { /* already stopped */ }
       try { c.source.stop(); } catch (e) { /* already stopped */ }
       try { c.source.disconnect(); } catch (e) { /* already disconnected */ }
@@ -288,10 +288,12 @@ class AudioEngine {
     try { current.source.stop(triggerCtxTime); } catch (e) { /* already stopped */ }
 
     let stepTime = triggerCtxTime;
+    const fragmentSteps = []; // { buffer, startCtxTime } per fragment — see getPlaybackPosition
     for (const buffer of fragmentBuffers) {
       const node = this._createSource(buffer);
       node.start(stepTime);
       pendingNodes.push(node);
+      fragmentSteps.push({ buffer, startCtxTime: stepTime });
       stepTime += buffer.duration;
     }
 
@@ -305,7 +307,7 @@ class AudioEngine {
 
     const plan = {
       triggerCtxTime, destStartCtxTime, destSongId: hopDecision.destSongId || null,
-      destNode, destBuffer, destOffsetSec: hopDecision.destOffsetSec || 0, pendingNodes,
+      destNode, destBuffer, destOffsetSec: hopDecision.destOffsetSec || 0, pendingNodes, fragmentSteps,
     };
     this._plan = plan;
     return plan;
@@ -326,12 +328,67 @@ class AudioEngine {
     };
   }
 
+  // The one authoritative "what's actually happening right now" query
+  // (docs/playback-model.md sec 7, Layer A) — sourced entirely from
+  // ctx.currentTime against the Plan/main-deck state, never a wall-clock
+  // accumulation, for anything with real audio. A UI driving a continuous
+  // display (a progress bar, a countdown) should read this every frame
+  // instead of computing its own position off session.timeLeft, which
+  // only changes once a second and — before this — was the actual cause
+  // of the reported jumpiness.
+  //
+  // Returns one of:
+  //   { phase: 'silence' }                                    — nothing real to report yet
+  //   { phase: 'fragment', elapsedSec, durationSec }           — mid transition/outro/intro clip
+  //   { phase: 'main', songId, elapsedSec, durationSec }       — a real master is sounding
+  getPlaybackPosition() {
+    if (!this.ctx) return { phase: 'silence' };
+    const now = this.ctx.currentTime;
+    const plan = this._plan;
+    if (plan && now >= plan.triggerCtxTime && (plan.destStartCtxTime == null || now < plan.destStartCtxTime)) {
+      for (let i = plan.fragmentSteps.length - 1; i >= 0; i--) {
+        const step = plan.fragmentSteps[i];
+        if (now >= step.startCtxTime) {
+          return { phase: 'fragment', elapsedSec: now - step.startCtxTime, durationSec: step.buffer.duration };
+        }
+      }
+    }
+    if (this._current && this._current.kind === 'main') {
+      return {
+        phase: 'main', songId: this._current.songId,
+        elapsedSec: this._current.offsetSec + Math.max(0, now - this._current.startCtxTime),
+        durationSec: this._current.buffer.duration,
+      };
+    }
+    if (this._current && this._current.kind === 'silent') {
+      // Same shape as 'main' — a consumer shouldn't need to know there's
+      // no real audio behind it — just sourced from the ctx clock instead
+      // of a buffer's own duration.
+      return {
+        phase: 'main', songId: this._current.songId,
+        elapsedSec: this._current.offsetSec + Math.max(0, now - this._current.startCtxTime),
+        durationSec: this._current.durationSec,
+      };
+    }
+    return { phase: 'silence' };
+  }
+
   // Starts the very first song of a set. `introEdge` (real audio optional)
   // plays first when the DJ chose "Intro" as the starting method.
   async startMain(song, introEdge) {
     const token = ++this._playToken;
     this._stopCurrentSound();
-    if (!song || !song.audioUrl) return false;
+    if (!song || !song.audioUrl) {
+      // No real audio to play — still record a ctx.currentTime-anchored
+      // reference (not Date.now()) so getPlaybackPosition's countdown for
+      // this song stays immune to setInterval/rAF throttling even though
+      // there's nothing actually sounding to be sample-accurate *to*. Kept
+      // as its own `kind` (not 'main') so getMainElapsed/seekMain/the
+      // scheduler correctly keep treating this as "no real deck" — this is
+      // purely a clock reference for the cosmetic countdown.
+      if (song) this._current = { kind: 'silent', songId: song.id, startCtxTime: this.ensureContext().currentTime, offsetSec: 0, durationSec: song.durationSec || 210 };
+      return false;
+    }
     if (introEdge && introEdge.audioUrl) {
       const introBuf = await this.loadBuffer(introEdge.audioUrl).catch(() => null);
       if (token !== this._playToken) return false;
