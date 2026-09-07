@@ -5,6 +5,7 @@ import {
   END, START, getVisibleEdges, inOutCounts, clamp, leftSocketAvailability, rightSocketAvailability,
   unwireOutput, wireConnection, wireStart, unwireStart, disconnectAllWires, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
   introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, hopSummary,
+  addTransitionConnection, removeTransitionConnection, autoconnectNodeTransitions, autoconnectFullGraph,
 } from '../core.js';
 import { engine, performAdvance } from '../audioEngine.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
@@ -363,6 +364,33 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setSession(prev => ({ ...prev, activePlaylist: wireConnection(prev.activePlaylist, source, target, endMode, endEdgeId, startMode, startEdgeId) }));
   }, [setSession]);
 
+  // A song can carry more than one simultaneous Transition now — adding
+  // one leaves whatever else it already carries alone (see
+  // addTransitionConnection, core.js); removing one specific edge (a
+  // hover-✕ on its own line) leaves any others untouched too.
+  const commitAddTransition = useCallback((source, target, edgeId) => {
+    setSession(prev => ({ ...prev, activePlaylist: addTransitionConnection(prev.activePlaylist, source, target, edgeId) }));
+  }, [setSession]);
+  const onDisconnectTransition = useCallback((source, edgeId) => {
+    setSession(prev => ({ ...prev, activePlaylist: removeTransitionConnection(prev.activePlaylist, source, edgeId) }));
+  }, [setSession]);
+
+  // Node context menu's "Autoconnect transitions" — wires every real
+  // produced Transition already leading out of this song at once. The
+  // canvas context menu's "Autoconnect all transitions" does the same for
+  // every placed song. Neither one touches None/Intro/Outro — see
+  // autoconnectNodeTransitions's own comment (core.js) for why that's
+  // deliberate, not an oversight.
+  const onAutoconnectNode = useCallback((songId) => {
+    setSession(prev => ({ ...prev, activePlaylist: autoconnectNodeTransitions(visibleEdges, prev.activePlaylist, songId) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleEdges]);
+  const onAutoconnectAll = useCallback(() => {
+    const ids = Object.keys(placedSongs);
+    setSession(prev => ({ ...prev, activePlaylist: autoconnectFullGraph(visibleEdges, prev.activePlaylist, ids) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleEdges, placedSongs]);
+
   // Start Set's own wire — see wireStart (core.js) for why this needs a
   // dedicated pointer instead of reusing endMode/nextSongId the way every
   // other connection does (Start isn't a song; nothing plays "from" it).
@@ -452,14 +480,19 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     if (sourceType === 'transition') {
       const candidates = transitionEdgesBetween(visibleEdges, conn.source, conn.target);
       if (candidates.length === 0) return;
-      commitWire(conn.source, conn.target, 'transition', candidates[0].id, 'transition', candidates[0].id);
+      // Adds this transition alongside whatever else the song already
+      // carries, rather than replacing it — a song can transition into
+      // more than one place at once now (see addTransitionConnection,
+      // core.js); dragging a second one in used to silently discard the
+      // first, which was a real footgun.
+      commitAddTransition(conn.source, conn.target, candidates[0].id);
       return;
     }
     const endEdgeId = sourceType === 'outro' ? ((outroEdgeFor(visibleEdges, conn.source)) || {}).id || null : null;
     const startEdgeId = targetType === 'intro' ? ((introEdgeFor(visibleEdges, conn.target)) || {}).id || null : null;
     commitWire(conn.source, conn.target, sourceType, endEdgeId, targetType, startEdgeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleEdges, commitWire, commitStartWire]);
+  }, [visibleEdges, commitWire, commitStartWire, commitAddTransition]);
 
   // A socket's dropdown (only rendered when 2+ candidates exist — see
   // socketDataById) swaps which produced edge fills an already-active
@@ -689,7 +722,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             songs={placedSongs} positions={positions} transitionEdgesRaw={transitionEdgesRaw} activePlaylist={activePlaylist}
             socketDataById={socketDataById} onToggleSocket={toggleSocket} onSelectVariant={selectVariant} mixingEdgeId={mixingEdgeId}
             onConnect={handleConnect} isValidConnection={isValidConnection} onDisconnectSong={disconnectSong}
-            onDisconnectStart={disconnectStart}
+            onDisconnectTransition={onDisconnectTransition} onDisconnectStart={disconnectStart}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
@@ -766,8 +799,10 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           onClose={closeContextMenu}
           onAddNodeHere={() => { setAddSongAt({ x: contextMenu.flowX, y: contextMenu.flowY }); closeContextMenu(); }}
           onArrangeForMe={() => { arrangeForMe(); closeContextMenu(); }}
+          onAutoconnectAll={() => { onAutoconnectAll(); closeContextMenu(); }}
           onFocus={(id) => { focusOn(id); closeContextMenu(); }}
           onSetAsStart={(id) => { setAsStart(id); closeContextMenu(); }}
+          onAutoconnectNode={(id) => { onAutoconnectNode(id); closeContextMenu(); }}
           onDisconnectAll={(id) => { disconnectAll(id); closeContextMenu(); }}
           onEditInLibrary={() => { goLibrary(); closeContextMenu(); }}
           onRemoveFromGraph={(id) => { removeFromCanvas(id); closeContextMenu(); }}
@@ -791,7 +826,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 // dropdowns do: a mousedown outside the menu, or Escape.
 function ContextMenu({
   menu, activePlaylist, onClose,
-  onAddNodeHere, onArrangeForMe, onFocus, onSetAsStart, onDisconnectAll, onEditInLibrary, onRemoveFromGraph, onDeleteSong,
+  onAddNodeHere, onArrangeForMe, onAutoconnectAll, onFocus, onSetAsStart, onAutoconnectNode, onDisconnectAll, onEditInLibrary, onRemoveFromGraph, onDeleteSong,
   onDisconnectStart, onDisconnectEnd,
 }) {
   const ref = useRef(null);
@@ -810,6 +845,11 @@ function ContextMenu({
       <>
         <button className="context-menu-item" onClick={onAddNodeHere}>Add node here</button>
         <button className="context-menu-item" onClick={onArrangeForMe}>Arrange for me</button>
+        {/* Wires every real produced Transition already leading out of every
+            placed song at once — see autoconnectFullGraph's own comment
+            (core.js) for why this deliberately only ever touches
+            Transitions, never None/Intro/Outro. */}
+        <button className="context-menu-item" onClick={onAutoconnectAll}>Autoconnect all transitions</button>
       </>
     );
   } else if (menu.nodeType === 'song') {
@@ -817,6 +857,7 @@ function ContextMenu({
       <>
         <button className="context-menu-item" onClick={() => onFocus(menu.nodeId)}>Focus here</button>
         <button className="context-menu-item" onClick={() => onSetAsStart(menu.nodeId)}>Set as Start</button>
+        <button className="context-menu-item" onClick={() => onAutoconnectNode(menu.nodeId)}>Autoconnect transitions</button>
         <button className="context-menu-item" onClick={() => onDisconnectAll(menu.nodeId)}>Disconnect all wires</button>
         <button className="context-menu-item" onClick={onEditInLibrary}>Edit in Library</button>
         <div className="context-menu-sep" />

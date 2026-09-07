@@ -150,7 +150,7 @@ const edgeTypes = { fanned: FannedEdge, active: ActiveEdge };
 
 export default function GraphPane({
   songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId,
-  onConnect, isValidConnection, onDisconnectSong, onDisconnectStart,
+  onConnect, isValidConnection, onDisconnectSong, onDisconnectTransition, onDisconnectStart,
   stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
   onDragSongPosition, endQueued, onSelectSong,
@@ -306,13 +306,25 @@ export default function GraphPane({
       seen.set(pairKey, dupIndex + 1);
       const offset = dupIndex === 0 ? 0 : Math.ceil(dupIndex / 2) * 26 * (dupIndex % 2 === 1 ? 1 : -1);
       const sourceNode = activePlaylist.nodes[e.l];
-      const isActive = !!sourceNode && sourceNode.endMode === 'transition' && sourceNode.endEdgeId === e.id;
+      // A song can carry more than one simultaneous Transition now (see
+      // addTransitionConnection, core.js) — check membership in the whole
+      // set, not equality against a single endEdgeId, so autoconnect (or a
+      // second manual drag) shows every wired one as active, not just
+      // whichever happens to be "primary".
+      const isActive = !!sourceNode && sourceNode.endMode === 'transition' && (
+        (sourceNode.transitions && sourceNode.transitions.length)
+          ? sourceNode.transitions.some(t => t.edgeId === e.id)
+          : sourceNode.endEdgeId === e.id
+      );
       const color = isActive ? lineColor.ink : lineColor.grey;
       return {
         id: e.id, source: e.l, target: e.r,
         sourceHandle: 'right-transition', targetHandle: 'left-transition',
         type: isActive ? 'active' : (offset === 0 ? 'default' : 'fanned'),
-        data: offset === 0 && !isActive ? undefined : { offset, onDisconnect: () => onDisconnectSong(e.l) },
+        // A hover-✕ on one active Transition line only ever removes that
+        // specific edge — see onDisconnectTransition, unlike the synthetic
+        // None/Outro link edges below, which still only ever have the one.
+        data: offset === 0 && !isActive ? undefined : { offset, onDisconnect: () => (isActive ? onDisconnectTransition(e.l, e.id) : onDisconnectSong(e.l)) },
         animated: isActive && mixingEdgeId === e.id,
         style: { stroke: color, strokeWidth: isActive ? 3 : 1.5, strokeDasharray: isActive ? undefined : '2 4' },
         markerEnd: { type: MarkerType.ArrowClosed, color, width: 10, height: 10 },
@@ -351,7 +363,7 @@ export default function GraphPane({
       });
     }
     return edgesOut;
-  }, [transitionEdgesRaw, activePlaylist, songs, lineColor, mixingEdgeId, onDisconnectSong, onDisconnectStart]);
+  }, [transitionEdgesRaw, activePlaylist, songs, lineColor, mixingEdgeId, onDisconnectSong, onDisconnectTransition, onDisconnectStart]);
 
   const onNodeDragStop = useCallback((_, node) => {
     onDragSongPosition(node.id, node.position.x, node.position.y);

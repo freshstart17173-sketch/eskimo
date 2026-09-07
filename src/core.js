@@ -116,7 +116,7 @@ export function unwireStart(playlist) {
 }
 
 function playlistNode(playlist, songId) {
-  return playlist.nodes[songId] || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null };
+  return playlist.nodes[songId] || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] };
 }
 
 // Wires one full connection — a Transition drag (endEdgeId names the
@@ -132,30 +132,111 @@ export function wireConnection(playlist, fromId, toId, endMode, endEdgeId, start
   return { ...playlist, nodes };
 }
 
-// Disconnects songId's outgoing wire, clearing whatever it pointed to back
-// to 'none' rather than leaving that node silently claiming a connection
-// that's no longer there.
+// Disconnects songId's ENTIRE outgoing wire — every simultaneous
+// transition it carries (see addTransitionConnection below) included, not
+// just one — clearing whatever it pointed to back to 'none' rather than
+// leaving that node silently claiming a connection that's no longer
+// there. Use removeTransitionConnection instead when only one specific
+// transition among several should go.
 export function unwireOutput(playlist, songId) {
   const node = playlistNode(playlist, songId);
-  if (!node.nextSongId) return playlist;
+  const hasTransitions = node.endMode === 'transition' && node.transitions && node.transitions.length > 0;
+  if (!node.nextSongId && !hasTransitions) return playlist;
   const nodes = { ...playlist.nodes };
-  const destId = node.nextSongId;
-  nodes[songId] = { ...node, endMode: 'none', endEdgeId: null, nextSongId: null };
-  if (nodes[destId]) nodes[destId] = { ...nodes[destId], startMode: 'none', startEdgeId: null };
+  const destIds = hasTransitions ? node.transitions.map(t => t.targetId) : (node.nextSongId ? [node.nextSongId] : []);
+  nodes[songId] = { ...node, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] };
+  destIds.forEach(destId => {
+    if (nodes[destId]) nodes[destId] = { ...nodes[destId], startMode: 'none', startEdgeId: null };
+  });
   return { ...playlist, nodes };
 }
 
+// A song can carry more than one simultaneous Transition now — dragging a
+// second one in adds to the set rather than silently replacing the first
+// (this is also what "Autoconnect" below wires up in bulk). Which one
+// actually plays is picked at random each time (playlistNextHop) until a
+// real weighting system exists; the graph itself still shows every wired
+// candidate as a solid active line, so nothing about what's *possible* is
+// hidden the way a blind shuffle would. A no-op if this exact edge is
+// already wired.
+export function addTransitionConnection(playlist, fromId, toId, edgeId) {
+  const node = playlistNode(playlist, fromId);
+  const existing = node.endMode === 'transition' ? (node.transitions || []) : [];
+  if (existing.some(t => t.edgeId === edgeId)) return playlist;
+  const transitions = [...existing, { edgeId, targetId: toId }];
+  const nodes = { ...playlist.nodes };
+  nodes[fromId] = { ...node, endMode: 'transition', endEdgeId: edgeId, nextSongId: toId, transitions };
+  // Input stays single-choice (v1) — if more than one song ends up wiring a
+  // transition into the same destination, whichever wrote last wins here,
+  // same as any other pre-existing wiring collision on a shared socket.
+  nodes[toId] = { ...playlistNode(playlist, toId), startMode: 'transition', startEdgeId: edgeId };
+  return { ...playlist, nodes };
+}
+
+// Removes exactly one transition from a song's set, leaving any others it
+// carries untouched — the counterpart to addTransitionConnection, and
+// what a hover-✕ on one specific transition edge (or unchecking one
+// candidate) should call instead of the blanket unwireOutput.
+export function removeTransitionConnection(playlist, fromId, edgeId) {
+  const node = playlistNode(playlist, fromId);
+  if (node.endMode !== 'transition') return playlist;
+  const current = node.transitions || (node.endEdgeId ? [{ edgeId: node.endEdgeId, targetId: node.nextSongId }] : []);
+  const removed = current.find(t => t.edgeId === edgeId);
+  if (!removed) return playlist;
+  const transitions = current.filter(t => t.edgeId !== edgeId);
+  const nodes = { ...playlist.nodes };
+  nodes[fromId] = transitions.length === 0
+    ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] }
+    : { ...node, endEdgeId: transitions[0].edgeId, nextSongId: transitions[0].targetId, transitions };
+  const dest = nodes[removed.targetId];
+  if (dest && dest.startEdgeId === edgeId) nodes[removed.targetId] = { ...dest, startMode: 'none', startEdgeId: null };
+  return { ...playlist, nodes };
+}
+
+// The node context menu's "Autoconnect transitions" — wires every REAL
+// produced Transition edge already leading out of this song at once,
+// instead of dragging each one in by hand. Deliberately narrower than
+// autoconnecting None/Intro/Outro too: a produced Transition is a
+// specific, deliberate pairing between two real songs (there's a real
+// audio asset behind it), so wiring "every one that exists" produces a
+// meaningful graph shape — you can see exactly what's allowed to play
+// after this song. None/Intro/Outro don't pair two songs together the
+// same way, so autoconnecting those instead would just produce an
+// arbitrary chain with no real information in it, indistinguishable from
+// a random shuffle — not offered here on purpose.
+export function autoconnectNodeTransitions(visibleEdges, playlist, songId) {
+  let next = playlist;
+  visibleEdges.filter(e => e.type === 'transition' && e.l === songId).forEach(e => {
+    next = addTransitionConnection(next, songId, e.r, e.id);
+  });
+  return next;
+}
+// The canvas context menu's "Autoconnect all transitions" — the same
+// thing, for every song currently on the graph.
+export function autoconnectFullGraph(visibleEdges, playlist, songIds) {
+  let next = playlist;
+  songIds.forEach(id => { next = autoconnectNodeTransitions(visibleEdges, next, id); });
+  return next;
+}
+
 // The node context menu's "Disconnect all wires" — clears every wire that
-// touches songId in one action: its own outgoing wire, whichever other
-// song (if any) wires its own output into songId, and Start Set's wire if
-// that's what points here. Written as three plain calls to the existing
-// single-wire primitives above rather than a new bespoke traversal, so it
-// can never drift from what a hover-✕ on each of those wires would already
-// do individually.
+// touches songId in one action: its own outgoing wire(s), whichever other
+// songs (there can be more than one now, if they each wired a different
+// Transition here) point their own output at songId, and Start Set's wire
+// if that's what points here. A non-transition source pointing at songId
+// gets its whole output unwired (it only ever has the one); a transition
+// source only loses the specific transition(s) that targeted songId,
+// leaving any others it carries alone.
 export function disconnectAllWires(playlist, songId) {
   let next = unwireOutput(playlist, songId);
-  const incomingFrom = Object.keys(next.nodes).find(id => next.nodes[id].nextSongId === songId);
-  if (incomingFrom) next = unwireOutput(next, incomingFrom);
+  Object.keys(next.nodes).forEach(id => {
+    const n = next.nodes[id];
+    if (n.endMode === 'transition' && n.transitions && n.transitions.length) {
+      n.transitions.filter(t => t.targetId === songId).forEach(t => { next = removeTransitionConnection(next, id, t.edgeId); });
+    } else if (n.nextSongId === songId) {
+      next = unwireOutput(next, id);
+    }
+  });
   if (next.startSongId === songId) next = unwireStart(next);
   return next;
 }
@@ -188,7 +269,14 @@ export function removeSongFromPlaylist(playlist, songId) {
   for (const id of Object.keys(playlist.nodes)) {
     if (id === songId) continue;
     const node = playlist.nodes[id];
-    nodes[id] = node.nextSongId === songId ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null } : node;
+    if (node.endMode === 'transition' && node.transitions && node.transitions.length) {
+      const transitions = node.transitions.filter(t => t.targetId !== songId);
+      nodes[id] = transitions.length === node.transitions.length ? node
+        : transitions.length === 0 ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] }
+        : { ...node, endEdgeId: transitions[0].edgeId, nextSongId: transitions[0].targetId, transitions };
+    } else {
+      nodes[id] = node.nextSongId === songId ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null } : node;
+    }
   }
   const wasStart = playlist.startSongId === songId;
   const startSongId = wasStart ? null : playlist.startSongId;
@@ -206,8 +294,17 @@ export function removeSongFromPlaylist(playlist, songId) {
 export function playlistNextHop(playlist, songId) {
   const node = playlist.nodes[songId];
   if (!node || !node.nextSongId) return null;
-  if (node.endMode === 'transition' && node.endEdgeId) {
-    return { id: node.nextSongId, mode: 'transition', edgeId: node.endEdgeId };
+  if (node.endMode === 'transition') {
+    // A song can carry more than one simultaneous Transition (see
+    // addTransitionConnection) — picked uniformly at random each time,
+    // until a real weighting system exists. Falls back to the singular
+    // endEdgeId/nextSongId for a playlist wired before this existed, so
+    // nothing already saved breaks.
+    const options = (node.transitions && node.transitions.length) ? node.transitions
+      : (node.endEdgeId ? [{ edgeId: node.endEdgeId, targetId: node.nextSongId }] : []);
+    if (options.length === 0) return null;
+    const pick = options[Math.floor(Math.random() * options.length)];
+    return { id: pick.targetId, mode: 'transition', edgeId: pick.edgeId };
   }
   const destNode = playlist.nodes[node.nextSongId];
   return {
