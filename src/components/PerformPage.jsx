@@ -590,8 +590,6 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchActive, matches, matchIndex, hasStarted]);
 
-  const cueBarPct = nowSong && nowSong.durationSec ? Math.round((1 - session.timeLeft / nowSong.durationSec) * 100) : 0;
-
   // Spotify-style dual display: once we're within CROSSFADE_LOOKAHEAD_SEC of
   // the committed transition's real cue point, show both songs instead of
   // just Playing.
@@ -754,7 +752,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           </button>
 
           <span className="mono-num player-bar-time">{fmtTime(elapsed)}</span>
-          <div className="player-bar-scrub"><Playhead pct={cueBarPct} onSeek={seekPlayhead} /></div>
+          <div className="player-bar-scrub"><Playhead onSeek={seekPlayhead} /></div>
           <span className="mono-num player-bar-time">{fmtTime(nowSong.durationSec)}</span>
 
           <div className="player-bar-next">

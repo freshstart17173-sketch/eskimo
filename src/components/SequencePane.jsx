@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { fmtTime, clamp } from '../core.js';
 import { Icon, ICONS, SongPicker, AlbumArt, useResolvedAudioUrl, usePalette } from './shared.jsx';
+import { usePlaybackFrame } from '../playbackControls.js';
 
 // A self-contained play/pause toggle over the row's own built audio (a
 // transition's fragment, or a cut/outro candidate's intro) — stops the
@@ -96,13 +97,18 @@ function Card({ row, onClick, onMouseEnter, onMouseLeave, onFocusRow, readOnly }
 // real audio deck, via `onSeek` — on release, the same "preview while
 // dragging, commit on drop" pattern most scrubbers use, rather than
 // restarting the audio buffer on every pixel of movement.
-export function Playhead({ pct, onSeek }) {
+export function Playhead({ onSeek }) {
   const trackRef = useRef(null);
-  const [dragPct, setDragPct] = useState(null);
+  const fillRef = useRef(null);
+  const scrubberRef = useRef(null);
   const draggingRef = useRef(false);
   const moveRef = useRef(null);
   const upRef = useRef(null);
 
+  function setDisplayPct(p) {
+    if (fillRef.current) fillRef.current.style.width = p + '%';
+    if (scrubberRef.current) scrubberRef.current.style.left = p + '%';
+  }
   function pctFromEvent(e) {
     const rect = trackRef.current.getBoundingClientRect();
     if (!rect.width) return 0;
@@ -111,15 +117,14 @@ export function Playhead({ pct, onSeek }) {
   function onPointerDown(e) {
     e.preventDefault();
     draggingRef.current = true;
-    setDragPct(pctFromEvent(e));
-    moveRef.current = (ev) => { if (draggingRef.current) setDragPct(pctFromEvent(ev)); };
+    setDisplayPct(pctFromEvent(e));
+    moveRef.current = (ev) => { if (draggingRef.current) setDisplayPct(pctFromEvent(ev)); };
     upRef.current = (ev) => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
       const p = pctFromEvent(ev);
       window.removeEventListener('pointermove', moveRef.current);
       window.removeEventListener('pointerup', upRef.current);
-      setDragPct(null);
       onSeek(p / 100);
     };
     window.addEventListener('pointermove', moveRef.current);
@@ -130,20 +135,29 @@ export function Playhead({ pct, onSeek }) {
     if (upRef.current) window.removeEventListener('pointerup', upRef.current);
   }, []);
 
-  const shownPct = dragPct != null ? dragPct : pct;
-  // `pct` only actually changes once a second (it's driven by the set
-  // clock's own 1Hz tick) — a plain width jump every second reads as a
-  // visibly stepping playhead. A short CSS transition smooths those steps
-  // into continuous motion for free, with no per-frame JS at all — long
-  // enough to erase the step, short enough that a deliberate seek or a
-  // skip to a new song still reads as landing right where it should, not
-  // visibly crawling there. Off entirely during an active drag so a scrub
-  // tracks the pointer with zero lag.
-  const transition = dragPct == null ? 'width .3s ease-out, left .3s ease-out' : 'none';
+  // Real position, read off the engine's own clock every frame — see
+  // usePlaybackFrame (playbackControls.js) and docs/playback-model.md sec
+  // 7. Never driven by React state/props, so there's no once-a-second
+  // step to smooth over with a CSS transition anymore; the value itself
+  // is already continuous. Skipped entirely while actively dragging so a
+  // scrub tracks the pointer with zero lag/fighting.
+  usePlaybackFrame((pos) => {
+    if (draggingRef.current) return;
+    let pct;
+    if (pos.phase === 'main') pct = pos.durationSec ? clamp((pos.elapsedSec / pos.durationSec) * 100, 0, 100) : 0;
+    // A fragment (transition/outro/intro clip) belongs to no single song —
+    // Now Playing's own master has already finished at this point, about
+    // to hand off, so the bar reads as complete rather than showing a
+    // stale or fabricated in-between value.
+    else if (pos.phase === 'fragment') pct = 100;
+    else pct = 0;
+    setDisplayPct(pct);
+  });
+
   return (
     <div className="playhead-track" ref={trackRef} onPointerDown={onPointerDown}>
-      <div className="playhead-fill" style={{ width: shownPct + '%', transition }} />
-      <div className="playhead-scrubber" style={{ left: shownPct + '%', transition }} />
+      <div className="playhead-fill" ref={fillRef} />
+      <div className="playhead-scrubber" ref={scrubberRef} />
     </div>
   );
 }

@@ -5,9 +5,10 @@
 // end), this module only performs the actual audio side of that decision.
 //
 // Graceful, per-song degradation: a song with no uploaded master plays
-// silently and the caller falls back to a wall-clock estimate for its
-// countdown (see getMainElapsed returning null) — nothing here requires
-// every song in the library to have real audio.
+// silently but still gets a real ctx-anchored position (kind 'silent' in
+// _current — see startMain/getMainElapsed/getPlaybackPosition), so its
+// countdown is exact rather than a wall-clock guess — nothing here
+// requires every song in the library to have real audio.
 //
 // Sequencing model: Now Playing's own master plays as the "main" deck.
 // At a hop, any produced fragment involved (a transition's own recorded
@@ -169,17 +170,25 @@ class AudioEngine {
   }
 
   // Scrubbing the playhead: restarts the same already-loaded main-deck
-  // buffer at a new offset instead of re-fetching/re-decoding it. Returns
-  // false (a no-op for the caller) when `songId` isn't actually the main
-  // deck sounding right now — mid-fragment (a transition/outro clip
-  // playing), or a song with no uploaded master at all, so there's nothing
-  // real to seek; the caller's own wall-clock `timeLeft` is what moves in
-  // that case instead, same as normal playback for a silent song already
-  // works today.
+  // buffer at a new offset instead of re-fetching/re-decoding it. A song
+  // with no uploaded master ('silent' kind — see startMain) has no buffer
+  // to restart, but still has a ctx-anchored position (offsetSec/
+  // startCtxTime, same as a real deck) that a seek must update the same
+  // way — otherwise the next authoritative read (getMainElapsed/
+  // getPlaybackPosition) would compute elapsed from the old anchor and a
+  // stale reactive fallback could stomp the seek before anything else
+  // ever notices it happened. Returns false (a genuine no-op) only when
+  // `songId` isn't the thing actually sounding right now at all — e.g.
+  // mid-fragment (a transition/outro clip playing).
   seekMain(songId, offsetSec) {
     const c = this._current;
-    if (!c || c.kind !== 'main' || c.songId !== songId) return false;
+    if (!c || (c.kind !== 'main' && c.kind !== 'silent') || c.songId !== songId) return false;
     const ctx = this.ensureContext();
+    if (c.kind === 'silent') {
+      c.offsetSec = Math.max(0, Math.min(offsetSec, c.durationSec));
+      c.startCtxTime = ctx.currentTime;
+      return true;
+    }
     const clamped = Math.max(0, Math.min(offsetSec, c.buffer.duration));
     // Any pending plan's scheduled times were computed against this deck's
     // old startCtxTime/offsetSec — meaningless (and wrong) the moment
@@ -190,12 +199,15 @@ class AudioEngine {
     return true;
   }
 
-  // Real elapsed seconds into `songId`'s own master, straight off the
-  // AudioContext clock — null whenever that song isn't the thing actually
-  // sounding right now (no real audio at all, or mid-fragment), which is
-  // the caller's cue to fall back to a wall-clock estimate instead.
+  // Real elapsed seconds into `songId`'s own master, off the AudioContext
+  // clock — including the ctx-anchored fallback a 'silent' deck (no
+  // uploaded master) keeps for exactly this purpose. Null only when that
+  // song isn't the thing actually sounding right now (mid-fragment, or
+  // nothing playing at all), which is the caller's cue to fall back to a
+  // wall-clock estimate instead.
   getMainElapsed(songId) {
-    if (!this.ctx || !this._current || this._current.kind !== 'main' || this._current.songId !== songId) return null;
+    if (!this.ctx || !this._current || this._current.songId !== songId) return null;
+    if (this._current.kind !== 'main' && this._current.kind !== 'silent') return null;
     return this._current.offsetSec + Math.max(0, this.ctx.currentTime - this._current.startCtxTime);
   }
 

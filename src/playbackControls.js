@@ -1,6 +1,30 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { introEdgeFor } from './core.js';
 import { engine, performAdvance } from './audioEngine.js';
+
+// Drives a continuous playback-position display off the real clock every
+// frame — the same technique LiveWaveform (GraphNodes.jsx) already uses
+// for its spectrum bars (a real reading, updated via requestAnimationFrame,
+// written directly through a ref), applied here to progress/countdown
+// displays too. `onFrame` should write straight to the DOM through a ref,
+// never call setState — going through React re-render for a value that
+// changes every frame would be the same mistake this exists to fix. See
+// docs/playback-model.md sec 7. A ref (not a dependency array entry) holds
+// the latest callback so passing an inline function every render doesn't
+// restart the rAF loop.
+export function usePlaybackFrame(onFrame) {
+  const onFrameRef = useRef(onFrame);
+  onFrameRef.current = onFrame;
+  useEffect(() => {
+    let raf;
+    function tick() {
+      onFrameRef.current(engine.getPlaybackPosition());
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+}
 
 // The transport primitives (Play/Pause, Skip, Start, Stop, Back). Used to
 // be hand-copied near-verbatim into both PerformPage.jsx and a second,
