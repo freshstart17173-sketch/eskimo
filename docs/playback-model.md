@@ -282,11 +282,163 @@ re-derive this same audit from scratch.
 
 ## 5. Open items (not implemented — need a decision or a dedicated pass)
 
-- **Back/previous control** (Finding 4) — needs the resume-vs-restart
-  question answered before it's built.
-- **Sample-accurate lookahead scheduling** (Findings 1 & 2) — the real fix
-  for "playing the right audio at the right time"; a scheduler rewrite,
-  not a contained patch. Tracked in `TODO.md`.
+- **Back/previous control** (Finding 4) — **resolved by direct instruction,
+  see §6.** No longer an open question.
+- **Sample-accurate lookahead scheduling** (Findings 1 & 2) — **design
+  finished, see §6**; not yet implemented.
 - **A real regression suite** (Finding 7) — scenarios in §2 above are
   written to be testable as stated, independent of whichever
   implementation ends up satisfying them.
+
+## 6. Round 2 — sample-accurate scheduling, and Back/Start resolved (design, not yet implemented)
+
+### Back and Start, simplified by direct instruction
+
+Both turned out not to need the open question in Finding 4 at all — the
+answer is "restart", not "resume", and both are meant to behave like the
+transport controls on any ordinary audio player, nothing v2-specific:
+
+- **Start from anywhere** is unchanged from what's already shipped: Intro-
+  or-cut from offset 0. No attempt to reconstruct "as if arrived via some
+  specific transition" — that idea is dropped, not deferred.
+- **Back**: if less than `BACK_RESTART_THRESHOLD_SEC` (proposed: 5s) into
+  the current song, go to the **previous** song and restart it from 0; at
+  or past that threshold, restart the **current** song from 0. Standard
+  "previous track" behavior, nothing novel.
+- **Both Skip and Back always land as a plain cut** — offset 0, no intro
+  clip, no transition clip, regardless of what's wired. This is Finding
+  3's `forceCut` behavior, and Back reuses it exactly rather than being a
+  new code path.
+
+This needs a real (if small) history stack — `session.history: songId[]`,
+pushed with the previous `nowPlayingId` every time it changes for any
+reason (a fired hop, a skip, a fresh start), *except* when the change is
+itself caused by `goBack()`. No resume-state is stored per entry — a
+songId is enough, since landing on it is always a restart.
+
+```
+BACK_RESTART_THRESHOLD_SEC = 5
+
+def goBack():
+    cancelScheduledPlan()
+    if real_elapsed_time_of(nowPlayingId) < BACK_RESTART_THRESHOLD_SEC and history is not empty:
+        destId = history.pop()
+    else:
+        destId = nowPlayingId
+    performImmediateCut(destId)   # same forceCut path as Skip: offset 0, no fragment
+```
+
+### The actual fix for "playing the right audio at the right time"
+
+Confirmed against current guidance (MDN's Web Audio best-practices page,
+and the "A Tale of Two Clocks" scheduling pattern this whole problem
+space traces back to — see Sources): the Web Audio API exposes its own
+high-precision clock, `AudioContext.currentTime`, and every node's
+`.start()`/`.stop()` takes an exact time on that clock. `setInterval` and
+anything derived from it (this engine's whole tick loop) can fire late
+under main-thread jank or background-tab throttling; the audio clock
+can't drift the same way, because the audio hardware itself fires the
+event at the sample-accurate time once it's scheduled. **The fix is to
+stop deciding "should a hop happen" reactively at all, and instead
+compute the exact future `AudioContext` time a hop must happen at, then
+schedule it once — the moment its audio is loaded, however far ahead of
+time that is.**
+
+The canonical version of this (the metronome lookahead scheduler: a 25ms
+tick scheduling anything landing within the next ~100ms) exists because a
+metronome has an *open-ended stream* of future notes and doesn't want to
+schedule thousands of them at once. That doesn't apply here — there is
+only ever **one** pending hop at a time. So the simpler version fits
+better: as soon as a hop's destination is known and its audio is decoded,
+schedule the *entire* chain of `.start()`/`.stop()` calls for it
+immediately, at their precisely computed times, no matter how far in the
+future that is — Web Audio has no problem with that, and it removes the
+need for any polling loop to drive the audio at all.
+
+```
+# One pending hop at a time — a "plan" is the fully-scheduled Web Audio
+# call chain for it, cancellable up until its own trigger time arrives.
+
+def scheduleHop(hopDecision):
+    cueOffsetSec = hopDecision.cuePoint  # outSeconds, or full duration for a plain cut
+    triggerCtxTime = currentMain.startCtxTime + (cueOffsetSec - currentMain.offsetSec)
+
+    chain = fragments_for(hopDecision)   # e.g. [transitionClip], or [outroClip, introClip], or []
+    prefetch_all(chain + [destination_buffer_if_any])   # start decoding now, regardless of how far off triggerCtxTime is
+
+    await all buffers in chain ready   # bail out here (via a plan token, same pattern as today's _playToken) if superseded meanwhile
+
+    currentMain.source.stop(triggerCtxTime)
+    stepTime = triggerCtxTime
+    for fragment in chain:
+        fragmentNode = create_source(fragment.buffer)
+        fragmentNode.start(stepTime)
+        stepTime += fragment.buffer.duration
+    if hopDecision.destSongId:
+        destNode = create_source(destination_buffer)
+        destNode.start(stepTime, hopDecision.destOffsetSec)   # 0 for a cut, edge.inSeconds for a transition
+
+    return Plan(triggerCtxTime, destStartCtxTime=stepTime, destSongId=hopDecision.destSongId,
+                pendingNodes=[...])   # for cancellation
+
+def Plan.cancel():
+    for node in pendingNodes not yet started (ctx.currentTime < node's own scheduled start):
+        node.stop()   # calling stop() before a scheduled start cancels it outright, per spec
+```
+
+**When to (re)schedule or cancel** — this is the part that actually needs
+care, since a plan computed against stale assumptions is worse than no
+plan:
+
+- **Main deck starts** → determine the hop decision immediately if it's
+  already knowable (the graph's own wiring — the normal combinatorial
+  case) and schedule it right away. If genuinely undecided yet (Live mode,
+  no ending picked), there's nothing to schedule until it is.
+- **The known hop decision changes** (a manual ending/transition gets
+  picked in Live mode, the wiring is edited mid-set) → cancel the existing
+  plan, schedule the new one.
+- **Seek** → cancel the existing plan, recompute `currentMain.startCtxTime`/
+  `offsetSec` from the new position, reschedule the *same* hop decision
+  against the new timeline. If the seek lands past where `triggerCtxTime`
+  already would have been, perform that hop immediately instead (same as
+  if the tick had just detected it).
+- **Skip / Back** → cancel the existing plan (its nodes haven't fired
+  yet), then perform the plain-cut hop immediately at `ctx.currentTime` —
+  these are deliberately instant, not scheduled.
+- **Pause** → do **nothing** to the plan. `ctx.suspend()` freezes
+  `currentTime` itself, which freezes every not-yet-fired scheduled event
+  right along with whatever's currently sounding — this should compose
+  for free, but needs to be verified empirically once implemented (per
+  the correctness-check skill's own polish pass: confirmed, not assumed).
+- **Stop / End Set** → cancel the plan, then stop as today.
+
+A song with **no uploaded audio** has no buffer to schedule against —
+this entire mechanism is moot for it, and it keeps using today's plain
+wall-clock estimate. Seamlessness was never a meaningful concept for a
+song with nothing real to be seamless *with*.
+
+### Why this also answers "is it a UI problem or a logic problem"
+
+Once scheduling is Web-Audio-native, the tick loop's job shrinks to
+something purely cosmetic: notice, after the fact, that
+`ctx.currentTime` has passed a plan's `destStartCtxTime`, and *only then*
+update `session.nowPlayingId`/`timeLeft` to match what's already true in
+the audio graph — never the other way around. The tick can be up to a
+second late updating a label with zero audible consequence, because it
+was never the thing deciding when sound happens. That gives a clean,
+structural answer to "which kind of bug is this": if the audio itself
+lands wrong (early, late, glitching, wrong clip), that's the scheduling
+plan — a logic bug in `audioEngine.js`. If the audio is correct but a
+label, highlight, or countdown briefly lags or shows a stale value,
+that's the tick's cosmetic sync — a UI bug, incapable of being anything
+else, because it no longer has any way to reach into what's actually
+sounding.
+
+### Status
+
+Design only — validated against current Web Audio guidance, not yet
+implemented. Next step is rewriting `audioEngine.js` around this Plan
+model and cutting the tick loop over to the cosmetic-only role described
+above.
+
+Sources: [MDN — Web Audio API best practices](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Best_practices) · [web.dev — A tale of two clocks](https://web.dev/articles/audio-scheduling) · [MDN — AudioBufferSourceNode.start()](https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode/start)
