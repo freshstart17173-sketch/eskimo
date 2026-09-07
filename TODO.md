@@ -1102,6 +1102,74 @@ point landed:
   and §7 for the matching rework of every progress-bar/countdown-ring
   display that used to be driven by the old 1Hz `session.timeLeft`.
 
+### Done this pass (round 10 — porting the design mockups: borderless/shadow visual language + the Add Audio transition preview player)
+
+Two static reference mockups existed only as standalone docs
+(`docs/design/socket-redesign-v6.html`, `docs/design/screen-atlas.html`) —
+this round ported the genuinely-new parts of both into `src/`, split into
+two independent efforts per the approved plan:
+
+**Part A — visual language pass (borderless, shadow-elevated):**
+- `.node-card` drops its border for shadow-only elevation at rest/hover;
+  `.state-selected` becomes a pure `box-shadow` ring instead of a
+  border+shadow combo. Provably safe against React Flow's live
+  drag-connect hit-testing since `box-sizing: border-box` is global — a
+  border-width change never touches the measured bounding box.
+- **Socket variant picker restructured**: a slot with 2+ produced
+  candidates used to show a separate full-width dropdown row below the
+  two socket columns; it now opens directly from the active socket row
+  itself (row's label swaps to the picked candidate's name, click opens
+  an anchored listbox) — no separate trigger, no chevron. The old
+  `SocketDropdown` component and its CSS are gone.
+- `.toolbar-start-set-btn` (Start Set) switched from a one-off saturated
+  green to the same neutral ink `.toolbar-stop-set-btn`/`.btn-primary`
+  already use.
+- `.context-menu` and `.toolbar-btn` diffed line-by-line against the
+  mockup (not just assumed to match): context menu went borderless/
+  shadow-only like the card; toolbar buttons' resting text color went
+  from `--muted` to `--ink` for legibility. `.icon-btn`/`.player-bar*`
+  confirmed already identical — no change needed.
+- Detail pane's close/play buttons and section titles confirmed already
+  matching (the mockup was catching up to already-correct real behavior
+  here, not flagging a real diff) — docked layout unchanged throughout.
+
+**Part B — new feature, the Add Audio transition preview player:**
+implements the user's own spec verbatim — "show the switch from the
+original to the transition and then back to original audio visually...
+make sure it only plays like 3 seconds before and 3 seconds after the
+transition... full controls including seek, play/pause, volume."
+- `src/transitionPreview.js` (new, pure logic): builds one buffer —
+  edgeSeconds of the left song ending at its OUT cue, the whole dropped
+  clip, edgeSeconds of the right song starting at its IN cue — via
+  `audioDetect.js`'s now-exported shared `AudioContext` (decode-time
+  resampling means every buffer shares one sample rate for free; channel
+  count is reconciled to stereo by hand since that isn't automatic).
+  Intro-only/outro-only uploads get one edge slice instead of two rather
+  than withholding the dropped clip.
+- `src/components/TransitionPreviewPlayer.jsx` (new): a real waveform
+  (bar heights from the buffer's own RMS envelope) with the dropped
+  clip's span colored/bracketed distinctly from the original audio on
+  either side. Real playback via a `AudioBufferSourceNode` + `GainNode`
+  — pause/seek stop the current node and start a fresh one at the new
+  offset (a source node can't seek in place), anchored the same
+  ctx-time-plus-offset way `audioEngine.js` tracks position so the
+  rAF-driven playhead can't drift. Dual-target scrub (scrub bar and the
+  waveform itself) pauses during the drag and only commits on release,
+  same pattern `Playhead` (`SequencePane.jsx`) already uses. Volume
+  reuses `PerformPage.jsx`'s own `VolumeControl` classes/popover verbatim.
+- Wired into `AddAudioPage` in place of the old bare
+  `<audio controls src={previewUrl}>`, once detection has resolved and
+  at least one side matched; the whole-file native player stays as the
+  fallback for a completely unmatched drop.
+- Verified end-to-end against the real dev server: real uploaded
+  reference masters, a real dropped clip, region math/bar coloring
+  matching the clip's actual length, a playhead that advances in real
+  time and stops exactly on pause (no drift), click-to-seek on the
+  waveform, and Save still working afterward.
+
+Each of the plan's 9 chunks (A1–A5, B1–B4) is its own small commit,
+per this app's per-commit Vercel deploy.
+
 ### Done this pass (round 9 — the player rewrite: sample-accurate scheduling, Back, and every jumpy progress display)
 
 The user asked for the deepest possible dive on the playback engine —
