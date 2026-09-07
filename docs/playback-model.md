@@ -442,3 +442,174 @@ model and cutting the tick loop over to the cosmetic-only role described
 above.
 
 Sources: [MDN — Web Audio API best practices](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API/Best_practices) · [web.dev — A tale of two clocks](https://web.dev/articles/audio-scheduling) · [MDN — AudioBufferSourceNode.start()](https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode/start)
+
+## 7. Round 3 — every timing-driven visual, in depth (design, not yet implemented)
+
+Scope for this round: not just the scheduling model, but **every UI
+element that claims to show playback position** — progress bars, the
+scrub bar, the per-socket countdown ring, elapsed/remaining text. This is
+explicitly for a live-performance context, so "looks basically right" is
+not the bar; sample-accurate audio scheduling (§6) is necessary but not
+sufficient if the *display* built on top of it is still coarse.
+
+### Inventory — every place playback position is shown
+
+| Element | File | Driven by |
+|---|---|---|
+| Bottom player bar scrub (`Playhead`) | `SequencePane.jsx` | `session.timeLeft` (prop `pct`) |
+| Live-screen progress bars (`LiveCard`/`ProgressBar`) | `LivePerformPage.jsx` | `session.timeLeft` (via `elapsed`) |
+| Per-socket countdown ring (`CountdownRing`) | `GraphNodes.jsx` | `position.elapsed` (context, from `session`) |
+| Elapsed/duration text (`node-position`) | `GraphNodes.jsx` | same `position` context |
+| Live spectrum bars (`LiveWaveform`) | `GraphNodes.jsx` | **`requestAnimationFrame` reading `engine.getLevels()` directly — not session state** |
+
+That last row is the important one: **one component already does this
+correctly**, and it's not an accident — its own comment explains exactly
+why (a real reading off the analyser, updated every frame via direct
+`style.height` writes through refs, deliberately bypassing React state
+for a value that changes 60 times a second). The fix for the other four
+rows is to bring them in line with a pattern the codebase already trusts,
+not invent a new one.
+
+### Root cause of "jumpy, unreliable, sometimes stalls"
+
+All four of the other rows ultimately trace back to `session.timeLeft`,
+which only changes once per second — inside `App.jsx`'s `setInterval`
+tick. That's three separate, compounding problems, not one:
+
+**1. "Jumpy" — the update rate itself.** A value that visually moves only
+once a second reads as stepping, not gliding, especially on a wide scrub
+bar where one second is several pixels. Two of the four rows
+(`Playhead`, `live-progress-fill`) already have a partial CSS-transition
+band-aid (`.3s ease-out` and `.2s linear` respectively) — meaning the bar
+glides for 200–300ms, then sits **motionless for the remaining 700–800ms
+of every second** before the next glide starts. That's not smooth, it's a
+glide-then-pause cycle, which can look worse than a clean instant step
+once you notice the rhythm. `CountdownRing` has no transition at all —
+its dash-offset snaps immediately, every second, with no smoothing
+whatsoever.
+
+**2. "Unreliable" — the elapsed-time *source* silently switches clocks.**
+`App.jsx`'s tick computes elapsed one of two ways: `engine.getMainElapsed()`
+(real, sample-accurate, `AudioContext`-derived) when the main deck is
+confirmed to be `nowPlayingId`'s own audio — or a wall-clock accumulation
+(`(duration - prev.timeLeft) + dtSec`) for everything else, including the
+instant right after every hop. These two clocks do not agree with each
+other, and the switch between them is invisible until it produces a
+visible correction: right after a hop, `timeLeft` resets to the new
+song's full duration and the wall-clock branch starts counting *up from
+that hop's session-state-write moment* — not from whenever the real audio
+actually starts. The moment `getMainElapsed` later comes back with a real
+number (once the destination's own master genuinely begins), the display
+snaps to reconcile the two clocks' disagreement — typically backward,
+since the real audio always starts later than the wall-clock guess
+assumed. A progress bar that visibly jumps backward is exactly what
+"unreliable" describes.
+
+**3. "Stalls along with the audio" — the wall-clock branch runs *through*
+fragment playback and load latency, fictitiously.** This is the biggest
+one, and it's not brief. The instant a hop is decided, `advanceSession`
+sets `timeLeft` to the destination song's full duration — but if that hop
+has a transition/outro/intro fragment attached, the fragment can take
+several real seconds to play, and the destination's own master doesn't
+start until it's done (plus whatever load latency Finding 1 already
+covers). For that entire window, the UI is counting up against the
+*destination song's own duration* as if its master had already started —
+when what's actually sounding is a completely different audio asset (or
+nothing at all, mid-load). This isn't a timing approximation, it's
+showing a number that has no relationship to what's audible. Once the
+real master finally starts (at `edge.inSeconds`, not 0), the reconciling
+jump from problem 2 lands on top of this.
+
+**Confirmed via research, not assumed:** Chrome exempts a tab from
+`setInterval`/`requestAnimationFrame` throttling *only while it's audibly
+producing sound* — a genuinely silent stretch (exactly the load-latency
+gap and the "hasn't started the real master yet" window above) does not
+carry that exemption, so if the tab isn't focused at that moment, the
+1Hz tick itself can be clamped to 2s+ increments right when accuracy
+already matters most. This compounds problem 3 in exactly the scenario
+that matters for live use — a DJ glancing at another window mid-set.
+
+### The fix — two decoupled layers, neither of which needs Tauri
+
+**Layer A (engine): one authoritative position query, sourced from the
+Plan model in §6, never from a wall-clock accumulation once real audio
+exists.**
+
+```
+def getPlaybackPosition():
+    if a Plan's fragment chain is currently between triggerCtxTime and destStartCtxTime:
+        # figure out which step of the chain we're in from ctx.currentTime directly
+        return { phase: 'fragment', kind, elapsedSec: ctx.currentTime - stepStartTime, durationSec: stepBuffer.duration }
+    if the main deck is confirmed sounding:
+        return { phase: 'main', songId, elapsedSec: ctx.currentTime - mainStartCtxTime + offsetSec, durationSec }
+    return { phase: 'silence' }   # e.g. still awaiting a buffer load — shown as such, not guessed at
+```
+
+No `Date.now()`/`dtSec` accumulation anywhere in this path. For a song
+with **no uploaded audio** (nothing to schedule against), the fallback
+still shouldn't accumulate off wall-clock `Date.now()` deltas — record the
+`ctx.currentTime` the countdown conceptually started at (the
+`AudioContext` clock is monotonic and jank-immune even when nothing is
+actually playing through it, since it exists the moment `ensureContext()`
+has ever run) and compute elapsed as a subtraction each read, the same
+shape as the real case. This won't be sample-accurate — there's nothing
+real to be accurate *to* — but it stops being vulnerable to timer drift
+independently of that.
+
+**Layer B (UI): a single `requestAnimationFrame` loop per consumer,
+matching `LiveWaveform`'s own already-correct pattern — direct ref writes,
+no React re-render for the continuous value.**
+
+```
+function usePlaybackFrame(onFrame):
+    useEffect(() => {
+        let raf
+        function tick() { onFrame(engine.getPlaybackPosition()); raf = requestAnimationFrame(tick); }
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [])
+```
+
+`Playhead`, `LiveCard`'s `ProgressBar`, and `CountdownRing` each use this
+to write their own width/dash-offset/text directly via a ref every frame,
+the same way `LiveWaveform` already writes bar heights. `session.timeLeft`
+stays in React state for what it's actually good for — discrete
+transitions (a new song started, the set ended) — but stops being the
+thing continuous visuals are computed from. The CSS-transition band-aids
+on `Playhead`/`live-progress-fill` become unnecessary once the value
+itself updates every frame — remove them rather than leave dead
+smoothing code fighting a value that's already smooth.
+
+**Why this survives being backgrounded, not just looks smoother while
+focused:** `requestAnimationFrame` pausing in a backgrounded tab is
+*correct* here — nobody's watching the bar, so it doesn't need to render.
+What matters is that it doesn't need to "catch up" when the tab comes
+back, because Layer A always computes position fresh from
+`ctx.currentTime` rather than accumulating incrementally — the very next
+frame after refocus shows the true position immediately, no backward
+jump, no stall. And per §6, the actual *audio* was never depending on
+either timer in the first place once Plan-based scheduling lands — this
+round is purely about the display finally being honest about what that
+schedule already guarantees.
+
+### Confirmed fine, not touched (per the correctness-check polish pass)
+
+- **`AudioContext`'s default latency is already optimal.** `'interactive'`
+  is the default `latencyHint` when none is specified — the engine already
+  gets the lowest-latency mode without any code change.
+- **`LiveWaveform`'s rAF/ref-write pattern is the right template**, not
+  something to redesign — Layer B above is that same pattern applied
+  three more places, not a new approach.
+
+### Not part of this design (noted, not solved here)
+
+Output-device routing (`AudioContext.setSinkId`, choosing a specific
+audio interface) would matter for a real live rig but is a separate
+feature request, not a correctness fix — not addressed here.
+
+### Status
+
+Design only. A future Tauri/desktop build doesn't change any of this —
+Web Audio's own scheduling and clock are already immune to the browser
+timer-throttling concerns this section addresses, so nothing here is a
+web-specific workaround being designed around.
