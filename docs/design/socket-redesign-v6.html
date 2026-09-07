@@ -73,8 +73,6 @@ section{ margin-bottom:46px; }
 }
 
 .shape{ flex:none; }
-.shape-none{ width:15px; height:15px; background:var(--ink); border-radius:1px; }
-.shape-tri{ width:0; height:0; border-left:8px solid transparent; border-right:8px solid transparent; border-bottom:13.5px solid var(--ink); }
 .shape-circle{ width:15px; height:15px; border-radius:50%; background:var(--ink); }
 
 /* --------------------------------------------------------------
@@ -141,21 +139,6 @@ section{ margin-bottom:46px; }
 .socket-shape{ flex:none; position:absolute; top:50%; transform:translateY(-50%); }
 .socket-col:first-child .socket-shape{ left:-16px; }
 .socket-col:last-child .socket-shape{ right:-16px; }
-
-.shape-none{ width:13px; height:13px; border-radius:1px; border:1.5px solid var(--line); background:var(--panel); }
-.socket-row.active .shape-none{ background:var(--ink); }
-.is-active .shape-none{ border-color:rgba(252,252,252,.4); }
-.is-active .socket-row.active .shape-none{ background:var(--paper-fixed); }
-
-/* Triangle can't take a CSS border directly (the whole shape IS border-
-   trick triangles) — a slightly larger grey triangle sits behind a
-   smaller inset one, so the grey rim reads the same as the square/
-   circle's real border. */
-.shape-tri{ width:0; height:0; border-left:7.5px solid transparent; border-right:7.5px solid transparent; border-bottom:13px solid var(--line); }
-.is-active .shape-tri{ border-bottom-color:rgba(252,252,252,.4); }
-.shape-tri::after{ content:''; position:absolute; left:1.8px; top:2px; width:0; height:0; border-left:5.7px solid transparent; border-right:5.7px solid transparent; border-bottom:10px solid var(--panel); }
-.socket-row.active .shape-tri::after{ border-bottom-color:var(--ink); }
-.is-active .socket-row.active .shape-tri::after{ border-bottom-color:var(--paper-fixed); }
 
 .shape-circle{ width:13px; height:13px; border-radius:50%; border:1.5px solid var(--line); background:var(--panel); }
 .socket-row.active .shape-circle{ background:var(--ink); }
@@ -259,7 +242,6 @@ section{ margin-bottom:46px; }
 .player-bar-hop-type{ font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); white-space:nowrap; flex:none; }
 .player-bar-art-sm{ width:22px; height:22px; flex:none; border-radius:3px; background:linear-gradient(135deg,#8fa8c9,#3f5a7a); }
 .player-bar-next-title{ font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.player-bar-crossfade{ flex:none; width:20px; height:20px; border-radius:50%; background:conic-gradient(var(--accent) 42%, var(--line) 0); }
 
 footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
 </style>
@@ -286,8 +268,16 @@ footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
       <li><b>Detail pane close button is the real <code>.icon-btn</code></b> (26×26, panel background, <code>rgba(19,19,19,.08)</code> hover) with the actual shipped × icon, not a bespoke bordered square.</li>
       <li><b>Detail pane play button has no native bevel</b> — added the app's real global button reset (<code>background:none;border:0;font:inherit</code>); without it a bare <code>&lt;button&gt;</code> keeps native chrome underneath a custom background, which is exactly what was showing through before.</li>
       <li><b>Detail pane section titles are plain text</b> — the little shape icon next to "Input"/"Output" is gone; shapes stay on the node card only.</li>
-      <li><b>The real bottom player bar is included</b>, ported structurally from <code>PerformPage.jsx</code>/<code>styles.css</code> — now/next, scrub bar, crossfade dot, volume — so this reference shows the full picture, not just the graph-side UI.</li>
+      <li><b>The real bottom player bar is included</b>, ported structurally from <code>PerformPage.jsx</code>/<code>styles.css</code> — now/next, scrub bar, volume — so this reference shows the full picture, not just the graph-side UI.</li>
       <li><b>A theme toggle</b> (top right) cycles system → light → dark so both themes are actually checkable here without touching OS settings.</li>
+    </ul>
+  </div>
+
+  <div class="changelog">
+    <b class="h">Corrected after review</b>
+    <ul>
+      <li><b>Sockets are all plain circles now</b> — the square/triangle/circle-per-type system from v6 is gone. Type is shown by label text and column (left = input, right = output) only, matching what was actually asked for.</li>
+      <li><b>Removed the crossfade indicator from the bottom bar</b> — that circular mix-progress dot exists in the real shipped bar (<code>.player-bar-crossfade</code>, <code>PerformPage.jsx</code>), but wasn't part of what was requested for this reference, so it's left out here.</li>
     </ul>
   </div>
 
@@ -302,9 +292,7 @@ footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
   <section>
     <div class="section-title">Shape + timing key</div>
     <div class="legend">
-      <div class="legend-item"><div class="shape shape-none"></div><div class="legend-text"><b>None</b><span>square</span></div></div>
-      <div class="legend-item"><div class="shape shape-tri"></div><div class="legend-text"><b>Intro (left) / Outro (right)</b><span>equilateral triangle, point up</span></div></div>
-      <div class="legend-item"><div class="shape shape-circle"></div><div class="legend-text"><b>Transition</b><span>circle</span></div></div>
+      <div class="legend-item"><div class="shape shape-circle"></div><div class="legend-text"><b>Every socket is a circle</b><span>type is shown by its label and which column it's in (left = input, right = output) — not by shape</span></div></div>
     </div>
     <div class="legend-timing">
       <div class="legend-item">
@@ -332,13 +320,13 @@ footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
             <div class="socket-section">
               <div class="socket-cols">
                 <div class="socket-col">
-                  <div class="socket-row"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
-                  <div class="socket-row active"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Intro</span></div>
+                  <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row active"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Intro</span></div>
                   <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
                 </div>
                 <div class="socket-col">
-                  <div class="socket-row socket-row-right"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
-                  <div class="socket-row socket-row-right"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Outro</span></div>
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Outro</span></div>
                   <div class="socket-row active socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Concrete Bloom</span></div>
                 </div>
               </div>
@@ -360,13 +348,13 @@ footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
             <div class="socket-section">
               <div class="socket-cols">
                 <div class="socket-col">
-                  <div class="socket-row"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
-                  <div class="socket-row active"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Intro</span></div>
+                  <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row active"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Intro</span></div>
                   <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
                 </div>
                 <div class="socket-col">
-                  <div class="socket-row socket-row-right"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
-                  <div class="socket-row active socket-row-right"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Outro</span></div>
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row active socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Outro</span></div>
                   <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
                 </div>
               </div>
@@ -388,13 +376,13 @@ footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
             <div class="socket-section">
               <div class="socket-cols">
                 <div class="socket-col">
-                  <div class="socket-row"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
-                  <div class="socket-row active"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Intro</span></div>
+                  <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row active"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Intro</span></div>
                   <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
                 </div>
                 <div class="socket-col">
-                  <div class="socket-row socket-row-right"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
-                  <div class="socket-row socket-row-right"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Outro</span></div>
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">None</span></div>
+                  <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Outro</span></div>
                   <div class="socket-row active socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Glass Static</span></div>
                 </div>
               </div>
@@ -423,13 +411,13 @@ footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
           <div class="socket-section">
             <div class="socket-cols">
               <div class="socket-col">
-                <div class="socket-row"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
-                <div class="socket-row active"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Intro</span></div>
+                <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">None</span></div>
+                <div class="socket-row active"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Intro</span></div>
                 <div class="socket-row"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Transition</span></div>
               </div>
               <div class="socket-col">
-                <div class="socket-row socket-row-right"><span class="socket-shape shape-none"></span><span class="socket-row-text">None</span></div>
-                <div class="socket-row socket-row-right"><span class="socket-shape shape-tri"></span><span class="socket-row-text">Outro</span></div>
+                <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">None</span></div>
+                <div class="socket-row socket-row-right"><span class="socket-shape shape-circle"></span><span class="socket-row-text">Outro</span></div>
                 <div class="socket-row active has-picker socket-row-right" style="position:relative;" tabindex="0">
                   <span class="socket-shape shape-circle"></span><span class="socket-row-text">Late Return</span>
                   <div class="socket-listbox">
@@ -519,7 +507,6 @@ footer{ font-size:11.5px; color:var(--faint); margin-top:10px; }
           <span class="player-bar-hop-type">Transition</span>
           <div class="player-bar-art-sm"></div>
           <span class="player-bar-next-title">Late Return</span>
-          <span class="player-bar-crossfade" data-tooltip="42% mixed"></span>
         </div>
         <button class="icon-btn" aria-label="Volume" style="margin-left:auto;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="3,9 8,9 13,4 13,20 8,15 3,15"></polygon><path d="M16.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.6"></path></svg>
