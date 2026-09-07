@@ -343,7 +343,6 @@ export default function GraphPane({
   }, [transitionEdgesRaw, activePlaylist, songs, lineColor, mixingEdgeId, onDisconnectSong, onDisconnectStart]);
 
   const onNodeDragStop = useCallback((_, node) => {
-    if (node.id === END || node.id === START) return;
     onDragSongPosition(node.id, node.position.x, node.position.y);
   }, [onDragSongPosition]);
 

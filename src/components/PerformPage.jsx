@@ -318,17 +318,19 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   const positions = useMemo(() => {
     const p = {};
     Object.keys(songs).forEach(id => { p[id] = { x: songs[id].x, y: songs[id].y }; });
-    p[END] = { x: 1250, y: 20 };
-    p[START] = { x: -170, y: 20 };
+    p[END] = session.endPos || { x: 1250, y: 20 };
+    p[START] = session.startPos || { x: -170, y: 20 };
     return p;
-  }, [songs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [songs, session.startPos, session.endPos]);
   function arrangeForMe() {
-    const layout = computeDagreLayout(songs, edges);
+    const layout = computeDagreLayout(songs, session.activePlaylist);
     setSongs(prev => {
       const next = { ...prev };
       Object.keys(next).forEach(id => { if (layout[id]) next[id] = { ...next[id], x: layout[id].x, y: layout[id].y }; });
       return next;
     });
+    setSession(prev => ({ ...prev, startPos: layout[START] || prev.startPos, endPos: layout[END] || prev.endPos }));
     // Dagre's computed positions land wherever its algorithm puts them, not
     // wherever the camera already happens to be — refit once the new
     // positions have actually rendered so the arranged graph isn't left
@@ -338,7 +340,15 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setTimeout(() => rf.fitView({ duration: 450, padding: 0.25 }), 60);
   }
 
+  // Start/End have nowhere else to persist a manual drag (they aren't
+  // songs) — without writing it to session.start/endPos, the very next
+  // recompute of `positions` (triggered by *any* song moving, since that's
+  // this memo's own dependency) snaps them straight back to the default
+  // spawn spot. Reported directly as a bug: nudge Start, then nudge any
+  // other node, and Start jumps back.
   function onDragSongPosition(id, x, y) {
+    if (id === START) { setSession(prev => ({ ...prev, startPos: { x, y } })); return; }
+    if (id === END) { setSession(prev => ({ ...prev, endPos: { x, y } })); return; }
     setSongs(prev => (prev[id] ? { ...prev, [id]: { ...prev[id], x, y } } : prev));
   }
 

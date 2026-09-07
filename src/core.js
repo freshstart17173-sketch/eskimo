@@ -57,6 +57,13 @@ export function emptySession() {
     transitionOnly: false, // true = a dead end stops the set instead of cutting to a random song
     autoHistory: [], // songs autoplay has actually played, most recent last — for the bottom queue bar
     activePlaylist: emptyActivePlaylist(), // the graph's live, always-editable wiring — see TODO.md
+    // Start/End's own dragged canvas position — null means "use the
+    // default spawn spot". These aren't songs, so they have nowhere else
+    // to persist a manual drag the way a song's own x/y already does; kept
+    // here (not activePlaylist, which is about wiring, not layout) purely
+    // because this is the one already-persisted bucket both PerformPage
+    // and GraphPane already share.
+    startPos: null, endPos: null,
   };
 }
 
@@ -509,17 +516,29 @@ export function transitionEdgesBetween(visibleEdges, fromId, toId) {
 }
 export const LEFT_SOCKET_TYPES = ['none', 'intro', 'transition'];
 export const RIGHT_SOCKET_TYPES = ['none', 'outro', 'transition'];
+// Intro/Outro are always connectable, whether or not a produced fragment
+// exists yet for this specific song — a wire there states the DJ's intent
+// ("this song starts/ends this way"), which is meaningful on its own (see
+// wireStart's own comment on the same point) even before real audio is
+// attached, and gating it on "already produced" made it flatly impossible
+// to wire an outro into a song that doesn't have a produced intro yet —
+// reported directly as a bug, since there's nothing semantically wrong
+// with that pairing (the destination just plays a cold cut for now, and
+// silently upgrades to using the real intro once one exists). Transition
+// stays gated: unlike None/Intro/Outro, a transition IS a specific
+// produced edge — with none built between two particular songs there's
+// nothing for that wire to reference at all.
 export function leftSocketAvailability(visibleEdges, songId) {
   return {
     none: true,
-    intro: introEdgesFor(visibleEdges, songId).length > 0,
+    intro: true,
     transition: transitionEdgesTo(visibleEdges, songId).length > 0,
   };
 }
 export function rightSocketAvailability(visibleEdges, songId) {
   return {
     none: true,
-    outro: outroEdgesFor(visibleEdges, songId).length > 0,
+    outro: true,
     transition: transitionCandidates(visibleEdges, songId, new Set()).length > 0,
   };
 }
