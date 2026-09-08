@@ -987,44 +987,115 @@ socket/dropdown redesign itself (see "Next up" below) is still queued.
   stepping, without any per-frame JS.
 
 ### Next up — the rest of the node redesign, not yet built
-Still queued from the same original request, roughly in the order they'd
-naturally build on each other:
+Still queued from the same original request:
 - **Socket rows → one dropdown per side, styled as a progress bar.**
-  Bigger labels; collapse the current 3-stacked-rows-per-side
-  (None/Intro/Transition, None/Outro/Transition) into a single dropdown
-  per side that IS a progress bar — a countdown color for an upcoming
-  trigger, a progress color for one actively playing. Opening it should
-  list *every* intro/outro/transition candidate (not just same-type
-  variants), each with its own countdown. Left/right dropdowns must stay
-  on the same horizontal level (explicit correction: don't stagger them —
-  scroll a long list instead).
-- **A bottom-of-node timeline bar** marking every associated cue's actual
-  in/out point, so the whole node's timing is readable at a glance.
+  Superseded, not built: the shipped mockups (`socket-redesign-v6.html`,
+  `screen-atlas.html`) that this whole node redesign has since been
+  ported from (see round 11 below) both kept the 3-stacked-rows-per-side
+  structure with an inline picker on the active row, not a collapsed
+  single dropdown — building this on top would mean two competing socket
+  UIs at once. Worth a direct decision before ever touching this again:
+  either the mockups' direction has quietly replaced this idea, or it's
+  still wanted and the mockups need updating first.
 - **A better collective name for "intro/outro/transition"** — user asked
-  for a proposal, not yet made.
-- **Wire `occludedTransitions` (core.js) into the new dropdown UI** so a
-  transition that would clash with an already-wired outro/intro (cue
-  points overlap) shows as unavailable/flagged, vs. one that doesn't
-  overlap and is fine.
-- **Smoother spectrum bars** (`LiveWaveform`, GraphNodes.jsx) — the
-  playhead got its smoothing pass this round (see above); the live
-  waveform bars still update via direct per-frame style writes off
-  `engine.getLevels` and haven't been revisited.
-- **A written v2 plan: multi-input/output sockets.** One output draggable
-  to multiple inputs; a single socket accepting multiple inputs, with
-  random selection among them for now. Explicitly a planning/documentation
-  task per the user's own framing ("prepare and plan"), not yet written
-  up here.
-- **Research/recommend an approach for many transitions between the same
-  songs** without the visual clutter multiple produced transitions between
-  one pair currently creates (GraphPane.jsx's `fannedBezierPath` already
-  fans them apart geometrically — worth writing up whether that's actually
-  sufficient or something like grouping/collapsing multi-edges is needed).
-- **Sample album covers for the example graph** (`sampleSongsForTests`,
-  core.js) so the color-match feature is visible in the guided first-run
-  example, not just once real cover art is uploaded.
-- **Harden the cover/color-match system** defensively so a bug in
-  updating a cover can't break anything else on the page.
+  for a proposal, still not made beyond a placeholder suggestion:
+  "arrival/departure style" or "hop style" both read naturally in a
+  sentence ("this song's departure style is Transition") and match
+  language already used in code comments (`docs/playback-model.md`,
+  `core.js`'s own "arrival style" phrasing) — neither has been run past
+  the user as a real decision yet.
+
+### Done this pass (round 11 — bug fixes, full mockup fidelity, and the rest of the backlog)
+
+Prompted directly: "start working on literally everything that was
+talked about... finish everything," plus one bug report (hover clobbering
+the selected ring) and several follow-on corrections mid-round.
+
+- **Fixed: hovering a selected node lost its accent ring.**
+  `.node-card.state-selected`/`.node-hovered` set `box-shadow` at equal
+  specificity with no rule combining them, so whichever was declared
+  later in the stylesheet won outright. Added a higher-specificity rule
+  that layers both shadows together.
+- **"Arrange for me" → "Autoarrange"; "Delete song" removed from the
+  node's right-click menu** (still available from Library — this menu
+  now only ever offers the non-destructive "Remove from graph"). The
+  dagre layout itself was already left-to-right — only the label needed
+  the rename.
+- **`occludedTransitions` (core.js) wired into the socket variant
+  picker** — an Intro/Outro candidate that would silently hide an
+  already-built Transition off/onto the same song now shows a small
+  warning badge in its listbox row, tooltip naming what it'd hide.
+- **`LiveWaveform`'s spectrum bars smoothed** — each bar now chases its
+  target value via exponential smoothing (faster attack than decay, a
+  real VU meter's own convention) instead of snapping to each frame's
+  raw analyser reading, which read as flicker rather than motion.
+- **Full visual-fidelity port from the mockups, not just the border/
+  shadow treatment from round 10.** The round 10 port matched
+  `docs/design/screen-atlas.html`'s borderless/shadow language but never
+  actually measured its *scale* — a direct pixel comparison found the
+  real app's node cards, socket dots, and text were meaningfully smaller
+  throughout. Ported for real: `.node-card` 208→224px/9→10px padding,
+  `.node-art` 26→56px, socket-columns gap 10→22px, `.node-socket-row`
+  15→22px height with real padding, `.node-socket-label` 9.5→12px,
+  socket dots 9→13px with a recomputed 20px hit-area (kept the documented
+  anti-overlap safety margin — see the comment above
+  `.graph-pane .react-flow__handle.node-socket::before`, styles.css).
+  Also ported a real, deliberate decision from `socket-redesign-v6.html`'s
+  own changelog that had never actually been carried into the app: socket
+  dots drop their per-type color entirely (green/orange/purple), now
+  hollow (grey outline, panel fill) when available-but-not-chosen and
+  solid ink when they're the active pick, with light-on-dark overrides on
+  an Active card. Sample/demo songs (`sampleSongsForTests`) also went
+  from 2 flat cover colors shared across 26 songs to a small cycling
+  palette per song, so the color-match feature (already working — see
+  the hardening entry below) actually shows real variety on first run.
+- **Arrowheads removed from every graph edge** — plain lines; direction
+  is already legible from the fixed left-input/right-output convention.
+- **Real multi-select.** React Flow's own selection-box drag already
+  marked every enclosed node `selected: true` individually — nothing
+  read that back out. New `MultiSelectionContext` (GraphNodes.jsx) gives
+  a multi-selected node (2+ selected) the same accent ring
+  `.state-selected` already uses, kept fully separate from the single
+  `selectedId`/detail-pane cursor (verified: a multi-selection never
+  changes what the detail pane shows). Right-clicking inside the
+  selection hits React Flow's own `.react-flow__nodesselection-rect`
+  overlay, not the node underneath — wired the dedicated
+  `onSelectionContextMenu` hook for that (confirmed structurally
+  necessary via a direct test, not just cleaner code) — its menu offers
+  Autoconnect transitions/Disconnect all wires/Remove from graph applied
+  across the whole selection in one `setSession` call.
+- **Cover/color-match hardening**: `derivePalette` now guards against a
+  malformed-but-truthy rgb (falls back to the fixed accent-blue palette
+  instead of computing `rgb(NaN, NaN, NaN)`); `usePalette`'s promise
+  chain has a `.catch()` as insurance against a future rejection;
+  `colorCache` (dominantColor.js) is now capped at 300 entries (plain
+  FIFO eviction) instead of growing for the life of the app.
+- **Multi-input/output sockets, investigated and mostly already there.**
+  Multi-*output* (one song transitioning into several different
+  destinations at once, random pick at playback) was already fully
+  built in an earlier round — confirmed via `addTransitionConnection`/
+  `playlistNextHop`. Multi-*input* (several different songs each wiring
+  into the same destination) turned out to already work correctly at
+  the data level too: each source's own wiring is untouched by another
+  source separately wiring into the same target — confirmed directly by
+  wiring two different songs into one destination and checking both
+  sides' saved state. The one real gap found was rendering: two
+  different sources converging on one destination drew as fully
+  overlapping lines (no fan-out existed for that case, only for multiple
+  transitions between one *same* pair) — fixed with the same
+  perpendicular-offset math, keyed by shared target. The destination's
+  own single `startMode`/`startEdgeId` (whether it plays its own intro
+  when cut into) staying shared across every source that leads into it
+  is correct, not a bug: only one thing plays at a time, so "does this
+  song like to play its own intro" is a property of the destination,
+  not of whichever source happens to be the one currently leading into
+  it — there's no real scenario where that needs to vary per incoming
+  wire.
+- Every change verified against the real dev server per its own chunk
+  (Playwright, synthetic data/audio where relevant) — most notably a
+  real multi-step-pointer-path drag-connect re-run after touching socket
+  sizing/colors and after adding `onSelectionChange`, both times
+  confirming React Flow's live hit-testing still works.
 
 ### Next up — graph interactions (the player rewrite below has shipped —
 see "Done this pass (round 9 — the player rewrite)")
