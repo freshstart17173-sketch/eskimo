@@ -877,6 +877,17 @@ a { color: var(--accent); }
    clearly distinct from Active's full color-matched fill. */
 .node-card.state-selected { box-shadow: 0 0 0 3px var(--accent); }
 .node-card.node-hovered { box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }
+/* Hovering a selected card used to lose the accent ring entirely — both
+   rules above set `box-shadow` at equal specificity (two classes each),
+   so whichever was declared later won outright instead of the two
+   effects combining, and a selected card looked identically unselected
+   the moment the pointer touched it. Layer both shadows (ring + lift)
+   in one higher-specificity rule instead, covering both the JS-tracked
+   `.node-hovered` (GraphNodes.jsx) and a plain native `:hover`, so the
+   ring stays visible under either. */
+.node-card.state-selected:hover, .node-card.state-selected.node-hovered {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .16), 0 0 0 3px var(--accent);
+}
 .node-card.node-dimmed { opacity: .28; }
 .node-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .node-title { font-weight: 600; font-size: 13px; line-height: 1.3; }
