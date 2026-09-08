@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { isSyncConfigured, isUploadConfigured } from '../core.js';
+import { isSyncConfigured, isUploadConfigured, getProfileName, setProfileName } from '../core.js';
 import { estimateSeamlessLength } from '../graphEstimate.js';
 import { useTheme } from '../theme.js';
 import { Field } from './shared.jsx';
@@ -10,6 +10,11 @@ export default function SettingsPage({
 }) {
   const estimate = useMemo(() => estimateSeamlessLength(songs, edges), [songs, edges]);
   const { theme, setTheme } = useTheme();
+  const [profileName, setProfileNameState] = useState(() => getProfileName() || '');
+  function saveProfileName(name) {
+    setProfileNameState(name);
+    setProfileName(name);
+  }
   const [confirmingReset, setConfirmingReset] = useState(false);
   const fileInputRef = useRef(null);
   const [importError, setImportError] = useState('');
@@ -72,6 +77,17 @@ export default function SettingsPage({
             <div className="settings-row-sub">{isUploadConfigured ? 'Configured — dropped files upload to your R2 bucket.' : 'Not set up yet — deploy worker/upload-worker.js and add its URL.'}</div>
           </div>
           <span className={'tag ' + (isUploadConfigured ? 'tag-good' : 'tag-warn')}>{isUploadConfigured ? 'ON' : 'OFF'}</span>
+        </div>
+      </div>
+
+      <div className="section-label" style={{ marginTop: 20 }}>Profile</div>
+      <div className="settings-card" style={{ marginBottom: 20 }}>
+        <div className="settings-row">
+          <div style={{ flex: 1 }}>
+            <div className="settings-row-title">Your name</div>
+            <div className="settings-row-sub">Credits whatever you add to a shared crate — a song or a built transition shows this name to your collaborators. Not shown anywhere in a solo library.</div>
+            <input className="input" style={{ marginTop: 8, maxWidth: 280 }} value={profileName} onChange={(e) => saveProfileName(e.target.value)} placeholder="e.g. Nomi" />
+          </div>
         </div>
       </div>
 

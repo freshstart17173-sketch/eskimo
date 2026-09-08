@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
-import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed, autoconnectFullGraph } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed, autoconnectFullGraph, getProfileName } from './core.js';
 import { engine, performAdvance, prefetchHop, PREFETCH_LOOKAHEAD_SEC, buildHopDecision, syncSessionFromFiredPlan } from './audioEngine.js';
 import { isCrateSyncConfigured, createCrate, fetchCrateLibrary, subscribeCrateLibrary, pushCrateSong, deleteCrateSong, pushCrateEdge, deleteCrateEdge } from './crateStore.js';
 import Sidebar from './components/Sidebar.jsx';
@@ -461,8 +461,9 @@ export default function App() {
   // an example graph never ends up blended with the user's own songs: the
   // first real upload while the example is showing clears it first.
   const addSong = useCallback((song) => {
-    if (isDemo) { clearExample(); setSongs({ [song.id]: song }); return; }
-    setSongs(prev => ({ ...prev, [song.id]: song }));
+    const stamped = { ...song, contributedBy: song.contributedBy || getProfileName() };
+    if (isDemo) { clearExample(); setSongs({ [stamped.id]: stamped }); return; }
+    setSongs(prev => ({ ...prev, [stamped.id]: stamped }));
   }, [isDemo, clearExample]);
 
   const songCount = Object.keys(songs).length;
@@ -501,7 +502,7 @@ export default function App() {
           {tab === 'addAudio' && (
             <AddAudioPage
               songs={songs} edges={edges}
-              onAddEdge={(edge) => setEdges(prev => [...prev, edge])}
+              onAddEdge={(edge) => setEdges(prev => [...prev, { ...edge, contributedBy: edge.contributedBy || getProfileName() }])}
               onViewSong={() => setTab('library')}
               goUpload={() => setTab('upload')}
               onLoadExample={loadExampleProp}

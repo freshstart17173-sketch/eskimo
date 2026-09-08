@@ -1005,6 +1005,82 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
+### Done this pass (round 19 — contributor attribution, extra-file attachments, a live-crossfade pulse, Start-node play, detail-pane destinations, and a real live-site crash fix)
+
+Six separate asks in one round, plus a live crash the user hit mid-pass:
+
+- **Contributor attribution.** A lightweight per-browser identity
+  (`core.js`'s `getProfileName`/`setProfileName`, `localStorage`-backed, no
+  login) — a "Your name" field in Settings. Every song/audio piece added
+  now carries `contributedBy`, stamped centrally in `App.jsx`'s
+  `addSong`/`onAddEdge` rather than at each upload call site. Shows as a
+  small tag on a node card (GraphNodes.jsx) and a Library row/built-audio
+  fragment (Library.jsx) whenever it's actually set — a solo library
+  (nobody ever set a name) shows nothing, by construction, not by a mode
+  check. Threaded through the shared-crate schema too: `crate_songs` grew
+  `contributed_by`/`extra_files` columns, `crate_edges` grew
+  `contributed_by` (migration `add_contributor_attribution_and_extra_files`),
+  and crateStore.js's row-mapping functions carry both both ways.
+- **Extra file attachments.** A song can now hold arbitrary extra files —
+  stems, the original project file, anything worth sharing beyond the
+  master — via a new `uploadExtraFileIfPossible` (core.js, mirrors
+  `uploadAudioIfConfigured`'s worker-or-IndexedDB path, generic content).
+  Library.jsx's drawer gained an "Extra files" section: multi-file picker,
+  per-file download (`useResolvedAudioUrl`, already marker-agnostic) and
+  remove.
+- **Live-crossfade pulse.** The `animated`/`active-edge-animated` wiring
+  on the currently-mixing edge (GraphPane.jsx's `mixingEdgeId`) has existed
+  since round 8 but was never actually styled — confirmed by grepping for
+  its CSS class and finding nothing. Added a genuine effect: a second
+  `<path>` on top of the solid base line, dashed white, `stroke-dashoffset`
+  animating negative (source → target, matching the path's own draw
+  direction), so a few bright dashes visibly travel along the live
+  crossfade repeatedly. Tripped on React Flow's own `base.css`, which
+  applies `.react-flow__edge.animated path { animation: dashdraw }` to
+  *any* path inside an animated edge indiscriminately, at higher
+  specificity than a bare new class — silently overrode both the base
+  line (making it dash) and the new overlay (making it use their rhythm,
+  not this one). Fixed by reasserting both paths explicitly at
+  matching-or-greater specificity. Verified via `getComputedStyle` in a
+  live-mixing fixture: base path solid/`animation: none`, overlay path
+  actually running `playbackFlow`.
+- **Start node play button.** `StartNode` (GraphNodes.jsx) now renders a
+  real play button (mirrors the toolbar's own Start button, same ink/paper
+  colors) when a real entry point is wired and nothing's playing yet —
+  calls the same `triggerStartSet` the toolbar button already used.
+  Disappears once a set is running, same as the toolbar button it mirrors.
+- **Detail pane destinations.** Fixed a real, live-reported crash (see
+  below) and used the same touch to add the actual ask: each active output
+  row in the detail pane's Output section now shows its real destination
+  song (or "ends the set" for End) with a small green dot — a genuine
+  color, not this app's usual ink-only palette, deliberately: a live-status
+  signal reads as a different kind of thing than a decorative accent.
+- **Live crash, found via a user report mid-pass**: clicking a node threw
+  `Cannot read properties of undefined (reading 'length')` on the deployed
+  site. Root cause: round 18's `socketDataById` rewrite replaced the
+  right/output side's old singular fields (`rightActive`/`rightOptions`/
+  `rightEdgeId`/`rightCueSeconds`) with the new multi-type shape
+  (`rightActiveTypes`/`rightOptionsByType`/etc.) everywhere except
+  `PerformPage.jsx`'s own `DetailPane`, which still read the old field
+  names — `sd.rightOptions.length` on `undefined` is exactly this error.
+  Rewrote `DetailPane`'s Output section against the real shape (one row
+  per active type). A sweep for the same stale shape elsewhere (the user
+  asked directly: "fix any related or similar issues") turned up a second,
+  not-yet-triggered instance — `GraphPane.jsx`'s `socketDataById[id] ||
+  {...}` fallback default object, used whenever a song briefly has no
+  entry in the map yet, still built the old shape too — fixed the same
+  way, plus a defensive `activeTypes = []` default added to `SocketList`
+  itself. Verified the exact crash no longer reproduces (a Playwright
+  repro clicking a multi-type-output node), then re-ran every existing
+  multi-output/multi-input/legacy-fallback regression test from rounds
+  16-18 to confirm the fix didn't disturb anything else. One of those
+  re-runs briefly looked like a new regression (drag-connect producing no
+  wire) — traced to Playwright test flakiness in an old test's own drag
+  helper (too few pointer-move steps for this sandbox's timing), not an
+  app bug: confirmed by reproducing the identical symptom against the
+  pre-this-round commit, then confirming a slower, more realistic drag
+  succeeds on the current code either way.
+
 ### Done this pass (round 18 — a node's output side now supports multiple simultaneous active types)
 
 Follow-up to round 16's multi-io fix, which only covered multiple

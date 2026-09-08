@@ -42,6 +42,7 @@ function songFromRow(row) {
     id: row.song_id, title: row.title || '', artist: row.artist || '',
     bpm: row.bpm, key: row.key, durationSec: row.duration_sec,
     audioUrl: row.audio_url, coverUrl: row.cover_url, x: row.x, y: row.y,
+    contributedBy: row.contributed_by || null, extraFiles: row.extra_files || [],
   };
 }
 function songToRow(crateId, song) {
@@ -50,6 +51,7 @@ function songToRow(crateId, song) {
     bpm: song.bpm, key: song.key, duration_sec: song.durationSec,
     audio_url: song.audioUrl || null, cover_url: song.coverUrl || null,
     x: song.x, y: song.y, updated_at: new Date().toISOString(),
+    contributed_by: song.contributedBy || null, extra_files: song.extraFiles || [],
   };
 }
 function edgeFromRow(row) {
@@ -57,7 +59,7 @@ function edgeFromRow(row) {
     id: row.edge_id, type: row.type, l: row.l || undefined, r: row.r || undefined,
     inSeconds: row.in_seconds == null ? undefined : row.in_seconds,
     outSeconds: row.out_seconds == null ? undefined : row.out_seconds,
-    verified: row.verified,
+    verified: row.verified, contributedBy: row.contributed_by || null,
   };
 }
 function edgeToRow(crateId, edge) {
@@ -66,6 +68,7 @@ function edgeToRow(crateId, edge) {
     in_seconds: edge.inSeconds == null ? null : edge.inSeconds,
     out_seconds: edge.outSeconds == null ? null : edge.outSeconds,
     verified: !!edge.verified, updated_at: new Date().toISOString(),
+    contributed_by: edge.contributedBy || null,
   };
 }
 

@@ -632,6 +632,66 @@ export async function uploadAudioIfConfigured(file) {
   }
 }
 
+// A song's "extra files" — stems, the original project file (.flp/.als/...),
+// reference notes, anything a collaborator wants attached beyond the master
+// itself, purely so whoever builds the next transition has more to work
+// with. Same upload path as the master (worker when configured, IndexedDB
+// otherwise via putLocalAudio, which despite its name stores any Blob) —
+// deliberately not folded into uploadAudioIfConfigured itself, since that
+// function's whole contract is keyed on the specific `audioUrl` field a
+// song/edge already has; this one hands back a plain {id, name, size, url}
+// entry meant to be pushed onto song.extraFiles.
+export async function uploadExtraFileIfPossible(file) {
+  if (!file || !file.name) return null;
+  const workerUrl = APP_CONFIG.UPLOAD_WORKER_URL;
+  if (!workerUrl) {
+    try {
+      const marker = await putLocalAudio(file);
+      return { id: uid('f'), name: file.name, size: file.size, url: marker };
+    } catch (e) {
+      console.warn('Eskimo Studio: could not store extra file locally', e);
+      return null;
+    }
+  }
+  try {
+    const res = await fetch(workerUrl + '/upload?filename=' + encodeURIComponent(file.name), {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    if (!res.ok) throw new Error('upload failed: ' + res.status);
+    const { url } = await res.json();
+    return { id: uid('f'), name: file.name, size: file.size, url };
+  } catch (e) {
+    console.warn('Eskimo Studio: extra file upload failed', e);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A lightweight per-browser identity, used only for attribution — "who
+// contributed this song/audio piece" on a shared crate. Deliberately not a
+// real account system (no login, no password, nothing server-side to get
+// wrong): just a display name this browser stamps onto whatever it adds,
+// so producer friends dropping songs into a shared crate show up as
+// themselves instead of an anonymous blob. Solo/local use never needs this
+// at all — a name tag only ever renders when contributedBy is actually set
+// (see SongNode/LibraryRow), so leaving this unset costs nothing.
+// ---------------------------------------------------------------------------
+const PROFILE_NAME_KEY = 'eskimo:profileName';
+export function getProfileName() {
+  try {
+    return (localStorage.getItem(PROFILE_NAME_KEY) || '').trim() || null;
+  } catch (e) { return null; }
+}
+export function setProfileName(name) {
+  try {
+    const trimmed = (name || '').trim();
+    if (trimmed) localStorage.setItem(PROFILE_NAME_KEY, trimmed);
+    else localStorage.removeItem(PROFILE_NAME_KEY);
+  } catch (e) { /* private-browsing/quota — attribution is best-effort only */ }
+}
+
 // Downscales an image file to a small JPEG thumbnail — a raw phone-camera
 // photo can run several MB, and a cover art thumbnail never needs to be
 // bigger than it'll ever actually be drawn (a few dozen px in the UI).

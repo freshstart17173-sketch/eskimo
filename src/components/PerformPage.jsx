@@ -404,12 +404,21 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         const edge = visibleEdges.find(e => e.id === transitionEntry.edgeId);
         if (edge && edge.outSeconds != null) rightCueSecondsByType.transition = edge.outSeconds;
       }
+      // Which real song each active output type currently leads to — the
+      // detail pane's own "playback destination" row (see DetailPane
+      // below) reads this to show a live target name, not just the type
+      // label. One destination per type shown here, same established
+      // scope as rightOptionsByType/rightCueSecondsByType above (a node
+      // can carry several simultaneous Transition destinations, but the
+      // card only ever has one Transition row).
+      const rightTargetIdByType = {};
+      outputs.forEach(o => { if (!(o.type in rightTargetIdByType)) rightTargetIdByType[o.type] = o.targetId; });
 
       map[id] = {
         leftAvailable: leftSocketAvailability(visibleEdges, id), rightAvailable: rightSocketAvailability(visibleEdges, id),
         leftActive, rightActiveTypes, leftFromStart,
         leftEdgeId, leftOptions,
-        rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType,
+        rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType, rightTargetIdByType,
       };
     });
     return map;
@@ -857,6 +866,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             endQueued={endWired}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
             onPaneClick={onPaneClick}
+            onStartPlay={triggerStartSet} canStartPlay={!hasStarted}
             onPaneContextMenu={onPaneContextMenu} onNodeContextMenu={onNodeContextMenu}
             onSelectionContextMenu={onSelectionContextMenu}
             onMultiSelectionChange={setMultiSelectedIds}
@@ -865,6 +875,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         {selectedSong && (
           <DetailPane
             song={selectedSong} socketData={socketDataById[selectedId]} io={ioById[selectedId] || { inCount: 0, outCount: 0 }}
+            songs={songs}
             onPlay={() => playSelected(selectedId)}
             onClose={() => setSelectedId(null)}
           />
@@ -1084,12 +1095,24 @@ function AddNodeModal({ songs, onPick, onCancel }) {
 // here starts playback except the one explicit Play button, matching the
 // Selected-vs-Active split this replaces the old always-on-canvas socket
 // dropdowns' implicit "click a socket to see it" behavior with.
-function DetailPane({ song, socketData, io, onPlay, onClose }) {
+function DetailPane({ song, socketData, io, songs, onPlay, onClose }) {
   const sd = socketData || {
-    leftActive: 'none', rightActive: 'none', leftEdgeId: null, rightEdgeId: null,
-    leftOptions: [], rightOptions: [], rightCueSeconds: null,
+    leftActive: 'none', rightActiveTypes: [], leftEdgeId: null,
+    leftOptions: [], rightOptionsByType: {}, rightCueSecondsByType: {}, rightTargetIdByType: {},
   };
   const SOCKET_LABEL = { none: 'None', intro: 'Intro', outro: 'Outro', transition: 'Transition' };
+  // A real wired destination — not just "this output type is on" — gets a
+  // small green dot next to its name, the same "this leads somewhere real"
+  // signal GraphPane's own edges give the socket that's actually drawn.
+  // END is its own real destination (ends the set); a type with no
+  // targetId yet (turned on, nothing chosen — see toggleSocket, core.js)
+  // shows the type alone with no dot, since there's genuinely nowhere it
+  // leads yet.
+  function destinationLabel(targetId) {
+    if (!targetId) return null;
+    if (targetId === END) return 'ends the set';
+    return songs && songs[targetId] ? songs[targetId].title : null;
+  }
   return (
     <div className="detail-pane">
       <button className="detail-pane-close icon-btn" onClick={onClose} aria-label="Close">
@@ -1116,10 +1139,23 @@ function DetailPane({ song, socketData, io, onPlay, onClose }) {
       </div>
       <div className="detail-pane-section">
         <div className="detail-pane-section-title">Output <span className="detail-pane-count">↑{io.outCount}</span></div>
-        <div className="detail-pane-row">
-          {SOCKET_LABEL[sd.rightActive]}{sd.rightOptions.length > 1 && ' (' + sd.rightOptions.length + ' variants)'}
-          {sd.rightCueSeconds != null && <span className="detail-pane-cue"> · cue at {fmtTime(sd.rightCueSeconds)}</span>}
-        </div>
+        {sd.rightActiveTypes.length === 0 && <div className="detail-pane-row">None active</div>}
+        {sd.rightActiveTypes.map(type => {
+          const options = sd.rightOptionsByType[type];
+          const cueSec = sd.rightCueSecondsByType[type];
+          const dest = destinationLabel(sd.rightTargetIdByType[type]);
+          return (
+            <div className="detail-pane-row" key={type}>
+              {SOCKET_LABEL[type]}{options && options.length > 1 && ' (' + options.length + ' variants)'}
+              {cueSec != null && <span className="detail-pane-cue"> · cue at {fmtTime(cueSec)}</span>}
+              {dest && (
+                <span className="detail-pane-destination">
+                  <span className="detail-pane-dest-dot" aria-hidden /> {dest}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

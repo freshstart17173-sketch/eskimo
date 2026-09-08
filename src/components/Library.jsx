@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { libraryRows, uploadCoverIfPossible, occludedTransitions } from '../core.js';
+import React, { useMemo, useRef, useState } from 'react';
+import { libraryRows, uploadCoverIfPossible, uploadExtraFileIfPossible, occludedTransitions, fmtBytes } from '../core.js';
 import { Icon, ICONS, Field, AlbumArt, CoverPicker, SongPicker, useResolvedAudioUrl } from './shared.jsx';
 
 // `audioUrl` may be a `local:` marker (IndexedDB, no backend configured —
@@ -18,9 +18,29 @@ function EdgeAudioPreview({ edge }) {
   if (!edge.audioUrl) return null;
   return resolvedUrl ? <audio controls src={resolvedUrl} style={{ height: 26 }} /> : null;
 }
+// A song's own extra files — stems, the original project file, anything
+// beyond the master itself a collaborator dropped in to help build a
+// better transition (see UploadSong/AddAudio's own upload path, which
+// this deliberately mirrors — same local/worker storage, just a plain
+// {id, name, size, url} entry instead of a dedicated audioUrl field).
+function ExtraFileRow({ file, onRemove }) {
+  const resolvedUrl = useResolvedAudioUrl(file.url);
+  return (
+    <div className="lib-extra-file">
+      <span className="lib-extra-file-name">{file.name}</span>
+      <span className="lib-extra-file-size mono-num">{fmtBytes(file.size)}</span>
+      {resolvedUrl
+        ? <a className="btn btn-ghost btn-xs" href={resolvedUrl} download={file.name} target="_blank" rel="noreferrer">Download</a>
+        : <span className="hint-text">loading…</span>}
+      <button className="btn btn-ghost btn-xs" onClick={onRemove}>Remove</button>
+    </div>
+  );
+}
 
 function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, selected, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
+  const [attaching, setAttaching] = useState(false);
+  const extraFileInputRef = useRef(null);
   const [draftTitle, setDraftTitle] = useState(song.title);
   const [draftArtist, setDraftArtist] = useState(song.artist);
   const [draftBpm, setDraftBpm] = useState(String(song.bpm));
@@ -47,6 +67,18 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
     const coverUrl = await uploadCoverIfPossible(file);
     onUpdateSong(song.id, { coverUrl });
   }
+  async function attachFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    setAttaching(true);
+    const uploaded = (await Promise.all(files.map(uploadExtraFileIfPossible))).filter(Boolean);
+    setAttaching(false);
+    if (uploaded.length === 0) return;
+    onUpdateSong(song.id, { extraFiles: [...(song.extraFiles || []), ...uploaded] });
+  }
+  function removeExtraFile(fileId) {
+    onUpdateSong(song.id, { extraFiles: (song.extraFiles || []).filter(f => f.id !== fileId) });
+  }
   function destText(e) {
     if (e.type === 'outro') return 'ends set';
     if (e.type === 'intro') return 'cold-open';
@@ -65,6 +97,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
         <div className="lib-title-wrap" onClick={onToggle}>
           <span className="lib-title">{row.title}</span>
           <span className="lib-artist">{row.artist}</span>
+          {song.contributedBy && <span className="lib-contributor">added by {song.contributedBy}</span>}
         </div>
         <div className="lib-tags" onClick={onToggle}>
           <span className="tag tag-accent">{row.bpm}</span>
@@ -117,7 +150,10 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                         <button className="btn btn-ghost btn-xs" onClick={() => onDeleteEdge(e.id)}>Remove</button>
                       </div>
                     </div>
-                    <div className="drawer-frag-dest">{destText(e)}</div>
+                    <div className="drawer-frag-dest">
+                      {destText(e)}
+                      {e.contributedBy && <span className="lib-contributor lib-contributor-inline"> · built by {e.contributedBy}</span>}
+                    </div>
                     {clashes.length > 0 && (
                       <div className="hint-text" style={{ color: 'var(--danger)' }}>
                         takes over before {clashes.length} transition{clashes.length > 1 ? 's' : ''} off this song — clashes if picked: {' '}
@@ -128,6 +164,21 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                 );
               })}
               {ownEdges.length === 0 && <div className="empty-note-sm">nothing built for this song yet</div>}
+            </div>
+          </div>
+          <div>
+            <div className="section-label">
+              Extra files
+              <button className="btn btn-ghost btn-xs" style={{ marginLeft: 8, textTransform: 'none' }} onClick={() => extraFileInputRef.current && extraFileInputRef.current.click()} disabled={attaching}>
+                {attaching ? (<><span className="spinner" /> Uploading…</>) : '+ Add file'}
+              </button>
+              <input ref={extraFileInputRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => { attachFiles(e.target.files); e.target.value = ''; }} />
+            </div>
+            <div className="lib-pieces">
+              {(song.extraFiles || []).map(f => <ExtraFileRow key={f.id} file={f} onRemove={() => removeExtraFile(f.id)} />)}
+              {(!song.extraFiles || song.extraFiles.length === 0) && (
+                <div className="empty-note-sm">stems, project files (.flp/.als/…), anything else worth sharing for this song</div>
+              )}
             </div>
           </div>
         </div>

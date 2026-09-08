@@ -254,7 +254,7 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
 // type for the same reason — each active type gets its own independent
 // dropdown/cue-ring data now, not one shared value gated on a single
 // "which type is active" check.
-function SocketList({ side, types, availability, activeTypes, onToggle, cueOffsetSecByType = {}, songId, optionsByType = {}, selectedEdgeIdByType = {}, onSelectVariant }) {
+function SocketList({ side, types, availability, activeTypes = [], onToggle, cueOffsetSecByType = {}, songId, optionsByType = {}, selectedEdgeIdByType = {}, onSelectVariant }) {
   return (
     <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
       {types.map((type) => {
@@ -323,6 +323,7 @@ export function SongNode({ data, selected }) {
         <div>
           <div className="node-title">{song.title}</div>
           <div className="node-artist">{song.artist}</div>
+          {song.contributedBy && <div className="node-contributor" data-tooltip="Added by">{song.contributedBy}</div>}
         </div>
         <AlbumArt className="node-art" url={song.coverUrl} />
       </div>
@@ -390,7 +391,7 @@ export function EndNode({ data }) {
 // meaning to invent here), so its hint just reflects whether one already
 // has.
 export function StartNode({ data }) {
-  const { wiredSongTitle } = data;
+  const { wiredSongTitle, canPlay, onPlay } = data;
   return (
     <div className="end-node start-node">
       <div className="node-socket-row node-socket-row-right">
@@ -400,8 +401,15 @@ export function StartNode({ data }) {
           isConnectable
         />
       </div>
-      <div className="end-node-title"><Icon path={<polygon points="6,4 20,12 6,20" />} filled size={11} /> Start Set</div>
-      <div className="end-node-hint">{wiredSongTitle ? `wired to ${wiredSongTitle} — use the toolbar's Start set button` : 'drag to a song’s Intro/None to set the entry point'}</div>
+      <div className="end-node-title-row">
+        <div className="end-node-title"><Icon path={<polygon points="6,4 20,12 6,20" />} filled size={11} /> Start Set</div>
+        {canPlay && (
+          <button className="start-node-play-btn" onClick={(e) => { e.stopPropagation(); onPlay(); }} data-tooltip={'Start playing from ' + wiredSongTitle}>
+            <Icon path={ICONS.play} filled size={12} />
+          </button>
+        )}
+      </div>
+      <div className="end-node-hint">{wiredSongTitle ? (canPlay ? `wired to ${wiredSongTitle} — click play, or use the toolbar` : `wired to ${wiredSongTitle}`) : 'drag to a song’s Intro/None to set the entry point'}</div>
     </div>
   );
 }

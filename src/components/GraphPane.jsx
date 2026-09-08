@@ -132,6 +132,16 @@ function ActiveEdge({ id, sourceX, sourceY, sourcePosition, targetX, targetY, ta
   return (
     <>
       <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} className={animated ? 'active-edge-animated' : undefined} />
+      {/* The actual live crossfade in progress (mixingEdgeId, PerformPage.jsx
+          — only set during the real ~8s audio handoff into a Transition,
+          not for the whole time a wire just sits there wired) gets a
+          traveling white pulse on top of the solid ink line, source to
+          target, repeating — "this is the path playback is taking right
+          now" as distinct from every other wired-but-idle line on the
+          canvas. A second path reusing the same `d` rather than styling
+          the base path itself, so the line underneath stays solid instead
+          of the whole thing turning into a dashed line. */}
+      {animated && <path d={path} className="playback-flow-path" aria-hidden />}
       <EdgeLabelRenderer>
         <button
           className={'edge-disconnect-btn' + (visible ? ' edge-disconnect-btn-visible' : '')}
@@ -156,6 +166,7 @@ export default function GraphPane({
   onDragSongPosition, endQueued, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
   onPaneContextMenu, onNodeContextMenu, onSelectionContextMenu, onMultiSelectionChange, onPaneClick,
+  onStartPlay, canStartPlay,
 }) {
   const { isDark } = useTheme();
   const lineColor = isDark ? LINE_COLOR.dark : LINE_COLOR.light;
@@ -194,8 +205,9 @@ export default function GraphPane({
     const socketData = socketDataById[id] || {
       leftAvailable: { none: true, intro: false, transition: false },
       rightAvailable: { none: true, outro: false, transition: false },
-      leftActive: 'none', rightActive: 'none',
-      leftEdgeId: null, rightEdgeId: null, leftOptions: [], rightOptions: [], rightCueSeconds: null,
+      leftActive: 'none', rightActiveTypes: [],
+      leftEdgeId: null, leftOptions: [],
+      rightOptionsByType: {}, rightEdgeIdByType: {}, rightCueSecondsByType: {}, rightTargetIdByType: {},
     };
     return {
       id, type: 'song', position: pos, draggable: true,
@@ -220,7 +232,7 @@ export default function GraphPane({
     const wiredSong = activePlaylist.startSongId ? songs[activePlaylist.startSongId] : null;
     return {
       id: START, type: 'start', position: pos, draggable: true,
-      data: { wiredSongTitle: wiredSong ? wiredSong.title : null },
+      data: { wiredSongTitle: wiredSong ? wiredSong.title : null, canPlay: !!(canStartPlay && wiredSong), onPlay: onStartPlay },
       style: START_STYLE,
     };
   }
@@ -273,7 +285,7 @@ export default function GraphPane({
       return { ...updated, position: n.position, selected: n.selected };
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs, stateFor, ioById, socketDataById, endQueued, activePlaylist.startSongId, nowPlayingId, onSelectSong]);
+  }, [songs, stateFor, ioById, socketDataById, endQueued, activePlaylist.startSongId, nowPlayingId, onSelectSong, canStartPlay, onStartPlay]);
 
   // The one place `position` actually gets written from outside RF's own
   // drag handling: a real layout change (auto-arrange, or a song's stored
