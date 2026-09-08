@@ -805,32 +805,6 @@ export function occludedTransitions(edges, clipEdge) {
   return [];
 }
 
-export function pseudoCuePoints(leftId, rightId) {
-  const h = hashString((leftId || '_') + '|' + (rightId || '_'));
-  const out = 90 + (h % 90); // 90s..180s "out" point on the left song
-  const inp = 3 + ((h >> 5) % 20); // 3s..23s "in" point on the right song
-  return { outSeconds: out, inSeconds: inp };
-}
-
-// Stands in for real audio-fingerprint detection: turns a filename+size into a
-// deterministic pick of one or two songs from the library, so "uploading" a file
-// consistently "detects" the same match every time you try it.
-export function pickDetectedSongs(songIds, seedText, count) {
-  const h = hashString(seedText || 'x');
-  const picks = [];
-  for (let i = 0; i < count; i++) {
-    if (songIds.length === 0) break;
-    const idx = (h + i * 2654435761) % songIds.length;
-    const id = songIds[Math.abs(idx) % songIds.length];
-    if (!picks.includes(id)) picks.push(id);
-  }
-  let j = 0;
-  while (picks.length < count && j < songIds.length) {
-    if (!picks.includes(songIds[j])) picks.push(songIds[j]);
-    j++;
-  }
-  return picks;
-}
 
 // ---------------------------------------------------------------------------
 // Song / edge helpers shared by multiple pages

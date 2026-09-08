@@ -290,10 +290,27 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
   const heights = barHeights(envelope);
   const bracketStartPct = total ? (regions.leftSec / total) * 100 : 0;
   const bracketEndPct = total ? ((regions.leftSec + regions.transitionSec) / total) * 100 : 0;
-  // Matches AddAudio.jsx's own derivedType logic — which side(s) actually
-  // matched decides the label, not a hardcoded "Transition" regardless of
-  // type (the exact class of mislabeling reported elsewhere in this round).
+  // Matches AddAudio.jsx's own type logic — which side(s) actually matched
+  // decides the label, not a hardcoded "Transition" regardless of type (the
+  // exact class of mislabeling reported elsewhere in this round).
   const bracketLabel = leftSong && rightSong ? 'Transition' : rightSong ? 'Intro' : 'Outro';
+  // Precise labeled cue markers — direct instruction: a single player that
+  // "perfectly shows the in or out points of any added media", not a
+  // separate lower-fidelity duplicate display elsewhere on the page (which
+  // used to exist and, worse, had the wording backwards for Outro/Intro —
+  // see the naming reasoning below).
+  //
+  // A Transition has a real early cue point on BOTH sides (the surrounding
+  // songs are deliberately cut short so the clip can carry the splice) —
+  // left = OUT, right = IN, the ordinary meaning. An Outro has no real out
+  // point on the left song at all (it always plays to its own full natural
+  // duration — see audioEngine.js/core.js) — the only meaningful moment
+  // left to mark is where you enter the outro's own new material, so it
+  // reads IN instead. An Intro has no real in point on the destination
+  // (it always starts fresh at 0) — the meaningful moment is where you
+  // exit the intro's own material into the destination, so it reads OUT.
+  const leftCueLabel = rightSong ? 'OUT' : 'IN';
+  const rightCueLabel = leftSong ? 'IN' : 'OUT';
 
   return (
     <div className="transition-preview">
@@ -307,6 +324,18 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
         <div className="transition-preview-bracket-label" style={{ left: ((bracketStartPct + bracketEndPct) / 2) + '%' }}>
           {bracketLabel} · {fmtTime(regions.transitionSec)}
         </div>
+        {leftSong && outSeconds != null && (
+          <>
+            <div className="waveform-marker" style={{ left: bracketStartPct + '%' }} />
+            <div className="waveform-marker-label" style={{ left: bracketStartPct + '%' }}>{leftCueLabel} <span className="mono-num">{fmtTime(outSeconds)}</span></div>
+          </>
+        )}
+        {rightSong && inSeconds != null && (
+          <>
+            <div className="waveform-marker" style={{ left: bracketEndPct + '%' }} />
+            <div className="waveform-marker-label" style={{ left: bracketEndPct + '%' }}>{rightCueLabel} <span className="mono-num">{fmtTime(inSeconds)}</span></div>
+          </>
+        )}
         <div className="transition-preview-playhead" ref={playheadRef} />
       </div>
       <div className="transition-preview-controls">

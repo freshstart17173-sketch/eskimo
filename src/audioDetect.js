@@ -1,4 +1,4 @@
-// Real audio matching for Add Audio's "detect the song(s) this connects" step.
+// Real audio matching for Add Audio's "detect the splice point" step.
 //
 // This works because of the reference-track workflow: every song can be
 // downloaded as its exact uploaded master (see Library -> "Download
@@ -6,39 +6,22 @@
 // same file. That means at the splice point, the dropped file's waveform is
 // (near-)identical to the reference track's — which makes this tractable
 // with straightforward signal correlation instead of needing a full
-// Shazam-style acoustic fingerprint database: decode both clips with the
-// Web Audio API, reduce each to a coarse RMS energy envelope, and find the
-// best-aligned normalized cross-correlation between the dropped file's
-// leading/trailing edge and each candidate's trailing/leading edge.
+// Shazam-style acoustic fingerprint database.
 //
-// Needs real reference audio to compare against — with no songs uploaded
-// with audio yet, there is nothing to detect against, so callers should
-// fall back to pickDetectedSongs (core.js) until that's true.
-//
-// Cost note: for a plain-PCM WAV master, fetchEdgesRanged below gets
-// everything this needs — an exact duration plus head/tail envelopes —
-// from a HEAD-sized probe and two small byte-range GETs, not the whole
-// file (R2 and most CDNs answer Range requests natively; see TODO.md for
-// the CORS header this needs on the bucket). Anything that isn't a WAV
-// this can parse falls back to downloading the whole file, same as
-// before — correctness over a cleverness that doesn't generalize.
+// The DJ picks which song(s) and which cut type this is BEFORE dropping
+// the file (AddAudio.jsx) — there is no auto-detect-which-song-out-of-the-
+// whole-library step here anymore. What's detected automatically is just
+// the splice timecode against the song(s) already chosen (see
+// detectSpliceForKnownSongs below), which needed a real rewrite of its own:
+// real produced uploads turned out to commonly be a FULL-LENGTH re-export
+// of the whole song with the splice embedded partway through — sometimes
+// 90+ seconds in — not a short clip beginning right at the cue point, so
+// detecting the actual divergence point means decoding and scanning the
+// whole file, not just comparing a short fixed edge window.
 
 import { resolveAudioUrl } from './localAudioStore.js';
 
-const EDGE_SECONDS = 10; // how much of each clip's head/tail we compare
 const WINDOW_SEC = 0.05; // ~50ms RMS windows — coarse but resistant to bit-level noise
-// Raised from 0.55 after measuring both sides directly with a real
-// (synthetic but non-periodic) splice: a genuine byte-exact overlap scores
-// 0.84-0.95 here, while an unrelated pairing can still drift up to ~0.5-0.6
-// by pure chance (two independent amplitude envelopes both trending
-// "smoothly", or a percussive one echoing its own general shape elsewhere
-// in the same track) — 0.55 was inside that noise band, letting an
-// upload's *irrelevant* side (e.g. an outro's own new tail material,
-// compared against some other song's head) occasionally read as a
-// confident second match and get misclassified as a Transition instead of
-// a plain Outro/Intro. 0.7 sits well clear of every false positive
-// measured (~0.6 max) while every genuine match measured cleared 0.8.
-const MATCH_THRESHOLD = 0.7;
 
 let sharedAudioCtx = null;
 export function getAudioContext() {
@@ -64,113 +47,6 @@ export async function fetchAndDecode(url) {
   return decodeArrayBuffer(await res.arrayBuffer());
 }
 
-// ---------------------------------------------------------------------------
-// Range-fetch fast path (WAV/PCM only — see the header comment above for why
-// AIFF/FLAC/MP3 fall back to the full-file fetch instead of trying to fake
-// their way through this).
-// ---------------------------------------------------------------------------
-
-function readAscii(view, offset, len) {
-  let s = '';
-  for (let i = 0; i < len; i++) s += String.fromCharCode(view.getUint8(offset + i));
-  return s;
-}
-
-// Walks a WAV's RIFF chunks to find 'fmt ' and 'data' rather than assuming
-// the classic "always at byte 44" layout — a DAW export can carry extra
-// metadata chunks (LIST, fact, …) before the actual samples.
-function parseWavHeader(bytes) {
-  if (bytes.length < 12) return null;
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (readAscii(dv, 0, 4) !== 'RIFF' || readAscii(dv, 8, 4) !== 'WAVE') return null;
-  let offset = 12, fmt = null, dataOffset = null, dataSize = null;
-  while (offset + 8 <= bytes.length) {
-    const chunkId = readAscii(dv, offset, 4);
-    const chunkSize = dv.getUint32(offset + 4, true);
-    if (chunkId === 'fmt ') {
-      fmt = {
-        audioFormat: dv.getUint16(offset + 8, true),
-        numChannels: dv.getUint16(offset + 10, true),
-        sampleRate: dv.getUint32(offset + 12, true),
-        byteRate: dv.getUint32(offset + 16, true),
-        blockAlign: dv.getUint16(offset + 20, true),
-        bitsPerSample: dv.getUint16(offset + 22, true),
-      };
-    } else if (chunkId === 'data') {
-      dataOffset = offset + 8;
-      dataSize = chunkSize;
-      break;
-    }
-    offset += 8 + chunkSize + (chunkSize % 2); // chunks are word-aligned
-  }
-  if (!fmt || dataOffset == null || !fmt.byteRate) return null;
-  return { ...fmt, dataOffset, dataSize };
-}
-
-// Wraps a slice of raw PCM bytes in a fresh, internally-consistent 44-byte
-// WAV header (sized to exactly that slice) so decodeAudioData sees a valid
-// standalone file instead of a bare fragment — never relies on a browser
-// tolerating a header whose declared chunk sizes don't match the buffer.
-function wavBlobFrom(fmt, pcmBytes) {
-  const header = new ArrayBuffer(44);
-  const dv = new DataView(header);
-  const writeAscii = (off, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(off + i, s.charCodeAt(i)); };
-  writeAscii(0, 'RIFF'); dv.setUint32(4, 36 + pcmBytes.byteLength, true); writeAscii(8, 'WAVE');
-  writeAscii(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, fmt.audioFormat, true);
-  dv.setUint16(22, fmt.numChannels, true); dv.setUint32(24, fmt.sampleRate, true);
-  dv.setUint32(28, fmt.byteRate, true); dv.setUint16(32, fmt.blockAlign, true); dv.setUint16(34, fmt.bitsPerSample, true);
-  writeAscii(36, 'data'); dv.setUint32(40, pcmBytes.byteLength, true);
-  return new Blob([header, pcmBytes]);
-}
-
-async function rangeGet(url, start, end) {
-  const res = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
-  if (!res.ok) throw new Error('range fetch failed: ' + res.status);
-  return new Uint8Array(await res.arrayBuffer());
-}
-
-// Gets exactly what detection needs from a WAV reference — an exact
-// duration (from the header, not a decoded buffer) plus head/tail RMS
-// envelopes — via one small probe GET and up to two small range GETs,
-// instead of downloading the whole file. Returns null (caller falls back
-// to fetchAndDecode) for anything this can't safely fast-path: not a WAV,
-// not plain PCM, a header that didn't fit the probe, or a server that
-// doesn't answer Range requests (some do return 200 with the full body
-// instead of erroring, which still works here, just without the savings).
-export async function fetchEdgesRanged(url, edgeSeconds = EDGE_SECONDS) {
-  let probe;
-  try { probe = await rangeGet(url, 0, 65535); } catch (e) { return null; }
-  const fmt = parseWavHeader(probe);
-  if (!fmt || fmt.audioFormat !== 1) return null; // 1 = PCM; anything else isn't safe to hand-reconstruct
-
-  const duration = fmt.dataSize / fmt.byteRate;
-  const edgeBytes = Math.min(fmt.dataSize, Math.floor((edgeSeconds * fmt.byteRate) / fmt.blockAlign) * fmt.blockAlign);
-  const dataEnd = fmt.dataOffset + fmt.dataSize;
-
-  // The probe already carries the start of the data chunk — top up only
-  // the remainder past it instead of re-requesting bytes it already has.
-  const headPcmEnd = fmt.dataOffset + edgeBytes;
-  let headPcm;
-  if (probe.length >= headPcmEnd) {
-    headPcm = probe.slice(fmt.dataOffset, headPcmEnd);
-  } else {
-    const already = probe.slice(fmt.dataOffset, probe.length);
-    const rest = await rangeGet(url, probe.length, headPcmEnd - 1);
-    headPcm = new Uint8Array(already.length + rest.length);
-    headPcm.set(already, 0);
-    headPcm.set(rest, already.length);
-  }
-
-  const tailStart = Math.max(fmt.dataOffset, dataEnd - edgeBytes);
-  const tailPcm = await rangeGet(url, tailStart, dataEnd - 1);
-
-  const [headBuffer, tailBuffer] = await Promise.all([
-    decodeArrayBuffer(await wavBlobFrom(fmt, headPcm).arrayBuffer()),
-    decodeArrayBuffer(await wavBlobFrom(fmt, tailPcm).arrayBuffer()),
-  ]);
-  return { headEnv: headEnvelope(headBuffer, edgeSeconds), tailEnv: tailEnvelope(tailBuffer, edgeSeconds), duration };
-}
-
 // Mono-mixed RMS envelope over fixed-size windows.
 export function rmsEnvelope(buffer, startSample, endSample, windowSize) {
   const channels = [];
@@ -192,17 +68,6 @@ export function rmsEnvelope(buffer, startSample, endSample, windowSize) {
   return env;
 }
 
-export function headEnvelope(buffer, seconds = EDGE_SECONDS) {
-  const windowSize = Math.max(1, Math.round(buffer.sampleRate * WINDOW_SEC));
-  const end = Math.min(buffer.length, Math.round(buffer.sampleRate * seconds));
-  return rmsEnvelope(buffer, 0, end, windowSize);
-}
-export function tailEnvelope(buffer, seconds = EDGE_SECONDS) {
-  const windowSize = Math.max(1, Math.round(buffer.sampleRate * WINDOW_SEC));
-  const start = Math.max(0, buffer.length - Math.round(buffer.sampleRate * seconds));
-  return rmsEnvelope(buffer, start, buffer.length, windowSize);
-}
-
 function zScore(arr) {
   if (arr.length === 0) return arr;
   let mean = 0; for (let i = 0; i < arr.length; i++) mean += arr[i]; mean /= arr.length;
@@ -221,9 +86,8 @@ export function bestCorrelation(a, b) {
   if (a.length === 0 || b.length === 0) return { score: 0, lag: 0 };
   const na = zScore(a), nb = zScore(b);
   // The valid lag range is NOT symmetric when the two envelopes differ in
-  // length (the ordinary case: a's the dropped clip's own edge, trimmed to
-  // its actual short length; b's the reference song's edge, usually the
-  // full EDGE_SECONDS window) — sliding a's start across b's whole length
+  // length (the ordinary case: a's a short probe window, b's a much
+  // longer reference envelope) — sliding a's start across b's whole length
   // needs lag from -(na.length-1) up to +(nb.length-1), not ±min(na,nb)-1.
   // Confirmed as a real bug, not a hunch: a genuine, byte-exact splice
   // between a 5s dropped clip and a 14s reference song scored 0.84 at its
@@ -267,95 +131,193 @@ export function bestCorrelation(a, b) {
   return { score: best === -Infinity ? 0 : best, lag: bestLag };
 }
 
-// candidateSongs: [{ id, audioUrl, durationSec }] — only songs with a real
-// reference track can be matched against. Returns null ids when nothing
-// clears the confidence threshold, same shape core.js's
-// pickDetectedSongs-based fallback expects, so callers can swap between the
-// two without branching on the result shape. leftOutSeconds/rightInSeconds
-// are the actual detected splice timecodes (from the winning correlation
-// lag), not guesses — null when there was no confident match to derive them from.
-// onProgress(checked, total), when given, fires once per reference track
-// actually looked at — lets the UI show real "N of M checked" feedback
-// instead of one static "Analyzing…" for the whole batch.
-export async function detectMatch(file, candidateSongs, onProgress) {
-  const dropped = await decodeFile(file);
-  const droppedHead = headEnvelope(dropped);
-  const droppedTail = tailEnvelope(dropped);
+function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 
-  const withAudio = candidateSongs.filter(s => s.audioUrl);
-  let bestLeft = null, bestLeftScore = 0, bestLeftLag = 0, bestLeftRefDuration = 0;
-  let bestRight = null, bestRightScore = 0, bestRightLag = 0;
+// ---------------------------------------------------------------------------
+// Splice-point detection against a known song (see the file header comment
+// above) — real produced uploads turned out to commonly be a FULL-LENGTH
+// re-export of the whole song with the splice embedded partway through, not
+// a short clip starting right at the cue point, so this scans as far into
+// the timeline as it takes to find the actual divergence, not just a fixed
+// short edge window. Confirmed directly against a real pair of files: a
+// produced "with outro" master and its plain reference matched sample-for-
+// sample (near-zero relative RMS difference) for the first ~91 seconds,
+// then diverged sharply for the rest.
+// ---------------------------------------------------------------------------
 
-  for (let i = 0; i < withAudio.length; i++) {
-    const song = withAudio[i];
-    let leftEnv, rightEnv, refDuration;
-    // song.audioUrl may be a `local:` marker (IndexedDB, no backend
-    // configured) rather than a real fetchable URL — resolve it to its
-    // (memoized) `blob:` URL first so both fetch paths below work
-    // identically regardless of which storage a reference track used.
-    const resolvedUrl = await resolveAudioUrl(song.audioUrl).catch(() => null);
-    if (!resolvedUrl) { if (onProgress) onProgress(i + 1, withAudio.length); continue; }
-    const ranged = await fetchEdgesRanged(resolvedUrl).catch(() => null);
-    if (ranged) {
-      leftEnv = ranged.tailEnv; rightEnv = ranged.headEnv; refDuration = ranged.duration;
-    } else {
-      let ref;
-      try { ref = await fetchAndDecode(resolvedUrl); } catch (e) { console.warn('Eskimo Studio: could not fetch reference audio for', song.id, e); if (onProgress) onProgress(i + 1, withAudio.length); continue; }
-      leftEnv = tailEnvelope(ref); rightEnv = headEnvelope(ref); refDuration = ref.duration;
-    }
+const DIVERGE_WINDOW_SEC = 0.05; // fine-scan window — matches WINDOW_SEC's own resolution
+// Empirically: two genuinely-matching windows (even across a lossy
+// re-encode) measured well under 0.05 relative RMS difference; a real
+// divergence point jumped straight past 0.4 and commonly well past 1.0
+// (the diverging content isn't just "different by some amount", it's
+// unrelated audio — its own energy has no reason to resemble the
+// original's at that moment at all).
+const DIVERGE_THRESHOLD = 0.35;
+// Requires the divergence to STAY past threshold for a full second before
+// accepting it — a single stray transient (a drum hit landing a few
+// samples out of phase between a lossy re-encode and the original) can
+// spike one window without being the real splice point.
+const DIVERGE_HOLD_SEC = 1.0;
+// How much of the probe's own leading edge feeds the initial coarse
+// alignment correlation — needs to be long enough to be a distinctive,
+// non-repeating passage (an intro/opening is usually unique within its
+// own song), not so long it starts overlapping the eventual divergence
+// point on a short produced clip.
+const COARSE_ALIGN_SEC = 20;
 
-    // the dropped file's leading edge should match a candidate's trailing
-    // edge — that candidate is the "left side" (what it plays out of)
-    const left = bestCorrelation(droppedHead, leftEnv);
-    if (left.score > bestLeftScore) { bestLeftScore = left.score; bestLeft = song.id; bestLeftLag = left.lag; bestLeftRefDuration = refDuration; }
-
-    // the dropped file's trailing edge should match a candidate's leading
-    // edge — that candidate is the "right side" (what it plays into)
-    const right = bestCorrelation(droppedTail, rightEnv);
-    if (right.score > bestRightScore) { bestRightScore = right.score; bestRight = song.id; bestRightLag = right.lag; }
-    if (onProgress) onProgress(i + 1, withAudio.length);
-  }
-
-  const matchedLeft = bestLeftScore >= MATCH_THRESHOLD;
-  const matchedRight = bestRightScore >= MATCH_THRESHOLD;
-  const leftOutSeconds = matchedLeft ? Math.max(0, (bestLeftRefDuration - EDGE_SECONDS) + bestLeftLag * WINDOW_SEC) : null;
-  const rightInSeconds = matchedRight ? Math.max(0, bestRightLag * WINDOW_SEC) : null;
+// A read-only, duck-typed AudioBuffer-alike with every channel's sample
+// order reversed. Intro detection needs the exact same "declining match
+// walking forward from an anchor" scan as Outro, just aimed the other way
+// (an intro clip's own NEW material sits at its start, matching the
+// destination near the clip's END) — reversing both buffers turns that
+// into the identical forward-scan shape Outro already handles, so there is
+// only one scanning implementation to keep correct, not two hand-written
+// mirror-image copies that could quietly drift apart.
+function reversedBuffer(buffer) {
+  const channels = [];
+  for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c).slice().reverse());
   return {
-    leftId: matchedLeft ? bestLeft : null,
-    rightId: matchedRight ? bestRight : null,
-    leftConfidence: bestLeftScore,
-    rightConfidence: bestRightScore,
-    // OUT point = where in the full left-song timeline the tail window
-    // (which starts at refDuration - EDGE_SECONDS) plus the winning lag falls.
-    // Real, meaningful splice point for a Transition (source stops here,
-    // the clip picks up) — NOT used the same way for an Outro (see
-    // leftClipStartSec below).
-    leftOutSeconds,
-    // IN point = where in the right song's own timeline (starting at 0) the
-    // winning lag falls — the head window already starts at absolute 0.
-    // Same story in reverse: real for a Transition, not for an Intro (see
-    // rightClipEndSec below).
-    rightInSeconds,
-    // Where INSIDE THE DROPPED CLIP ITSELF the left song's own overlap
-    // ends and genuinely new outro material begins — derived from the same
-    // correlation lag, just solved for the dropped file's own timeline
-    // instead of the reference's. An outro clip is commonly produced by
-    // recording over the tail of the original master, so its own t=0
-    // already duplicates audio the main deck is *also* about to play
-    // naturally — an outro has no real "out point" on the original song
-    // (it always plays to its own natural end, unlike a Transition's early
-    // splice), so the clip needs its OWN internal skip instead: starting
-    // it at this offset means only the new material actually plays,
-    // instead of replaying the overlapping tail a second time back to
-    // back with the main deck's own natural ending.
-    leftClipStartSec: matchedLeft ? clamp(bestLeftRefDuration - leftOutSeconds, 0, dropped.duration) : null,
-    // The mirror image for an Intro: where INSIDE THE CLIP the destination
-    // song's own beginning (t=0) falls — an intro has no real "in point" on
-    // the destination either (it always starts fresh at 0), so the CLIP
-    // itself needs to stop here instead of playing to its own natural end,
-    // or its own trailing overlap would duplicate the destination's
-    // opening the instant the destination's real master takes over.
-    rightClipEndSec: matchedRight ? clamp(dropped.duration - EDGE_SECONDS - rightInSeconds, 0, dropped.duration) : null,
+    numberOfChannels: buffer.numberOfChannels, length: buffer.length,
+    sampleRate: buffer.sampleRate, duration: buffer.duration,
+    getChannelData: (c) => channels[c],
   };
 }
-function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+
+// Per-window normalized RMS difference between two buffers at given start
+// offsets — near 0 while genuinely matching (same recording), jumping well
+// past 1 once they diverge into unrelated content. Mono-mixes each buffer's
+// own channels independently (mirrors rmsEnvelope's own convention) so a
+// mono probe against a stereo reference, or vice versa, still compares
+// correctly. Stops at whichever buffer runs out of samples first.
+function relativeDiffEnvelope(bufferA, bufferB, startA, startB, windowSize, maxWindows) {
+  const chA = []; for (let c = 0; c < bufferA.numberOfChannels; c++) chA.push(bufferA.getChannelData(c));
+  const chB = []; for (let c = 0; c < bufferB.numberOfChannels; c++) chB.push(bufferB.getChannelData(c));
+  const availableWindows = Math.floor(Math.min(bufferA.length - startA, bufferB.length - startB) / windowSize);
+  const numWindows = Math.max(0, Math.min(maxWindows, availableWindows));
+  const out = new Float32Array(numWindows);
+  for (let w = 0; w < numWindows; w++) {
+    let sumSqDiff = 0, sumSqA = 0;
+    const baseA = startA + w * windowSize, baseB = startB + w * windowSize;
+    for (let i = 0; i < windowSize; i++) {
+      let av = 0; for (let c = 0; c < chA.length; c++) av += chA[c][baseA + i] || 0; av /= chA.length;
+      let bv = 0; for (let c = 0; c < chB.length; c++) bv += chB[c][baseB + i] || 0; bv /= chB.length;
+      const d = av - bv;
+      sumSqDiff += d * d;
+      sumSqA += av * av;
+    }
+    const rmsA = Math.sqrt(sumSqA / windowSize);
+    const rmsDiff = Math.sqrt(sumSqDiff / windowSize);
+    out[w] = rmsA > 1e-6 ? rmsDiff / rmsA : rmsDiff;
+  }
+  return out;
+}
+
+// Refines a divergence boundary found at DIVERGE_WINDOW_SEC (~50ms)
+// resolution down to individual-sample precision — "should be identical
+// when spliced" needs better than a 50ms window can promise on its own.
+// Requires a short run of consecutively-elevated absolute difference
+// (not one single sample) before accepting the boundary, the same
+// "don't trust one transient" reasoning as DIVERGE_HOLD_SEC above, just at
+// sample scale instead of window scale.
+function refineSampleBoundary(probeBuffer, refBuffer, probeStart, refStart, scanSamples) {
+  const pch = probeBuffer.getChannelData(0), rch = refBuffer.getChannelData(0);
+  const maxLen = Math.max(0, Math.min(scanSamples, probeBuffer.length - probeStart, refBuffer.length - refStart));
+  const RUN = 8;
+  const ABS_FLOOR = 0.01;
+  const window = [];
+  let runSum = 0;
+  for (let i = 0; i < maxLen; i++) {
+    const d = Math.abs((pch[probeStart + i] || 0) - (rch[refStart + i] || 0));
+    window.push(d); runSum += d;
+    if (window.length > RUN) runSum -= window.shift();
+    if (window.length === RUN && (runSum / RUN) > ABS_FLOOR) return probeStart + i - RUN + 1;
+  }
+  return probeStart;
+}
+
+// The core scan: finds where `probeBuffer` stops matching `refBuffer`,
+// walking FORWARD from probeBuffer's own start. Returns times in seconds:
+// `alignSec` (where in refBuffer's own timeline probeBuffer's t=0 aligns —
+// found by coarse correlation, so this is NOT assumed to be 0 even though
+// it commonly turns out to be, for a full-length re-export that starts in
+// sync with the original), `divergeProbeSec` (where in PROBEBUFFER's own
+// timeline the match ends) and `divergeRefSec` (the same instant, on
+// refBuffer's own timeline — just `alignSec + divergeProbeSec`).
+async function scanForwardDivergence(probeBuffer, refBuffer) {
+  const winSize = Math.max(1, Math.round(refBuffer.sampleRate * WINDOW_SEC));
+  const coarseSamples = Math.min(probeBuffer.length, Math.round(refBuffer.sampleRate * COARSE_ALIGN_SEC));
+  const probeCoarseEnv = rmsEnvelope(probeBuffer, 0, coarseSamples, winSize);
+  const refFullEnv = rmsEnvelope(refBuffer, 0, refBuffer.length, winSize);
+  const { lag, score } = bestCorrelation(probeCoarseEnv, refFullEnv);
+  const alignSec = Math.max(0, lag * WINDOW_SEC);
+  const refStartSample = Math.round(alignSec * refBuffer.sampleRate);
+
+  const fineWinSamples = Math.max(1, Math.round(refBuffer.sampleRate * DIVERGE_WINDOW_SEC));
+  const maxWindows = Math.floor(Math.min(probeBuffer.length, Math.max(0, refBuffer.length - refStartSample)) / fineWinSamples);
+  const diffEnv = relativeDiffEnvelope(probeBuffer, refBuffer, 0, refStartSample, fineWinSamples, maxWindows);
+  const holdWindows = Math.max(1, Math.round(DIVERGE_HOLD_SEC / DIVERGE_WINDOW_SEC));
+  let divergeWindow = diffEnv.length; // never diverges within what was scanned — whole probe matches the reference
+  for (let w = 0; w < diffEnv.length; w++) {
+    if (diffEnv[w] <= DIVERGE_THRESHOLD) continue;
+    let sustained = true;
+    for (let j = w; j < Math.min(diffEnv.length, w + holdWindows); j++) {
+      if (diffEnv[j] <= DIVERGE_THRESHOLD) { sustained = false; break; }
+    }
+    if (sustained) { divergeWindow = w; break; }
+  }
+  let divergeProbeSec = divergeWindow * DIVERGE_WINDOW_SEC;
+  if (divergeWindow > 0 && divergeWindow < diffEnv.length) {
+    const refinedSample = refineSampleBoundary(
+      probeBuffer, refBuffer,
+      (divergeWindow - 1) * fineWinSamples, refStartSample + (divergeWindow - 1) * fineWinSamples,
+      fineWinSamples * 2,
+    );
+    divergeProbeSec = refinedSample / refBuffer.sampleRate;
+  }
+
+  return { alignSec, divergeProbeSec, divergeRefSec: alignSec + divergeProbeSec, score };
+}
+
+// The real entry point once the DJ has told us which song(s) and which cut
+// type this produced file is for (AddAudio.jsx's manual picker) — no more
+// guessing WHICH song out of the whole library, just an accurate splice
+// timecode against the song(s) actually chosen. `leftSong` (Outro/
+// Transition) gets a forward scan; `rightSong` (Intro/Transition) gets the
+// same scan on time-reversed copies of both buffers (see reversedBuffer),
+// converted back to real, forward timecodes afterward. Always downloads
+// each reference song's FULL master (not just its head/tail) — the
+// fetchEdgesRanged fast path above only ever covered a fixed short edge
+// window, which is exactly the assumption this function exists to drop.
+export async function detectSpliceForKnownSongs(file, { leftSong, rightSong }, onProgress) {
+  const dropped = await decodeFile(file);
+  const result = {
+    leftOutSeconds: null, leftClipStartSec: null, leftScore: null,
+    rightInSeconds: null, rightClipEndSec: null, rightScore: null,
+  };
+
+  if (leftSong && leftSong.audioUrl) {
+    const url = await resolveAudioUrl(leftSong.audioUrl).catch(() => null);
+    if (url) {
+      const ref = await fetchAndDecode(url);
+      if (onProgress) onProgress('left');
+      const { divergeRefSec, divergeProbeSec, score } = await scanForwardDivergence(dropped, ref);
+      result.leftOutSeconds = clamp(divergeRefSec, 0, ref.duration);
+      result.leftClipStartSec = clamp(divergeProbeSec, 0, dropped.duration);
+      result.leftScore = score;
+    }
+  }
+  if (rightSong && rightSong.audioUrl) {
+    const url = await resolveAudioUrl(rightSong.audioUrl).catch(() => null);
+    if (url) {
+      const ref = await fetchAndDecode(url);
+      if (onProgress) onProgress('right');
+      const revProbe = reversedBuffer(dropped);
+      const revRef = reversedBuffer(ref);
+      const { divergeRefSec: revDivergeRef, divergeProbeSec: revDivergeProbe, score } = await scanForwardDivergence(revProbe, revRef);
+      result.rightInSeconds = clamp(ref.duration - revDivergeRef, 0, ref.duration);
+      result.rightClipEndSec = clamp(dropped.duration - revDivergeProbe, 0, dropped.duration);
+      result.rightScore = score;
+    }
+  }
+  return result;
+}

@@ -385,6 +385,17 @@ export default function GraphPane({
           sourceHandle: 'right-' + o.type, targetHandle: 'left-' + startMode,
           type: 'active',
           data: { offset, onDisconnect: () => onDisconnectOutput(songId, o.type, o.edgeId) },
+          // This synthetic edge's own `id` ('link-...') never matches a real
+          // produced-audio edge id, so comparing it against mixingEdgeId
+          // directly would never light up — an Outro entry has a real
+          // produced edge behind it (o.edgeId) even though this synthetic
+          // wrapper edge doesn't share its id; a plain None entry has no
+          // produced audio at all (an instant cut has nothing to "mix"
+          // into), so it never animates. Confirmed as a real bug, not just
+          // a narrow trigger window: before this, an Outro-wired link never
+          // animated AT ALL, regardless of mixingEdgeId, because `animated`
+          // was never even set on this branch.
+          animated: o.type === 'outro' && !!mixingEdgeId && mixingEdgeId === o.edgeId,
           style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
         });
       });

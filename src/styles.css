@@ -706,20 +706,25 @@ a { color: var(--accent); }
 .graph-pane .react-flow { background: var(--panel); overflow: hidden; }
 .graph-pane .react-flow__attribution { display: none; }
 .graph-pane .react-flow__edge-path { stroke-linecap: round; }
-/* The live-crossfade pulse (see ActiveEdge, GraphPane.jsx) — short bright
-   dashes traveling along the same path as the solid line underneath,
-   source to target, looping for as long as the real audio handoff is in
-   progress. Negative dashoffset moves the pattern in the direction the
-   path itself was drawn (source -> target), which is the direction
-   playback is actually headed. Never intercepts the pointer — the
-   disconnect button and the base edge's own hover/click handling live on
-   the path underneath this one. */
+/* The live-crossfade pulse (see ActiveEdge, GraphPane.jsx) — a traveling
+   dashed line on top of the solid line underneath, source to target,
+   looping for as long as the real audio handoff is in progress. Modeled
+   directly on TouchDesigner's own wire convention (confirmed, not
+   guessed — TD's UserGuide: "Wires display animated dashed lines to
+   provide visual feedback as to which nodes in a network are cooking,
+   and the animated dashed lines represent the flow of data between
+   nodes" — an animated dash pattern, not literal arrow/chevron shapes).
+   Negative dashoffset moves the pattern in the direction the path itself
+   was drawn (source -> target), which is the direction playback is
+   actually headed. Never intercepts the pointer — the disconnect button
+   and the base edge's own hover/click handling live on the path
+   underneath this one. */
 .playback-flow-path {
   fill: none; stroke: #fff; stroke-width: 3px; stroke-linecap: round;
-  stroke-dasharray: 1 15; opacity: .95; pointer-events: none;
+  stroke-dasharray: 5 9; opacity: .95; pointer-events: none;
   animation: playbackFlow 0.9s linear infinite;
 }
-@keyframes playbackFlow { to { stroke-dashoffset: -16; } }
+@keyframes playbackFlow { to { stroke-dashoffset: -14; } }
 /* React Flow's own base stylesheet (base.css) ships `.react-flow__edge.
    animated path { stroke-dasharray: 5; animation: dashdraw .5s linear
    infinite }` — an indiscriminate `path` selector that matches BOTH the
@@ -729,7 +734,7 @@ a { color: var(--accent); }
    it fights this effect on the overlay and turns the base line dashed —
    reassert both explicitly, at matching-or-greater specificity. */
 .graph-pane .react-flow__edge.animated path.react-flow__edge-path { stroke-dasharray: none; animation: none; }
-.graph-pane .react-flow__edge.animated path.playback-flow-path { stroke-dasharray: 1 15; animation: playbackFlow 0.9s linear infinite; }
+.graph-pane .react-flow__edge.animated path.playback-flow-path { stroke-dasharray: 5 9; animation: playbackFlow 0.9s linear infinite; }
 /* React Flow's own drag-select box ships hardcoded to its library default
    (a saturated blue, `rgba(0, 89, 220, ...)`) via `--xy-selection-*`
    custom properties it defines on `.react-flow` itself — never overridden

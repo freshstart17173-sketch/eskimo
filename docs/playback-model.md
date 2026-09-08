@@ -818,3 +818,135 @@ here) — the math mirrors the already-shipped `leftOutSeconds`/
 `rightInSeconds` derivation exactly (same correlation lag, solved for the
 other timeline), but a real produced clip is the only way to fully close
 this out.
+
+## 9. Round 5 — real produced audio changed the shape of the detection problem
+
+§8's own "not re-verified against a real produced render" gap got closed
+this round — the DJ supplied two real files (`regular.mp3`, a plain
+reference master; `with_outro.mp3`, the same song with a produced outro)
+directly. Ground truth, established independently of any detection code by
+a raw zero-lag sample comparison across the whole pair: the two files are
+byte-for-byte identical (relative RMS difference near the decode noise
+floor) for the first **~91 seconds**, then diverge sharply for the rest —
+matching the DJ's own estimate ("~1:33") closely.
+
+### Confirmed bug: the old detector's whole premise didn't match real uploads
+
+`detectMatch` (the auto-detect-which-song matcher, §1's original design)
+only ever compared the dropped file's first/last `EDGE_SECONDS` (10s)
+against a candidate's tail/head. Against the real pair, this reported the
+divergence at **2:53** — 82 seconds off the true ~91s point, an error far
+too large to be the correlation's own ~50ms window resolution. Root cause:
+the algorithm assumed a produced upload is a short clip beginning right at
+the splice — real uploads turned out to commonly be a **full-length
+re-export of the whole song** with the splice embedded 90+ seconds in, a
+shape a fixed 10-second edge window can never find a match inside.
+
+### The rewrite: scan for the actual divergence, don't assume where it is
+
+`audioDetect.js`'s `detectMatch` (and its exclusively-used support code —
+`fetchEdgesRanged`, `headEnvelope`/`tailEnvelope`, `EDGE_SECONDS`,
+`MATCH_THRESHOLD`) is gone, replaced by `detectSpliceForKnownSongs`. Two
+changes, not one:
+
+1. **No more auto-detecting WHICH song.** Direct instruction: the
+   auto-match-across-the-whole-library step was unreliable enough that the
+   DJ now picks the type (Transition/Intro/Outro) and the song(s) by hand,
+   *before* dropping the file (`AddAudio.jsx`'s new segmented type picker +
+   `SongPicker`s, gated so the Dropzone itself only appears once the
+   song(s) are chosen). This also makes the previous round's
+   `sameSongBothSides` ambiguity structurally impossible for a Transition
+   (two independent pickers, not one detector guessing both sides from the
+   same file) — the check stays as a plain defensive guard, not a
+   detection-derived judgment call anymore.
+2. **A real divergence scan for the splice TIMECODE**, now that WHICH
+   song is a given, not a guess. `scanForwardDivergence` (i) coarsely
+   correlates the probe's own leading ~20s against the reference's
+   **entire** duration (not just its tail) to find where the probe's own
+   t=0 aligns — commonly 0 for a full re-export, but not assumed to be;
+   (ii) walks forward from there comparing windowed relative-RMS
+   difference until it's *sustained* above threshold for a full second
+   (guards against one transient — a drum hit landing slightly out of
+   phase after a lossy re-encode — reading as the splice); (iii) refines
+   the ~50ms-resolution boundary down to individual-sample precision via a
+   short run of consecutively-elevated absolute difference. Intro
+   detection (destination's real opening sits at the CLIP's own end, not
+   its start) reuses the exact same forward-scanning function on
+   time-reversed copies of both buffers (`reversedBuffer`) rather than a
+   second hand-written mirror-image implementation — one scan to keep
+   correct, not two that could quietly drift apart. `leftOutSeconds`/
+   `leftClipStartSec`/`rightInSeconds`/`rightClipEndSec` keep their exact
+   established meanings (§8) — only how they're computed changed, so
+   nothing downstream (`AddAudio.jsx`'s save, `audioEngine.js`) needed to
+   change shape.
+
+Re-run against the real pair: **91.75s** (vs. ~2:53/173s before), a
+0.16-second difference from the independent ground-truth check. Confirmed
+via a direct splice-and-diff test (exactly the DJ's own requested
+verification method): render `regular[0:leftOutSeconds] +
+with_outro[leftClipStartSec:end]` and compare it, sample-for-sample,
+against the real `with_outro.mp3` in full — relative RMS difference stayed
+under 0.008 for every 2-second window across the entire ~192s track except
+one brief transient exactly at the splice boundary (0.27 for that single
+2s window, still far short of "unrelated audio"), confirming the detected
+point is genuinely where the two streams cross, not merely plausible.
+
+### Terminology followed the same correction as §8's mechanics
+
+Direct feedback: a detected cue point on an Outro/Intro edge was labeled
+"OUT"/showing the wrong word, because the UI's wording had never caught up
+to §8's "an outro has no out point, an intro has no in point" correction —
+it kept calling the Outro's own divergence marker an "out point" even
+though §8 already established the main deck's real out-point concept
+doesn't apply there. Fixed with a consistent rename, not a special case:
+a Transition has a real early cue on both sides (OUT on the left, IN on
+the right — unchanged). An Outro has no real out point on the left song,
+but does have a real moment worth marking — where you enter the outro's
+own new material — so it reads **IN**. An Intro has no real in point on
+the destination, but has a real moment worth marking too — where you exit
+the intro's own material into the destination — so it reads **OUT**. Also
+consolidated to one player showing this precisely (a labeled tick +
+timecode chip, not a translucent region alone) rather than a second, lower-
+fidelity duplicate display elsewhere on the page — direct instruction.
+
+### Confirmed bug found alongside all this: the live pulse never fired for Outro links at all
+
+While restyling the graph's live-mixing pulse to match TouchDesigner's own
+wire convention (confirmed via its UserGuide, not guessed: TD shows an
+animated dashed line — not literal arrow shapes — to indicate active data
+flow between nodes), found that the pulse had never worked for an
+Outro-wired link in the first place, independent of anything else in this
+round. `GraphPane.jsx` draws two separate edge families: real produced
+Transitions (which set `animated: isActive && mixingEdgeId === e.id`
+correctly), and a second family of synthetic "active link" edges for
+plain None/Outro/Intro wiring, which never set `animated` at all — and
+even if it had, that family's own edge `id` is a synthesized
+`'link-<songId>-<type>'` string that never matches `mixingEdgeId` (which
+holds the real underlying produced-edge id). Fixed by wiring `animated:
+o.type === 'outro' && mixingEdgeId === o.edgeId` on that branch — a plain
+None link still never animates (no produced audio, nothing to mix into).
+
+### Node graph performance
+
+Investigated directly (Chrome DevTools tracing via Playwright, both the
+dev server and a production build): idle CPU is negligible with no
+always-on `requestAnimationFrame` loop running when nothing is playing;
+a sustained node-drag runs close to 60fps (~16.5ms average frame time, no
+frames over 33ms) with no runaway loop, no unstable `nodeTypes`/`edgeTypes`
+identity (a well-known React Flow foot-gun — confirmed absent, both are
+declared module-level), and memoized derived props (`placedSongs`,
+`positions`, etc., PerformPage.jsx) correctly scoped so a once-a-second
+session tick doesn't force a full rebuild. No specific bug was found or
+fixed here — this is an honest "not reproduced in this environment"
+finding, not a confirmed-fine verdict: a real user's own hardware, browser,
+or a specific interaction not covered by this profiling pass could still
+be genuinely slower, and would need a concrete repro (ideally a screen
+recording or the specific gesture that lags) to pin down further.
+
+### Status
+
+**Implemented and verified** for detection accuracy (a real produced pair,
+not synthetic audio — the gap §8 explicitly left open), the manual
+type/song picker, the IN/OUT terminology fix, and the graph pulse bug.
+Node graph performance remains an open item pending a concrete repro from
+the DJ's own environment.
