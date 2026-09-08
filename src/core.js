@@ -206,6 +206,22 @@ function existingTransitions(node) {
   return node.endEdgeId ? [{ edgeId: node.endEdgeId, targetId: node.nextSongId }] : [];
 }
 
+// Every destination a node's own outgoing wiring actually reaches — one
+// for a plain None/Outro cut, but *all* of them for a Transition (which
+// can carry more than one, see addTransitionConnection). graphLayout.js's
+// Autoarrange needs this same "every one, not just the first" view for
+// its own dagre edges: it used to read `nextSongId` alone, which only
+// ever holds the most-recently-wired transition — a node's other
+// transition(s) were completely invisible to the layout, leaving that
+// destination with no positional relationship to its real source at all
+// and dumping it wherever dagre parks an otherwise-disconnected node
+// (reported directly as Autoarrange drawing a huge, pointless diagonal
+// line back across the whole graph).
+export function allDestinationIds(node) {
+  if (node.endMode === 'transition') return existingTransitions(node).map(t => t.targetId);
+  return node.nextSongId ? [node.nextSongId] : [];
+}
+
 // Wires one full connection — a Transition drag (endEdgeId names the
 // produced edge, toId is just edge.r) and a None/Outro/Intro drag (toId is
 // whatever node the DJ dropped on, endEdgeId is the outro edge if any, the

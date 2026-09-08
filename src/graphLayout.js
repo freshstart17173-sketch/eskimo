@@ -1,5 +1,5 @@
 import dagre from 'dagre';
-import { END, START } from './core.js';
+import { END, START, allDestinationIds } from './core.js';
 
 export const NODE_W = 208;
 export const NODE_H = 165;
@@ -32,7 +32,14 @@ export function computeDagreLayout(songs, activePlaylist) {
 
   Object.keys(activePlaylist.nodes).forEach(id => {
     const node = activePlaylist.nodes[id];
-    if (node.nextSongId && songs[id] !== undefined) g.setEdge(id, node.nextSongId);
+    if (songs[id] === undefined) return;
+    // Every destination, not just node.nextSongId (only ever the most-
+    // recently-wired one) — a node's other transition(s) used to be
+    // completely invisible here, leaving that destination with no
+    // positional relationship to its real source at all. See
+    // allDestinationIds's own comment (core.js) for the exact bug this
+    // produced (a huge, pointless diagonal line clear across the graph).
+    allDestinationIds(node).forEach(destId => g.setEdge(id, destId));
   });
   if (activePlaylist.startSongId && songs[activePlaylist.startSongId]) g.setEdge(START, activePlaylist.startSongId);
 
