@@ -1005,6 +1005,63 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
+### Done this pass (round 12 — the mockup port, finished: every other screen + a real backdrop)
+
+Round 11 (below) only ported the graph/node screen's real scale — asked
+directly to finish the rest ("when I said everything I meant
+everything"), same measure-the-mockup-don't-eyeball-it method applied to
+Library, Upload Song, Add Audio, Settings, and the app shell:
+
+- **Library**: `.lib-row` was a flat bordered accordion list — now
+  individually elevated borderless/shadow cards (`.node-card`'s own
+  recipe). Native checkbox restyled to a real custom checkmark box
+  (`appearance:none` + a drawn `✓`, keeping real checkbox semantics)
+  instead of the browser's default plus an off-palette accent-blue
+  `accent-color`. `.lib-select-bar` switched from solid ink to the
+  accent-bg/accent-text treatment already used for other "you're in a
+  selection state" banners.
+- **Settings**: new `.settings-card` (same borderless/shadow language as
+  `.form-card`, smaller padding since each `.settings-row` carries its
+  own padding + a divider). Its previously-separate, near-duplicate
+  `.autoplay-card`/`.autoplay-row`/`-title`/`-sub` classes are gone,
+  unified onto `.settings-card`/`.settings-row`. `.switch.on` (Autoplay/
+  Transition-only toggles) went from accent blue to ink, matching the
+  app's own near-monochrome + one-pastel-accent convention.
+- **Upload Song / Add Audio**: `.form-card` went from a flat grey panel
+  to the same borderless/shadow-elevated treatment (background
+  panel→paper, real shadow, radius 2→6px, padding 14→20px) — deliberately
+  did NOT copy the mockup's own bigger inter-field gap verbatim, since
+  real fields are wrapped in `.field` (its own margin-bottom already),
+  and doubling up would have overshot the intended spacing.
+  `.dropzone` padding/border/gap bumped to match.
+- **`.segmented`** (Light/System/Dark, also used in dark contexts like
+  the sequence pane's own ending buttons) drops its border/per-button
+  dividers for a shadow — deliberately did NOT force a background/text
+  color the way the mockup's flat version does, since an existing
+  comment documents why that specifically broke a dark-context usage
+  before (invisible near-white-on-near-white buttons); a box-shadow
+  doesn't touch color, so it's safe to add unconditionally where the
+  border wasn't.
+- **A real backdrop for every page, not just the graph canvas.** Every
+  card this pass (and round 11) has been adding was floating on the
+  exact same flat white as the page itself — a shadow alone barely
+  reads with nothing to contrast against, which the graph canvas never
+  had this problem with (its own dot-grid already gave it visual
+  depth). New `--canvas-bg` token (light/dark, matching the mockup's own
+  exact values) applied to `.main` — the whole app shell's content area
+  outside the sidebar. `.sidebar` itself switched from `--panel` to
+  `--paper` to match (the toned `--main` now does the separation job a
+  grey sidebar used to), and `.nav-btn`'s hover tint switched from a
+  custom faint rgba (chosen specifically to still show up against the
+  old grey sidebar) to the same `--panel` tint every other hover
+  affordance in the app already uses.
+
+Verified visually in both light and dark mode across every screen
+touched, plus a re-run of the real multi-step-pointer-path drag-connect
+regression test after all of it (CSS-only changes, but the graph screen
+specifically has burned this session before, so it gets re-checked on
+every pass that touches shared tokens/backgrounds).
+
 ### Done this pass (round 11 — bug fixes, full mockup fidelity, and the rest of the backlog)
 
 Prompted directly: "start working on literally everything that was
