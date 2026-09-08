@@ -1005,6 +1005,52 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
+### Done this pass (round 13 — Blender node-editor UX audit, documentation only)
+
+Asked directly, after round 12 finished the full screen port: look through
+Blender's node editor for anything worth stealing for the graph canvas —
+"a slow viewport, a jittery input, lack of ux polish in the form of hover
+states, snap anticipation, all these little things, every single one
+should be documented." A documentation deliverable, not an implementation
+one — nothing below has been built yet.
+
+Full writeup: **`docs/blender-node-editor-audit.md`**. Every item was
+checked against Eskimo's actual current code (`GraphPane.jsx`,
+`GraphNodes.jsx`, `styles.css`, `@xyflow/react` v12.3.6's real defaults),
+not assumed from memory of either codebase. Four concrete, scoped gaps
+came out of it, in priority order:
+
+1. **No visual feedback while dragging a wire toward a socket** — this is
+   the direct hit against "snap anticipation." React Flow already applies
+   `.connectingto.valid`/`.invalid` classes to candidate handles during a
+   drag; nothing in `styles.css` styles them, so a 40px-radius forgiving
+   hit-test (`connectionRadius={40}`) has zero matching visual confidence
+   before you let go.
+2. **The drag-select box is still React Flow's stock blue** — the one
+   remaining default-blue element after round 11/12's whole point-of-the-
+   exercise pivot away from blue-accent conventions onto ink + one pastel
+   accent. Never overridden; confirmed by grep, zero hits.
+3. **No middle-mouse-button pan** — panning currently requires holding
+   Shift while dragging (deliberate, fixes a real past bug, don't touch
+   it) but has no second, unclaimed input alongside it the way Blender/
+   Figma/etc. all offer MMB-drag for exactly this.
+4. **The visible 22px dot-grid background implies alignment nothing
+   honors** — node drag has no snapping at all, onto that grid or
+   otherwise. Grid-only snap-on-release is the safe version to build;
+   Blender's own users report its node-to-node snap variant as
+   "unpredictable" (cited in the doc) — don't copy that part.
+
+Also documented at length, and explicitly **not** recommended, with
+reasoning for each: node header color-by-category (Eskimo's Song nodes
+already use per-song cover-derived color, which does that job better for
+a graph made of one dominant node type), socket color-by-data-type
+(deliberately removed earlier this session — mockup correction, sockets
+already carry a text label), Blender auto-offset/reroute-node/link-drag-
+search/Node-Wrangler-style hidden shortcuts (don't map cleanly onto a
+graph of fixed song entities), and a minimap (Blender's own core doesn't
+ship one either — third-party addon only — and Eskimo's graphs are nowhere
+near the scale where one earns its screen space).
+
 ### Done this pass (round 12 — the mockup port, finished: every other screen + a real backdrop)
 
 Round 11 (below) only ported the graph/node screen's real scale — asked
