@@ -503,14 +503,13 @@ export function playlistNextHop(playlist, songId) {
   return {
     id: pick.targetId, mode: 'cut',
     ending: chosenType === 'outro' ? 'outro' : 'cut',
-    // The outro clip's own edgeId, so transitionTriggerElapsed (below) can
-    // hand off at *its* real cue point the same way a transition already
-    // does — without this, an outro-ending hop had no way to find its own
-    // outSeconds and fell all the way back to the full song duration,
-    // meaning the main song played out completely before the outro clip
-    // started from its own beginning, which (per the "render with the
-    // original still attached" upload convention) duplicates whatever tail
-    // portion the outro clip overlaps with.
+    // The outro clip's own edgeId — so findOutroEdgeFor (audioEngine.js)
+    // resolves the specific outro variant actually wired here, not just
+    // "the first outro on this song", the moment a song has more than one
+    // outro to choose from. The main deck itself always plays to its own
+    // full natural duration for an outro (see transitionTriggerElapsed);
+    // this edgeId is for finding the right clip and its own clipStartSec,
+    // not for an early cue point on the main song.
     edgeId: chosenType === 'outro' ? pick.edgeId : null,
     starting: (destNode && destNode.startMode === 'intro') ? 'intro' : 'cut',
   };
@@ -932,24 +931,24 @@ export const CROSSFADE_LOOKAHEAD_SEC = 8;
 
 // Now Playing should hand off exactly at the committed transition's real
 // cue point (edge.outSeconds) when one was built and chosen — not after
-// the whole song plays out. Falls back to the full duration for a Cut or a
-// transition/outro edge that doesn't carry a cue point yet.
+// the whole song plays out. Falls back to the full duration for a Cut, an
+// outro ending, or a transition edge that doesn't carry a cue point yet.
 //
-// An outro ending needs exactly the same early handoff a transition
-// already gets, for exactly the same reason: the outro clip is uploaded
-// with the song's own tail still attached (so detection can splice it),
-// which means the clip's own t=0 already corresponds to `outSeconds` in
-// the song's timeline. Letting the main song play its full recorded
-// duration first — the old behavior here, since only `mode === 'transition'`
-// was ever checked — meant the outro clip then started over from its own
-// beginning, replaying whatever tail material it overlaps with a second
-// time before ever reaching its actually-new content.
+// An outro is NOT the same case as a transition here: a transition has a
+// real early splice point on the main deck (edge.outSeconds is where the
+// original song is deliberately cut short so the clip can carry the
+// crossfade) — an outro has no such point. It always plays the main song
+// to its own full natural duration ("an outro has no out point"); ending
+// the set early would just be losing the last few seconds of the song for
+// no reason. The old behavior here (also cutting early at `outSeconds` for
+// an outro) was itself a patch for a different, real bug — an outro clip
+// commonly still carries the original song's own tail before its new
+// material starts, so playing the clip from its own t=0 right after
+// cutting the main deck short replayed that overlapping tail a second
+// time. The actual fix for that lives on the clip's own playback instead
+// (see edge.clipStartSec / audioEngine.js's handleHandoff), not here.
 export function transitionTriggerElapsed(queueHead, edges, nowSongDurationSec) {
   if (queueHead && queueHead.mode === 'transition' && queueHead.edgeId) {
-    const edge = edges.find(e => e.id === queueHead.edgeId);
-    if (edge && edge.outSeconds != null) return edge.outSeconds;
-  }
-  if (queueHead && queueHead.ending === 'outro' && queueHead.edgeId) {
     const edge = edges.find(e => e.id === queueHead.edgeId);
     if (edge && edge.outSeconds != null) return edge.outSeconds;
   }

@@ -10,7 +10,7 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
   const [progress, setProgress] = useState(null); // { done, total } | null
   const [detected, setDetected] = useState(false);
   const [usedRealDetection, setUsedRealDetection] = useState(false);
-  const [realCue, setRealCue] = useState(null); // { outSeconds, inSeconds } | null
+  const [realCue, setRealCue] = useState(null); // { outSeconds, inSeconds, leftClipStartSec, rightClipEndSec } | null
   const [leftId, setLeftId] = useState(null);
   const [rightId, setRightId] = useState(null);
   const [fragLabel, setFragLabel] = useState('');
@@ -35,9 +35,9 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
       if (referenceableSongs.length > 0) {
         // Real detection: cross-correlate this file's head/tail against every
         // song that has a real reference track (see src/audioDetect.js).
-        const { leftId: l, rightId: r, leftOutSeconds, rightInSeconds } = await detectMatch(f, referenceableSongs, (done, total) => setProgress({ done, total }));
+        const { leftId: l, rightId: r, leftOutSeconds, rightInSeconds, leftClipStartSec, rightClipEndSec } = await detectMatch(f, referenceableSongs, (done, total) => setProgress({ done, total }));
         setLeftId(l); setRightId(r);
-        setRealCue((l || r) ? { outSeconds: leftOutSeconds, inSeconds: rightInSeconds } : null);
+        setRealCue((l || r) ? { outSeconds: leftOutSeconds, inSeconds: rightInSeconds, leftClipStartSec, rightClipEndSec } : null);
         setUsedRealDetection(true);
       } else {
         // No reference audio anywhere yet — nothing to correlate against, so
@@ -61,7 +61,22 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
 
   const leftSong = leftId ? songs[leftId] : null;
   const rightSong = rightId ? songs[rightId] : null;
-  const derivedType = leftId && rightId ? 'transition' : rightId ? 'intro' : leftId ? 'outro' : null;
+  // A song can't transition into itself — this used to be possible with
+  // exactly one real reference track in the library: the dropped file's
+  // head AND tail can both legitimately correlate against that one song
+  // (e.g. an outro clip that still carries a fair amount of the original
+  // track), and nothing stopped `leftId === rightId` from being read as a
+  // genuine two-song Transition (reported directly: a real outro upload,
+  // the only song in the library, saved and played back as a Transition
+  // from the song into itself — which then plays the fragment and starts
+  // the very same song's own master right after it, reading as the whole
+  // song "doubling up"). Treated as unresolved rather than guessed at:
+  // which single side is the "real" match isn't decidable from leftId/
+  // rightId alone (both scored above the match threshold), so this stays
+  // an explicit error the DJ resolves by hand (pick one side, or Free the
+  // other) rather than silently trusting one detector score over another.
+  const sameSongBothSides = !!(leftId && rightId && leftId === rightId);
+  const derivedType = sameSongBothSides ? null : leftId && rightId ? 'transition' : rightId ? 'intro' : leftId ? 'outro' : null;
   const pseudoCue = detected ? pseudoCuePoints(leftId, rightId) : null;
   const cue = detected
     ? {
@@ -82,6 +97,7 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
   // right here before it ever becomes part of the graph, so anything saved
   // is verified by definition (see core.js's edge.verified: always true).
   async function saveEdge() {
+    if (sameSongBothSides) { setError('Left and right are the same song — a transition can\'t lead a song into itself. Pick a different song on one side, or set it to Free.'); return; }
     if (!derivedType) { setError('This needs at least one song — pick a left and/or right side.'); return; }
     setUploading(true);
     const audio = await uploadAudioIfConfigured(file);
@@ -91,6 +107,16 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
       l: leftId || undefined, r: rightId || undefined,
       verified: true, label: fragLabel.trim() || undefined, audioUrl: audio.audioUrl || null,
       outSeconds: cue ? cue.outSeconds : undefined, inSeconds: cue ? cue.inSeconds : undefined,
+      // Where inside the CLIP's OWN audio (not the surrounding songs') its
+      // real content starts/ends — an outro clip commonly still carries the
+      // original song's tail before its own new material, and an intro clip
+      // commonly still carries a lead-in into the destination's own opening
+      // after its own new material ends. Only meaningful for Outro/Intro
+      // (a Transition splices at outSeconds/inSeconds on the real decks
+      // instead); undefined here falls back to playing the clip from/to its
+      // own natural start/end, same as before real detection existed.
+      clipStartSec: (derivedType === 'outro' && realCue && realCue.leftClipStartSec != null) ? realCue.leftClipStartSec : undefined,
+      clipEndSec: (derivedType === 'intro' && realCue && realCue.rightClipEndSec != null) ? realCue.rightClipEndSec : undefined,
     };
     onAddEdge(edge);
     setSaved({ label: derivedType, songId: rightId || leftId });
@@ -179,6 +205,13 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
               </div>
             </div>
 
+            {sameSongBothSides && (
+              <div className="error-note">
+                Left and right are both {leftSong.title} — a transition can't lead a song into itself.
+                Pick a different song on one side, or set it to Free.
+              </div>
+            )}
+
             <div className="detected-summary">
               <span className="tag tag-neutral">Type: {typeLabel}</span>
               {leftSong && rightSong && (
@@ -229,7 +262,7 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
 
         {error && <div className="error-note">{error}</div>}
         {detected && (
-          <button className="btn btn-primary btn-self-start" onClick={saveEdge} disabled={uploading}>
+          <button className="btn btn-primary btn-self-start" onClick={saveEdge} disabled={uploading || !derivedType}>
             {uploading ? (<><span className="spinner" /> Uploading…</>) : 'Sounds right — save ' + typeLabel}
           </button>
         )}

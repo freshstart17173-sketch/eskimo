@@ -7,7 +7,7 @@ import {
   introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, hopSummary, occludedTransitions, nodeOutputs, removeOutput,
   addTransitionConnection, autoconnectNodeTransitions, autoconnectFullGraph,
 } from '../core.js';
-import { engine } from '../audioEngine.js';
+import { engine, findOutroEdgeFor } from '../audioEngine.js';
 import { useTransportControls } from '../playbackControls.js';
 import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
 import GraphPane from './GraphPane.jsx';
@@ -604,15 +604,38 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // commitStartWire below and the plain `commitWire` reuse for End, since
   // END is just an ordinary target id as far as wireConnection is
   // concerned.
+  // Intro/Outro need a real produced edge to drag a connection onto/from,
+  // the same way Transition already does below — `leftSocketAvailability`/
+  // `rightSocketAvailability` (core.js) report Intro/Outro as always
+  // "available" on purpose (a plain click-toggle can mark a song as
+  // arriving-via-Intro or ending-via-Outro before any real clip is built
+  // yet, as a planning gesture with no wire attached), so they can't be
+  // reused here — a drag-connection is different: it's specifically
+  // wiring a real audio piece, and completing one where no such piece
+  // exists left Start (or another song) connected to a song's Intro
+  // socket that had nothing behind it (reported directly). `introEdgeFor`/
+  // `outroEdgeFor` check for the real edge itself, exactly like the
+  // Transition branch already does via `transitionEdgesBetween`.
   const isValidConnection = useCallback((conn) => {
     if (conn.source === conn.target) return false;
-    if (conn.source === START) return conn.targetHandle === 'left-none' || conn.targetHandle === 'left-intro';
-    if (conn.target === END) return conn.sourceHandle === 'right-none' || conn.sourceHandle === 'right-outro';
+    if (conn.source === START) {
+      if (conn.targetHandle === 'left-none') return true;
+      if (conn.targetHandle === 'left-intro') return !!introEdgeFor(visibleEdges, conn.target);
+      return false;
+    }
+    if (conn.target === END) {
+      if (conn.sourceHandle === 'right-none') return true;
+      if (conn.sourceHandle === 'right-outro') return !!outroEdgeFor(visibleEdges, conn.source);
+      return false;
+    }
     const sourceType = conn.sourceHandle.slice('right-'.length);
     const targetType = conn.targetHandle.slice('left-'.length);
     if (sourceType === 'transition' || targetType === 'transition') return sourceType === 'transition' && targetType === 'transition';
+    if (sourceType === 'outro' && !outroEdgeFor(visibleEdges, conn.source)) return false;
+    if (targetType === 'intro' && !introEdgeFor(visibleEdges, conn.target)) return false;
     return true;
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleEdges]);
 
   // A dropped connection always wires immediately, picking the first
   // produced candidate when several exist between that pair (or several
@@ -776,18 +799,45 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   const queueHead = session.queue[0] || (session.nowPlayingId ? playlistNextHop(activePlaylist, session.nowPlayingId) : null);
   const committedEdge = (queueHead && queueHead.mode === 'transition' && queueHead.edgeId)
     ? edges.find(e => e.id === queueHead.edgeId) : null;
-  let mixingIntoSong = null, crossfadePct = 0, mixingEdgeId = null;
-  if (nowSong && queueHead && queueHead.mode === 'transition') {
+  // An Outro-ending cut hop has a real produced fragment too — the same
+  // "something audible is about to switch in" case a Transition already
+  // covered, just missed entirely before (reported directly: the whole
+  // point of the bottom bar is to show the outro's own approach and then
+  // actually hear it arrive, and an Outro hop never lit any of this up at
+  // all). Reuses audioEngine.js's own `findOutroEdgeFor` rather than a
+  // second copy of "which outro edge did this hop mean".
+  const outroEdgeForHop = (queueHead && queueHead.mode === 'cut' && queueHead.ending === 'outro')
+    ? findOutroEdgeFor(edges, session.nowPlayingId, queueHead.edgeId) : null;
+  const fragmentEdge = committedEdge || outroEdgeForHop;
+  // The cue fraction along the CURRENT song's own timeline where its
+  // active fragment actually takes over — this drives the scrub bar's own
+  // colored trailing zone (see Playhead, SequencePane.jsx). Only a
+  // Transition has a real *early* cue point here (its main deck is
+  // deliberately cut short at outSeconds so the clip can carry the
+  // crossfade) — an Outro has no such point on the main deck at all: it
+  // always plays to its own full natural duration, so there's no earlier
+  // position to mark a zone from. `null` here means "no zone" (see
+  // Playhead's `cuePct != null` guard) rather than drawing one starting
+  // from the wrong (too-early) position; the light-up-on-crossing effect
+  // still fires for an Outro the instant the song naturally ends and its
+  // fragment begins (Playhead's `.in-crossfade` toggle doesn't depend on
+  // a zone existing).
+  const cuePct = (nowSong && committedEdge && committedEdge.outSeconds != null && nowSong.durationSec)
+    ? clamp((committedEdge.outSeconds / nowSong.durationSec) * 100, 0, 100) : null;
+  // Only actually "mixing" (and so pulsing the graph's own edge — see
+  // GraphPane's mixingEdgeId) within the real ~8s handoff window, same
+  // window the scrub bar's own light-up crosses into naturally once
+  // playback gets there. An Outro's trigger is always the song's own
+  // natural end (see cuePct's comment above) — never its edge's own
+  // outSeconds, which is a different, informational-only timecode (see
+  // occludedTransitions) not a real playback cue for an Outro.
+  let mixingEdgeId = null;
+  if (nowSong && fragmentEdge) {
     const triggerAt = committedEdge && committedEdge.outSeconds != null ? committedEdge.outSeconds : nowSong.durationSec;
-    if (triggerAt - elapsed <= 8) {
-      mixingIntoSong = songs[queueHead.id] || null;
-      crossfadePct = clamp(Math.round((1 - Math.max(0, triggerAt - elapsed) / 8) * 100), 0, 100);
-      mixingEdgeId = committedEdge ? committedEdge.id : null;
-    }
+    if (triggerAt - elapsed <= 8) mixingEdgeId = fragmentEdge.id;
   }
   // The player bar's "Next" preview — whatever queueHead already resolved
-  // to (a manual commit or the graph's own wiring), regardless of the
-  // 8-second crossfade lookahead mixingIntoSong is gated behind.
+  // to (a manual commit or the graph's own wiring).
   const nextSong = queueHead && queueHead.id !== END ? songs[queueHead.id] : null;
 
   // EndNode's "part of your plan"/"not queued" hint — now reads the graph's
@@ -934,7 +984,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           </button>
 
           <span className="mono-num player-bar-time">{fmtTime(elapsed)}</span>
-          <div className="player-bar-scrub"><Playhead onSeek={seekPlayhead} /></div>
+          <div className="player-bar-scrub"><Playhead cuePct={cuePct} onSeek={seekPlayhead} /></div>
           <span className="mono-num player-bar-time">{fmtTime(nowSong.durationSec)}</span>
 
           <div className="player-bar-next">
@@ -953,9 +1003,6 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
                     <AlbumArt className="player-bar-art-sm" url={nextSong ? nextSong.coverUrl : null} />
                     <span className="player-bar-next-title">{nextSong ? nextSong.title : ''}</span>
                   </>
-                )}
-                {mixingIntoSong && (
-                  <span className="player-bar-crossfade" style={{ '--pct': crossfadePct + '%' }} data-tooltip={crossfadePct + '% mixed'} />
                 )}
               </>
             ) : <span className="player-bar-next-empty">nothing wired next</span>}

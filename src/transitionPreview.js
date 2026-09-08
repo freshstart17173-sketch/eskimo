@@ -48,7 +48,7 @@ function sliceBuffer(ctx, buffer, startSec, endSec) {
 // cueSeconds, running forward edgeSeconds). Resolves a `local:` marker
 // the same way audioDetect.js's own detection path does, so this works
 // identically regardless of which storage a reference track used.
-export async function loadEdgeSlice(song, cueSeconds, side, edgeSeconds = 3) {
+export async function loadEdgeSlice(song, cueSeconds, side, edgeSeconds = 1) {
   if (!song || !song.audioUrl || cueSeconds == null) return null;
   const url = await resolveAudioUrl(song.audioUrl).catch(() => null);
   if (!url) return null;
@@ -64,7 +64,7 @@ export async function loadEdgeSlice(song, cueSeconds, side, edgeSeconds = 3) {
 // without recomputing boundaries of its own. A side with no reference
 // song (or no detected cue) simply contributes no slice — its region
 // stays 0 rather than the whole thing being withheld.
-export async function buildTransitionPreviewBuffer({ file, leftSong, rightSong, outSeconds, inSeconds, edgeSeconds = 3 }) {
+export async function buildTransitionPreviewBuffer({ file, leftSong, rightSong, outSeconds, inSeconds, edgeSeconds = 1 }) {
   const ctx = getAudioContext();
   const dropped = await decodeFile(file);
   const [leftSlice, rightSlice] = await Promise.all([

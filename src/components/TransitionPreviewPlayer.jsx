@@ -56,6 +56,16 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
   const scrubFillRef = useRef(null);
   const timeNowRef = useRef(null);
   const volumeRootRef = useRef(null);
+  const bracketRef = useRef(null);
+  // Which side of the transition boundary playback was on last frame — a
+  // plain boolean isn't enough to know when the switch actually *happens*
+  // versus merely *is*, and "lights up the moment playback reaches it" was
+  // the explicit ask, not just "the boundary looks different while inside
+  // it" (already covered by `.in-transition` bars). Compared frame to
+  // frame here rather than derived from React state, same reasoning as
+  // every other continuous value in this component.
+  const wasInTransitionRef = useRef(false);
+  const litTimerRef = useRef(null);
 
   useEffect(() => { dataRef.current = data; }, [data]);
 
@@ -78,6 +88,27 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
     if (playheadRef.current) playheadRef.current.style.left = pct + '%';
     if (scrubFillRef.current) scrubFillRef.current.style.width = pct + '%';
     if (timeNowRef.current) timeNowRef.current.textContent = fmtTime(clamp(offsetSec, 0, d.buffer.duration));
+
+    // "Lights up" the instant playback actually reaches the boundary —
+    // not just "looks different while inside it" (the `.in-transition`
+    // bar color already covers that) — retriggered on every crossing in
+    // either direction (entering the added audio, or landing back on the
+    // original past it) by removing and re-adding the class across a
+    // frame, since a CSS animation already at its end state doesn't
+    // replay just because the class never left.
+    const { leftSec, transitionSec } = d.regions;
+    const inTransitionNow = offsetSec >= leftSec && offsetSec < leftSec + transitionSec;
+    if (inTransitionNow !== wasInTransitionRef.current) {
+      wasInTransitionRef.current = inTransitionNow;
+      const el = bracketRef.current;
+      if (el) {
+        el.classList.remove('lit');
+        void el.offsetWidth; // force reflow so the next add restarts the animation
+        el.classList.add('lit');
+        if (litTimerRef.current) clearTimeout(litTimerRef.current);
+        litTimerRef.current = setTimeout(() => el.classList.remove('lit'), 500);
+      }
+    }
   }
 
   function currentOffset() {
@@ -154,6 +185,7 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
   useEffect(() => {
     stopPlayback();
     startOffsetRef.current = 0;
+    wasInTransitionRef.current = false;
     setData(null); setError('');
     if (!file || (!leftSong && !rightSong)) return undefined;
     let cancelled = false;
@@ -175,7 +207,7 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
   }, [file, leftSong && leftSong.id, rightSong && rightSong.id, outSeconds, inSeconds]);
 
   // Stop cleanly on unmount (navigating away from Add Audio mid-playback).
-  useEffect(() => () => stopPlayback(), []);
+  useEffect(() => () => { stopPlayback(); if (litTimerRef.current) clearTimeout(litTimerRef.current); }, []);
 
   // Dual-target scrub: pointerdown/pointermove on the scrub bar AND the
   // waveform itself. Matches Playhead's own (SequencePane.jsx) "preview
@@ -258,6 +290,10 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
   const heights = barHeights(envelope);
   const bracketStartPct = total ? (regions.leftSec / total) * 100 : 0;
   const bracketEndPct = total ? ((regions.leftSec + regions.transitionSec) / total) * 100 : 0;
+  // Matches AddAudio.jsx's own derivedType logic — which side(s) actually
+  // matched decides the label, not a hardcoded "Transition" regardless of
+  // type (the exact class of mislabeling reported elsewhere in this round).
+  const bracketLabel = leftSong && rightSong ? 'Transition' : rightSong ? 'Intro' : 'Outro';
 
   return (
     <div className="transition-preview">
@@ -267,9 +303,9 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
           const inTransition = t >= regions.leftSec && t < regions.leftSec + regions.transitionSec;
           return <span key={i} className={'transition-preview-bar' + (inTransition ? ' in-transition' : '')} style={{ height: h + '%' }} />;
         })}
-        <div className="transition-preview-bracket" style={{ left: bracketStartPct + '%', width: (bracketEndPct - bracketStartPct) + '%' }} />
+        <div className="transition-preview-bracket" ref={bracketRef} style={{ left: bracketStartPct + '%', width: (bracketEndPct - bracketStartPct) + '%' }} />
         <div className="transition-preview-bracket-label" style={{ left: ((bracketStartPct + bracketEndPct) / 2) + '%' }}>
-          Transition · {fmtTime(regions.transitionSec)}
+          {bracketLabel} · {fmtTime(regions.transitionSec)}
         </div>
         <div className="transition-preview-playhead" ref={playheadRef} />
       </div>

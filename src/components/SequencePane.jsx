@@ -97,17 +97,31 @@ function Card({ row, onClick, onMouseEnter, onMouseLeave, onFocusRow, readOnly }
 // real audio deck, via `onSeek` — on release, the same "preview while
 // dragging, commit on drop" pattern most scrubbers use, rather than
 // restarting the audio buffer on every pixel of movement.
-export function Playhead({ onSeek }) {
+// `cuePct` (0-100, optional) marks where along the CURRENT song's own
+// timeline its wired fragment (a transition or an outro) actually takes
+// over — the colored zone from there to the end of the track, visible the
+// whole time a real fragment is wired, not just in the last few seconds.
+// The zone itself "lights up" (a brief flash, `.lit`) at the exact frame
+// playback actually crosses into or back out of it — direct instruction:
+// a colored segment alone only shows *where* it is, not *that playback
+// has reached it*, and this used to live as two separate, easy-to-miss
+// pieces (this bar plus a tiny standalone "% mixed" dot elsewhere in the
+// player bar) that never actually lit up together with the real audio.
+export function Playhead({ cuePct, onSeek }) {
   const trackRef = useRef(null);
   const fillRef = useRef(null);
   const scrubberRef = useRef(null);
+  const zoneRef = useRef(null);
   const draggingRef = useRef(false);
   const moveRef = useRef(null);
   const upRef = useRef(null);
+  const wasFragmentRef = useRef(false);
+  const litTimerRef = useRef(null);
 
-  function setDisplayPct(p) {
+  function setDisplayPct(p, inFragment) {
     if (fillRef.current) fillRef.current.style.width = p + '%';
     if (scrubberRef.current) scrubberRef.current.style.left = p + '%';
+    if (trackRef.current) trackRef.current.classList.toggle('in-crossfade', !!inFragment);
   }
   function pctFromEvent(e) {
     const rect = trackRef.current.getBoundingClientRect();
@@ -151,11 +165,36 @@ export function Playhead({ onSeek }) {
     // stale or fabricated in-between value.
     else if (pos.phase === 'fragment') pct = 100;
     else pct = 0;
-    setDisplayPct(pct);
+    const inFragment = pos.phase === 'fragment';
+    setDisplayPct(pct, inFragment);
+    if (inFragment !== wasFragmentRef.current) {
+      wasFragmentRef.current = inFragment;
+      // Flash the fill itself — the thing actually switching color — not
+      // just the zone marker: an Outro has no early zone at all (no real
+      // early cue point to mark), so gating the flash on the zone existing
+      // would silently drop the "lights up at the crossing" signal for
+      // exactly that case. Also flash the zone when one exists (a
+      // Transition), for a stronger signal spanning the whole colored span.
+      [fillRef.current, zoneRef.current].forEach((el) => {
+        if (!el) return;
+        el.classList.remove('lit');
+        void el.offsetWidth; // force reflow so re-adding the class replays the flash
+        el.classList.add('lit');
+      });
+      if (litTimerRef.current) clearTimeout(litTimerRef.current);
+      litTimerRef.current = setTimeout(() => {
+        if (fillRef.current) fillRef.current.classList.remove('lit');
+        if (zoneRef.current) zoneRef.current.classList.remove('lit');
+      }, 500);
+    }
   });
+  useEffect(() => () => { if (litTimerRef.current) clearTimeout(litTimerRef.current); }, []);
 
   return (
     <div className="playhead-track" ref={trackRef} onPointerDown={onPointerDown}>
+      {cuePct != null && (
+        <div className="playhead-cue-zone" ref={zoneRef} style={{ left: cuePct + '%', width: (100 - cuePct) + '%' }} />
+      )}
       <div className="playhead-fill" ref={fillRef} />
       <div className="playhead-scrubber" ref={scrubberRef} />
     </div>

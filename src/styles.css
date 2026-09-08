@@ -453,7 +453,39 @@ a { color: var(--accent); }
 .seq-mixing-title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-mixing-artist { font-size: 10.5px; color: rgba(252, 252, 252, .6); }
 .seq-mixing-pct { font-family: var(--font-mono); font-weight: 600; font-size: 12px; color: var(--paper-fixed); flex: none; }
+/* The fill re-colors the instant playback actually crosses into a wired
+   fragment (Playhead's own frame-to-frame phase check) — a different
+   signal from the cue-zone marker below (which shows *where* the zone is,
+   the whole time it's wired, not just once reached). */
 .playhead-track.in-crossfade .playhead-fill { background: var(--state-later); }
+/* The colored trailing zone itself — where a wired transition/outro will
+   take over, visible for as long as one is wired at all, not gated to a
+   short lookahead window the way the crossfade percentage used to be.
+   Sits behind the fill/scrubber (z-index unset, painted first in DOM
+   order) so the ink fill visibly sweeps over it exactly like the rest of
+   the track as playback proceeds through it. */
+.playhead-cue-zone { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--state-later); opacity: .45; pointer-events: none; }
+/* Flashes the moment playback actually reaches (or leaves) the zone —
+   "the switch...lights up and we can see that playback has reached it",
+   direct instruction, distinct from the zone's own always-on color above.
+   Retriggered by the JS removing/re-adding this class across a frame. */
+.playhead-cue-zone.lit { animation: playheadZoneFlash .5s ease-out; }
+@keyframes playheadZoneFlash {
+  0% { opacity: 1; box-shadow: 0 0 8px 2px rgba(255, 255, 255, .9); }
+  100% { opacity: .45; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
+/* Same flash, on the fill itself rather than the zone marker — an Outro
+   has no early zone to flash (it has no early cue point at all, see
+   PerformPage.jsx's cuePct), but the crossing itself — the fill actually
+   switching to the "later" color — still needs to visibly light up the
+   instant it happens, not just silently change color. Also fires for a
+   Transition, alongside the zone's own flash, for a stronger signal right
+   where the eye already is (on the fill, not the static zone behind it). */
+.playhead-fill.lit { animation: playheadFillFlash .5s ease-out; }
+@keyframes playheadFillFlash {
+  0% { box-shadow: 0 0 8px 2px rgba(255, 255, 255, .9); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
 .seq-now-card .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper-fixed); }
 /* a regular playhead — elapsed/total, not a countdown — plus the missing
    manual "skip to next" action right where you'd look for it */
@@ -638,7 +670,12 @@ a { color: var(--accent); }
 .player-bar-time { font-size: 10.5px; color: var(--muted); flex: none; width: 32px; }
 .player-bar-time:last-of-type { text-align: right; }
 .player-bar-scrub { flex: 1; min-width: 100px; }
-.player-bar .playhead-track { background: rgba(19, 19, 19, .12); margin-top: 0; }
+/* Taller than the default 4px specifically here — this is the one place
+   the colored cue-zone/light-up actually needs to read at a glance during
+   a live set, not just a thin decorative line (direct instruction: "really
+   a playbar cause it has to be tall enough to see it"). */
+.player-bar .playhead-track { background: rgba(19, 19, 19, .12); margin-top: 0; height: 10px; border-radius: 4px; }
+.player-bar .playhead-fill, .player-bar .playhead-cue-zone { border-radius: 4px; }
 /* The volume control collapses to a plain icon and only opens a slider on
    click (see VolumeControl, PerformPage.jsx) — "most things should
    disappear until clicked" applied to the one always-open control this bar
@@ -662,13 +699,6 @@ a { color: var(--accent); }
 .player-bar-next-title { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-bar-next-end { font-style: italic; color: var(--muted); }
 .player-bar-next-empty { font-size: 11px; color: var(--faint); font-style: italic; }
-/* A small filling dot standing in for "how far into the crossfade we are" —
-   deliberately tiny (this is a glance-at indicator, not a second playhead);
-   `--pct` is set inline per-render. */
-.player-bar-crossfade {
-  flex: none; width: 20px; height: 20px; border-radius: 50%; position: relative;
-  background: conic-gradient(var(--accent) var(--pct), var(--line) 0);
-}
 
 /* ---------------------------------------------------------------
    Graph canvas (React Flow) — themed to match the flat/paper design
@@ -1218,6 +1248,18 @@ a { color: var(--accent); }
 .transition-preview-bar { flex: 1; min-width: 0; border-radius: 1px; background: var(--line); }
 .transition-preview-bar.in-transition { background: var(--accent); }
 .transition-preview-bracket { position: absolute; bottom: -2px; height: 3px; background: var(--accent); border-radius: 2px; pointer-events: none; }
+/* Flashes the instant playback actually crosses into or back out of the
+   added audio (TransitionPreviewPlayer's own frame-to-frame crossing
+   check) — distinct from `.in-transition`'s always-on color, which only
+   ever shows "this part IS the transition", not "playback just reached
+   it". Retriggered by the JS removing/re-adding this class across a
+   frame, so a `.lit` class already present at animation-end still
+   replays on the next crossing. */
+.transition-preview-bracket.lit { animation: transitionBracketFlash .5s ease-out; }
+@keyframes transitionBracketFlash {
+  0% { box-shadow: 0 0 0 6px rgba(255, 255, 255, .9); background: #fff; }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); background: var(--accent); }
+}
 .transition-preview-bracket-label {
   position: absolute; bottom: 9px; font-family: var(--font-mono); font-size: 9px; font-weight: 600;
   color: var(--accent-ink); white-space: nowrap; transform: translateX(-50%); pointer-events: none;

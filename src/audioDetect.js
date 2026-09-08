@@ -318,6 +318,8 @@ export async function detectMatch(file, candidateSongs, onProgress) {
 
   const matchedLeft = bestLeftScore >= MATCH_THRESHOLD;
   const matchedRight = bestRightScore >= MATCH_THRESHOLD;
+  const leftOutSeconds = matchedLeft ? Math.max(0, (bestLeftRefDuration - EDGE_SECONDS) + bestLeftLag * WINDOW_SEC) : null;
+  const rightInSeconds = matchedRight ? Math.max(0, bestRightLag * WINDOW_SEC) : null;
   return {
     leftId: matchedLeft ? bestLeft : null,
     rightId: matchedRight ? bestRight : null,
@@ -325,9 +327,35 @@ export async function detectMatch(file, candidateSongs, onProgress) {
     rightConfidence: bestRightScore,
     // OUT point = where in the full left-song timeline the tail window
     // (which starts at refDuration - EDGE_SECONDS) plus the winning lag falls.
-    leftOutSeconds: matchedLeft ? Math.max(0, (bestLeftRefDuration - EDGE_SECONDS) + bestLeftLag * WINDOW_SEC) : null,
+    // Real, meaningful splice point for a Transition (source stops here,
+    // the clip picks up) — NOT used the same way for an Outro (see
+    // leftClipStartSec below).
+    leftOutSeconds,
     // IN point = where in the right song's own timeline (starting at 0) the
     // winning lag falls — the head window already starts at absolute 0.
-    rightInSeconds: matchedRight ? Math.max(0, bestRightLag * WINDOW_SEC) : null,
+    // Same story in reverse: real for a Transition, not for an Intro (see
+    // rightClipEndSec below).
+    rightInSeconds,
+    // Where INSIDE THE DROPPED CLIP ITSELF the left song's own overlap
+    // ends and genuinely new outro material begins — derived from the same
+    // correlation lag, just solved for the dropped file's own timeline
+    // instead of the reference's. An outro clip is commonly produced by
+    // recording over the tail of the original master, so its own t=0
+    // already duplicates audio the main deck is *also* about to play
+    // naturally — an outro has no real "out point" on the original song
+    // (it always plays to its own natural end, unlike a Transition's early
+    // splice), so the clip needs its OWN internal skip instead: starting
+    // it at this offset means only the new material actually plays,
+    // instead of replaying the overlapping tail a second time back to
+    // back with the main deck's own natural ending.
+    leftClipStartSec: matchedLeft ? clamp(bestLeftRefDuration - leftOutSeconds, 0, dropped.duration) : null,
+    // The mirror image for an Intro: where INSIDE THE CLIP the destination
+    // song's own beginning (t=0) falls — an intro has no real "in point" on
+    // the destination either (it always starts fresh at 0), so the CLIP
+    // itself needs to stop here instead of playing to its own natural end,
+    // or its own trailing overlap would duplicate the destination's
+    // opening the instant the destination's real master takes over.
+    rightClipEndSec: matchedRight ? clamp(dropped.duration - EDGE_SECONDS - rightInSeconds, 0, dropped.duration) : null,
   };
 }
+function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }

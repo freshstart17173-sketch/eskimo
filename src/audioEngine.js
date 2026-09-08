@@ -154,7 +154,15 @@ class AudioEngine {
     this._current = { source, gain, buffer, kind: 'main', songId, startCtxTime, offsetSec };
   }
 
-  _playClipToEnd(buffer) {
+  // `offsetSec` skips into the clip's OWN timeline before playing (an outro
+  // clip commonly still carries the original song's own tail before its
+  // new material starts — see edge.clipStartSec). `clipEndSec`, when given,
+  // is the absolute position in the clip's OWN timeline to stop at instead
+  // of playing to its natural end (an intro clip commonly still carries a
+  // trailing overlap into the destination's own opening — edge.clipEndSec).
+  // Both default to "play the whole clip", the same behavior as before
+  // either concept existed.
+  _playClipToEnd(buffer, offsetSec = 0, clipEndSec = null) {
     return new Promise((resolve) => {
       const ctx = this.ensureContext();
       const source = ctx.createBufferSource();
@@ -163,8 +171,10 @@ class AudioEngine {
       source.connect(gain); gain.connect(this.master);
       source.onended = () => resolve();
       const startCtxTime = ctx.currentTime;
-      source.start(startCtxTime);
-      this._current = { source, gain, buffer, kind: 'clip', startCtxTime, offsetSec: 0, resolve };
+      const playDurationSec = clipEndSec != null ? Math.max(0, clipEndSec - offsetSec) : null;
+      if (playDurationSec != null) source.start(startCtxTime, offsetSec, playDurationSec);
+      else source.start(startCtxTime, offsetSec);
+      this._current = { source, gain, buffer, kind: 'clip', startCtxTime, offsetSec, resolve };
     });
   }
 
@@ -270,8 +280,12 @@ class AudioEngine {
     const planToken = ++this._planToken;
     this.cancelPlan();
 
-    const fragmentUrls = (hopDecision.fragmentUrls || []).filter(Boolean);
-    const urlsToLoad = [...fragmentUrls, ...(hopDecision.destUrl ? [hopDecision.destUrl] : [])];
+    // { url, offsetSec?, clipEndSec? } per fragment — offsetSec/clipEndSec
+    // trim into the fragment's OWN timeline (an outro's own duplicated tail,
+    // an intro's own trailing overlap — see edge.clipStartSec/clipEndSec),
+    // independent of the surrounding songs' own cue points.
+    const fragments = (hopDecision.fragments || []).filter((f) => f && f.url);
+    const urlsToLoad = [...fragments.map((f) => f.url), ...(hopDecision.destUrl ? [hopDecision.destUrl] : [])];
     const buffers = await Promise.all(urlsToLoad.map((url) => this.loadBuffer(url).catch(() => null)));
     // Superseded while awaiting buffers — a newer scheduleHop call, a
     // seek, or a stop already happened. Bail without touching the graph;
@@ -279,13 +293,13 @@ class AudioEngine {
     if (planToken !== this._planToken) return null;
     if (this._current !== current) return null;
 
-    const fragmentBuffers = buffers.slice(0, fragmentUrls.length);
+    const fragmentBuffers = buffers.slice(0, fragments.length);
     const destBuffer = hopDecision.destUrl ? buffers[buffers.length - 1] : null;
     // A fragment or the destination failed to load (network error, bad
     // file) — bail rather than schedule a chain with a silent gap where
     // real audio was supposed to be; the caller's existing reactive path
     // is the fallback for this rare case, same as today.
-    if (fragmentUrls.length && fragmentBuffers.some((b) => !b)) return null;
+    if (fragments.length && fragmentBuffers.some((b) => !b)) return null;
     if (hopDecision.destUrl && !destBuffer) return null;
 
     const triggerCtxTime = current.startCtxTime + (hopDecision.cueOffsetSec - current.offsetSec);
@@ -298,14 +312,30 @@ class AudioEngine {
     try { current.source.stop(triggerCtxTime); } catch (e) { /* already stopped */ }
 
     let stepTime = triggerCtxTime;
-    const fragmentSteps = []; // { buffer, startCtxTime } per fragment — see getPlaybackPosition
-    for (const buffer of fragmentBuffers) {
+    const fragmentSteps = []; // { buffer, startCtxTime, offsetSec, durationSec } per fragment — see getPlaybackPosition
+    for (let i = 0; i < fragmentBuffers.length; i++) {
+      const buffer = fragmentBuffers[i];
+      const spec = fragments[i];
+      const offsetSec = spec.offsetSec || 0;
+      const playDurationSec = spec.clipEndSec != null ? Math.max(0, spec.clipEndSec - offsetSec) : (buffer.duration - offsetSec);
       const node = this._createSource(buffer);
-      node.start(stepTime);
+      if (spec.clipEndSec != null) node.start(stepTime, offsetSec, playDurationSec);
+      else node.start(stepTime, offsetSec);
       pendingNodes.push(node);
-      fragmentSteps.push({ buffer, startCtxTime: stepTime });
-      stepTime += buffer.duration;
+      fragmentSteps.push({ buffer, startCtxTime: stepTime, offsetSec, durationSec: playDurationSec });
+      stepTime += playDurationSec;
     }
+
+    // The ctx-time everything scheduled by this call has finished by —
+    // equal to destStartCtxTime when there's a real destination, but also
+    // meaningful when there isn't one (an End-Set outro): the moment the
+    // last fragment's own playback actually ends. Stored separately from
+    // destStartCtxTime (which stays null for a no-destination hop) so a
+    // caller checking "has this plan already fully fired" never has to
+    // treat a null destStartCtxTime as "always already past" — `now >=
+    // null` coerces to `now >= 0`, which is true from the very first tick
+    // after scheduling, long before the fragment itself actually played.
+    const planEndCtxTime = stepTime;
 
     let destStartCtxTime = null, destNode = null;
     if (destBuffer) {
@@ -316,7 +346,7 @@ class AudioEngine {
     }
 
     const plan = {
-      triggerCtxTime, destStartCtxTime, destSongId: hopDecision.destSongId || null,
+      triggerCtxTime, destStartCtxTime, planEndCtxTime, destSongId: hopDecision.destSongId || null,
       destNode, destBuffer, destOffsetSec: hopDecision.destOffsetSec || 0, pendingNodes, fragmentSteps,
     };
     this._plan = plan;
@@ -359,7 +389,7 @@ class AudioEngine {
       for (let i = plan.fragmentSteps.length - 1; i >= 0; i--) {
         const step = plan.fragmentSteps[i];
         if (now >= step.startCtxTime) {
-          return { phase: 'fragment', elapsedSec: now - step.startCtxTime, durationSec: step.buffer.duration };
+          return { phase: 'fragment', elapsedSec: now - step.startCtxTime, durationSec: step.durationSec };
         }
       }
     }
@@ -411,7 +441,7 @@ class AudioEngine {
       const introBuf = await this.loadBuffer(introEdge.audioUrl).catch(() => null);
       if (token !== this._playToken) return false;
       if (introBuf) {
-        await this._playClipToEnd(introBuf);
+        await this._playClipToEnd(introBuf, 0, introEdge.clipEndSec != null ? introEdge.clipEndSec : null);
         if (token !== this._playToken) return false;
       }
     }
@@ -449,7 +479,7 @@ class AudioEngine {
       if (ending === 'outro' && outroEdge && outroEdge.audioUrl) {
         const buf = await this.loadBuffer(outroEdge.audioUrl).catch(() => null);
         if (token !== this._playToken) return;
-        if (buf) await this._playClipToEnd(buf);
+        if (buf) await this._playClipToEnd(buf, outroEdge.clipStartSec || 0);
       }
       return;
     }
@@ -474,17 +504,22 @@ class AudioEngine {
     }
 
     // cut/outro hop: an outro clip leaving the old song, then an intro
-    // clip starting the new one, whichever of the two actually exist.
+    // clip starting the new one, whichever of the two actually exist. The
+    // outro clip starts past its own duplicated tail (clipStartSec); the
+    // intro clip stops before its own trailing overlap into the
+    // destination (clipEndSec) — the main deck already played to its own
+    // full duration before this ran, and the destination always starts
+    // fresh at 0 right after, so neither clip needs to touch those points.
     if (ending === 'outro' && outroEdge && outroEdge.audioUrl) {
       const buf = await this.loadBuffer(outroEdge.audioUrl).catch(() => null);
       if (token !== this._playToken) return;
-      if (buf) await this._playClipToEnd(buf);
+      if (buf) await this._playClipToEnd(buf, outroEdge.clipStartSec || 0);
       if (token !== this._playToken) return;
     }
     if (starting === 'intro' && introEdge && introEdge.audioUrl) {
       const buf = await this.loadBuffer(introEdge.audioUrl).catch(() => null);
       if (token !== this._playToken) return;
-      if (buf) await this._playClipToEnd(buf);
+      if (buf) await this._playClipToEnd(buf, 0, introEdge.clipEndSec != null ? introEdge.clipEndSec : null);
       if (token !== this._playToken) return;
     }
     const mainBuf = await this.loadBuffer(destSong.audioUrl).catch(() => null);
@@ -513,7 +548,7 @@ export const engine = new AudioEngine();
 // performAdvance and buildHopDecision so there's exactly one place that
 // resolves "which outro edge did this hop actually mean" — two separate
 // copies of this same lookup is exactly how they'd eventually disagree.
-function findOutroEdgeFor(edges, nowPlayingId, edgeId) {
+export function findOutroEdgeFor(edges, nowPlayingId, edgeId) {
   return (edgeId && edges.find((e) => e.id === edgeId)) || edges.find((e) => e.type === 'outro' && e.l === nowPlayingId);
 }
 
@@ -550,10 +585,14 @@ export function prefetchHop(hop, nowPlayingId, edges, songs) {
 export function buildHopDecision(hop, nowPlayingId, songs, edges, currentBufferDurationSec) {
   if (!hop) return null;
   if (hop.id === END) {
-    if (hop.ending !== 'outro') return { cueOffsetSec: currentBufferDurationSec, fragmentUrls: [], destSongId: null, destUrl: null, destOffsetSec: 0 };
+    if (hop.ending !== 'outro') return { cueOffsetSec: currentBufferDurationSec, fragments: [], destSongId: null, destUrl: null, destOffsetSec: 0 };
     const edge = findOutroEdgeFor(edges, nowPlayingId, hop.edgeId);
-    const cueOffsetSec = edge && edge.outSeconds != null ? edge.outSeconds : currentBufferDurationSec;
-    return { cueOffsetSec, fragmentUrls: edge && edge.audioUrl ? [edge.audioUrl] : [], destSongId: null, destUrl: null, destOffsetSec: 0 };
+    // An outro has no out point on the main deck — it always plays to its
+    // own full natural duration; the clip's own trim (clipStartSec, below)
+    // is what avoids replaying material the main deck already played, not
+    // an early cutoff here.
+    const fragments = edge && edge.audioUrl ? [{ url: edge.audioUrl, offsetSec: edge.clipStartSec || 0 }] : [];
+    return { cueOffsetSec: currentBufferDurationSec, fragments, destSongId: null, destUrl: null, destOffsetSec: 0 };
   }
   const destSong = songs[hop.id];
   if (!destSong) return null;
@@ -561,18 +600,23 @@ export function buildHopDecision(hop, nowPlayingId, songs, edges, currentBufferD
     const edge = edges.find((e) => e.id === hop.edgeId);
     const cueOffsetSec = edge && edge.outSeconds != null ? edge.outSeconds : currentBufferDurationSec;
     return {
-      cueOffsetSec, fragmentUrls: edge && edge.audioUrl ? [edge.audioUrl] : [],
+      cueOffsetSec, fragments: edge && edge.audioUrl ? [{ url: edge.audioUrl }] : [],
       destSongId: hop.id, destUrl: destSong.audioUrl || null, destOffsetSec: edge && edge.inSeconds != null ? edge.inSeconds : 0,
     };
   }
   // cut, possibly with an outro leaving the old song and/or an intro
   // starting the new one — same up-to-three-piece chain handleHandoff's
-  // sequential version plays, just scheduled all at once instead.
+  // sequential version plays, just scheduled all at once instead. Neither
+  // an outro nor an intro moves the cue point: the outro's main deck always
+  // plays to its own full duration (no out point), and the destination
+  // always starts at 0 (no in point) — each clip's own trim handles the
+  // rest (clipStartSec/clipEndSec).
   const outroEdge = hop.ending === 'outro' ? findOutroEdgeFor(edges, nowPlayingId, hop.edgeId) : null;
   const introEdge = hop.starting === 'intro' ? edges.find((e) => e.type === 'intro' && e.r === hop.id) : null;
-  const cueOffsetSec = outroEdge && outroEdge.outSeconds != null ? outroEdge.outSeconds : currentBufferDurationSec;
-  const fragmentUrls = [outroEdge ? outroEdge.audioUrl : null, introEdge ? introEdge.audioUrl : null].filter(Boolean);
-  return { cueOffsetSec, fragmentUrls, destSongId: hop.id, destUrl: destSong.audioUrl || null, destOffsetSec: 0 };
+  const fragments = [];
+  if (outroEdge && outroEdge.audioUrl) fragments.push({ url: outroEdge.audioUrl, offsetSec: outroEdge.clipStartSec || 0 });
+  if (introEdge && introEdge.audioUrl) fragments.push({ url: introEdge.audioUrl, clipEndSec: introEdge.clipEndSec != null ? introEdge.clipEndSec : null });
+  return { cueOffsetSec: currentBufferDurationSec, fragments, destSongId: hop.id, destUrl: destSong.audioUrl || null, destOffsetSec: 0 };
 }
 
 // The tick's job once it notices a scheduled Plan already fired in real

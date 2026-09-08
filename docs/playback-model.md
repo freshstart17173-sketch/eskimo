@@ -676,3 +676,145 @@ A future Tauri/desktop build doesn't change any of this — Web Audio's
 own scheduling and clock are already immune to the browser
 timer-throttling concerns this section addresses, so nothing here is a
 web-specific workaround being designed around.
+
+## 8. Round 4 — an outro has no out point, an intro has no in point (implemented)
+
+Direct correction from the DJ, superseding part of §1/§2 above: an
+**Outro** has no real early cue point on the main deck at all, and an
+**Intro** has no real cue point on the destination at all. Concretely:
+
+- **Outro**: the main deck always plays to its own full natural duration —
+  never cuts early at some `outSeconds`, however that value was detected
+  or entered. The outro clip is what carries a transition-like feel, but
+  the *song being left* is never truncated for it.
+- **Intro**: the destination song always starts at offset 0 — never at
+  some detected `inSeconds`. The intro clip is what leads into the song;
+  the song itself always starts fresh.
+
+§1/§2's "a fragment splices out at `outSeconds` and back in at `inSeconds`"
+is only true for a **Transition** (a real two-sided splice with a
+deliberately-shortened main deck on both sides — that mechanic is
+unchanged). `outSeconds`/`inSeconds` on an Outro/Intro edge are still
+stored and still meaningful — occlusion-clash detection
+(`core.js`'s `occludedTransitions`) uses them to warn when two produced
+pieces off the same song would clash — but they are informational
+timecodes on the *reference song's own master*, not a live playback
+trigger, for Outro/Intro.
+
+### Why the old "cut early" behavior existed, and the real fix
+
+An earlier fix (§3, this doc's own Finding-shaped comment in
+`transitionTriggerElapsed`) had the main deck cut early at an outro's
+`outSeconds`, matching Transition's own mechanic — reasoning that the
+outro clip is commonly uploaded still carrying the original song's own
+tail (so detection can correlate it), and playing the clip from its own
+t=0 right after the *full* song would replay that overlap a second time.
+That reasoning about the overlap was correct; cutting the *main song*
+short to avoid it was not the right fix, and directly caused two of this
+round's reported symptoms: it's why a real outro upload measured with a
+3:18 duration only ever played "the regular version instead" up to the
+early cutoff, and a large part of why re-seeking near the end could
+double up material (the main deck's own natural tail and the outro
+clip's copy of it, both ending up scheduled).
+
+**The actual fix**: never move the main deck's own cue point. Instead,
+trim the *clip's own internal timeline*:
+
+- `audioDetect.js`'s `detectMatch` now also returns `leftClipStartSec` /
+  `rightClipEndSec` — solving the same correlation lag for the **dropped
+  file's own timeline** instead of the reference song's. `leftClipStartSec`
+  is where, inside the outro clip itself, the original song's own overlap
+  ends and genuinely new material begins. `rightClipEndSec` is where,
+  inside the intro clip itself, the destination's own overlap begins (the
+  clip should stop before there).
+- `AddAudio.jsx` saves these as `edge.clipStartSec` (Outro) /
+  `edge.clipEndSec` (Intro) — undefined when there was no confident
+  detection to derive them from, which falls back to the pre-existing
+  "play the whole clip" behavior.
+- `audioEngine.js`: `_playClipToEnd(buffer, offsetSec, clipEndSec)` now
+  takes the third `AudioBufferSourceNode.start(when, offset, duration)`
+  argument — an outro clip starts at `offsetSec = edge.clipStartSec || 0`
+  (skips its own duplicated tail); an intro clip stops at
+  `clipEndSec = edge.clipEndSec` (never plays its own trailing overlap).
+  `buildHopDecision`'s outro branches (both an End-Set outro and a
+  cut-ending-in-outro hop) now always use `currentBufferDurationSec` as
+  the cue point, never `edge.outSeconds`; its fragment descriptors carry
+  the same `offsetSec`/`clipEndSec` through to `scheduleHop`'s
+  per-fragment `.start()` calls. `core.js`'s `transitionTriggerElapsed`
+  (the reactive fallback path, for a song with no real audio to schedule
+  the Plan against) now only special-cases `mode === 'transition'`;
+  an outro-ending hop always falls through to the full song duration.
+
+Verified via the instrumented-`AudioBufferSourceNode.start()` technique
+against real synthetic WAVs: an 8s main song plus an outro clip with
+`clipStartSec=3` schedules the clip's own `start(8, 3)` — the main deck's
+own `stop()` also lands at 8, never earlier — and symmetrically an intro
+clip with `clipEndSec=5` schedules `start(0, 0, 5)` with the destination
+starting immediately after at offset 0, not at the clip's own natural end.
+
+### Confirmed bug found and fixed alongside this: premature `consumePlan`
+
+While verifying the above, the live scrub bar's colored-zone/light-up
+behavior (the `Playhead` redesign in `SequencePane.jsx`) never actually
+lit up for an **End-Set outro** hop specifically,
+despite the audio itself scheduling and playing correctly underneath.
+Root cause, in `App.jsx`'s tick: it treated a Plan as "already fired" via
+`engine.ctx.currentTime >= plan.destStartCtxTime` — but an End-Set outro
+has no destination, so `destStartCtxTime` is `null`, and `now >= null`
+coerces to `now >= 0` in JS, which is true from the very first tick after
+scheduling. That called `engine.consumePlan` and wiped `_plan` long
+before the outro fragment actually started, which is exactly why
+`getPlaybackPosition` could never report `phase: 'fragment'` for this
+case — there was no plan left to check against by the time the crossing
+actually happened. It also meant `syncSessionFromFiredPlan` set
+`session.setEnded = true` immediately upon scheduling, not once the
+outro clip actually finished — confirmed separately: `session.setEnded`
+now only flips true once the real elapsed time covers the full main song
+plus the full outro clip, not at the main song's own natural end.
+
+Fixed by giving the Plan its own `planEndCtxTime` (the ctx-time everything
+scheduled by that call finishes, whether or not there's a real
+destination) and checking that instead — `destStartCtxTime` still exists
+and is still `null` exactly when there's no destination, but is no longer
+used as a stand-in for "has this plan fired" outside of that case.
+
+### Also fixed this round, same "mislabeling" family of bug
+
+- **Self-transition**: `AddAudio.jsx`'s `derivedType` computation
+  (`leftId && rightId ? 'transition' : ...`) never checked
+  `leftId !== rightId` — with exactly one real reference song in the
+  library, `detectMatch`'s independent left/right correlation can
+  legitimately match that same song on both sides (e.g. an outro clip
+  that still carries a fair amount of the original), which then read as a
+  genuine two-song Transition from a song into itself. Reported directly:
+  a real outro upload, saved and played back this way, sounded like the
+  song "doubling up". Fixed with an explicit, un-auto-resolved error
+  state (`sameSongBothSides`) — which single side is correct isn't
+  decidable from the scores alone, so the DJ picks by hand rather than one
+  detector score silently winning over the other.
+- **Start→Intro (and general Outro/Intro) drag-connect validity**:
+  `isValidConnection` (`PerformPage.jsx`) let Start connect to a song's
+  Intro socket, and a song's Outro connect to End, with no check that a
+  real produced edge existed for it — unlike Transition, which already
+  required one. Fixed by adding the same `introEdgeFor`/`outroEdgeFor`
+  existence checks Transition already had.
+- **The Add Audio preview's own bracket label** (`TransitionPreviewPlayer.jsx`)
+  unconditionally read "Transition · …" regardless of which side(s)
+  actually matched — the same mislabeling class of bug, just in the
+  preview screen rather than live playback. Now derives Transition/
+  Intro/Outro the same way `AddAudio.jsx`'s own `derivedType` does.
+
+### Status
+
+**Implemented and verified** via the instrumented-`AudioBufferSourceNode`
+Playwright technique established earlier in this doc, against real
+synthetic WAV files: outro clip-start offset, intro clip-end trim, no
+early main-deck cutoff, no overlapping/duplicate sources, correct
+`setEnded` timing, and the scrub bar's fragment-phase light-up all
+confirmed directly. Not re-verified: real-world detection accuracy of
+`leftClipStartSec`/`rightClipEndSec` against an actual produced outro/
+intro render (only synthetic, non-overlapping test audio was available
+here) — the math mirrors the already-shipped `leftOutSeconds`/
+`rightInSeconds` derivation exactly (same correlation lag, solved for the
+other timeline), but a real produced clip is the only way to fully close
+this out.

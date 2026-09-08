@@ -260,8 +260,18 @@ export default function App() {
       // A previously scheduled hop already fired in real audio — sync
       // session state to match what's already true, then let the next
       // tick schedule whatever comes after (once state has settled).
+      // Checks planEndCtxTime (when everything scheduled has finished
+      // playing), never destStartCtxTime directly — a no-destination plan
+      // (an End-Set outro) has destStartCtxTime === null, and `now >=
+      // null` coerces to `now >= 0`, which is already true on the very
+      // first tick after scheduling. That falsely "fired" the plan and
+      // wiped it (engine.consumePlan) before the outro fragment itself
+      // ever actually started, which is exactly why the live scrub bar's
+      // fragment-phase readout (the colored-zone light-up) never lit up
+      // for an End-Set outro despite the audio itself scheduling and
+      // playing correctly underneath.
       const plan = engine._plan;
-      if (plan && engine.ctx && engine.ctx.currentTime >= plan.destStartCtxTime) {
+      if (plan && engine.ctx && engine.ctx.currentTime >= plan.planEndCtxTime) {
         const ctxNow = engine.ctx.currentTime;
         engine.consumePlan(plan);
         scheduledHopKeyRef.current = null;
