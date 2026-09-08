@@ -188,6 +188,24 @@ function playlistNode(playlist, songId) {
   return playlist.nodes[songId] || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] };
 }
 
+// A node's real transition set, reconstructed from the old singular
+// endEdgeId/nextSongId fields when `transitions` itself is missing or
+// empty — every one of transition-mode's three real touch points
+// (reading who plays next, adding a new transition, removing one) needs
+// this exact same fallback, since any node touched only by `wireConnection`
+// or created before `transitions` existed carries the singular fields but
+// no array. Originally only `playlistNextHop` and `removeTransitionConnection`
+// had it; `addTransitionConnection` didn't, which meant dragging a SECOND
+// transition onto a node still in the old singular shape silently discarded
+// the first one instead of adding to it (reported directly, reproduced
+// exactly: the first transition visibly downgraded to a dashed, unwired
+// line the moment a second one was dragged in).
+function existingTransitions(node) {
+  if (node.endMode !== 'transition') return [];
+  if (node.transitions && node.transitions.length) return node.transitions;
+  return node.endEdgeId ? [{ edgeId: node.endEdgeId, targetId: node.nextSongId }] : [];
+}
+
 // Wires one full connection — a Transition drag (endEdgeId names the
 // produced edge, toId is just edge.r) and a None/Outro/Intro drag (toId is
 // whatever node the DJ dropped on, endEdgeId is the outro edge if any, the
@@ -230,7 +248,7 @@ export function unwireOutput(playlist, songId) {
 // already wired.
 export function addTransitionConnection(playlist, fromId, toId, edgeId) {
   const node = playlistNode(playlist, fromId);
-  const existing = node.endMode === 'transition' ? (node.transitions || []) : [];
+  const existing = existingTransitions(node);
   if (existing.some(t => t.edgeId === edgeId)) return playlist;
   const transitions = [...existing, { edgeId, targetId: toId }];
   const nodes = { ...playlist.nodes };
@@ -248,8 +266,7 @@ export function addTransitionConnection(playlist, fromId, toId, edgeId) {
 // candidate) should call instead of the blanket unwireOutput.
 export function removeTransitionConnection(playlist, fromId, edgeId) {
   const node = playlistNode(playlist, fromId);
-  if (node.endMode !== 'transition') return playlist;
-  const current = node.transitions || (node.endEdgeId ? [{ edgeId: node.endEdgeId, targetId: node.nextSongId }] : []);
+  const current = existingTransitions(node);
   const removed = current.find(t => t.edgeId === edgeId);
   if (!removed) return playlist;
   const transitions = current.filter(t => t.edgeId !== edgeId);
@@ -366,11 +383,8 @@ export function playlistNextHop(playlist, songId) {
   if (node.endMode === 'transition') {
     // A song can carry more than one simultaneous Transition (see
     // addTransitionConnection) — picked uniformly at random each time,
-    // until a real weighting system exists. Falls back to the singular
-    // endEdgeId/nextSongId for a playlist wired before this existed, so
-    // nothing already saved breaks.
-    const options = (node.transitions && node.transitions.length) ? node.transitions
-      : (node.endEdgeId ? [{ edgeId: node.endEdgeId, targetId: node.nextSongId }] : []);
+    // until a real weighting system exists.
+    const options = existingTransitions(node);
     if (options.length === 0) return null;
     const pick = options[Math.floor(Math.random() * options.length)];
     return { id: pick.targetId, mode: 'transition', edgeId: pick.edgeId };
