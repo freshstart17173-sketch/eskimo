@@ -1005,6 +1005,60 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
+### Done this pass (round 15 — BPM/key detection re-enabled, root-caused against real music)
+
+`audioAnalyze.js`'s BPM/key detection had been disabled since well before this
+handoff — `analyzeAudio` hardcoded `{ bpm: null, key: null }`, with a comment
+citing a sine-wave test tone confidently coming back "140 BPM, A maj." Asked
+directly to actually get it working, with two real, individually-verified
+songs uploaded as ground truth to test against instead of guessing:
+
+- **Root cause**: the onset-autocorrelation (BPM) and chroma-correlation
+  (key) math were never actually wrong — reproduced the exact original sine-
+  tone failure, then ran the same code against two real tracks (one cross-
+  checked against Beatport/Tunebat: 160 BPM, B major) and it landed within
+  1% on BPM and got the key exactly right on the very first try, no tuning.
+  The real defect: neither estimator had any confidence gate, so `argmax`
+  over pure noise (no rhythm, no chord content) still returned *a* winner.
+- Researched established alternatives before patching (`web-audio-beat-
+  detector`, Essentia.js's `RhythmExtractor2013`/`KeyExtractor`) rather than
+  assuming the home-grown approach was worth keeping by default. Verdict:
+  `web-audio-beat-detector` is well-maintained but empirically *less*
+  robust across a wide BPM search range than the existing code — it only
+  found the correct 160 BPM once the search range was hand-narrowed to
+  140-180; left untouched it landed on an unrelated wrong value (105) or
+  the half-time octave (80). Essentia.js would work but pulls in a WASM
+  bundle for an editable, non-critical prefill field. Chroma + Krumhansl-
+  Kessler correlation (what's already here) *is* the standard textbook
+  approach for pure-JS browser key detection — confirmed via research that
+  the same technique is what every other pure-JS browser key-finder tool
+  uses. Kept and fixed the existing DSP rather than replacing it.
+- **The fix** (`estimateBpm`/`estimateKey` in `audioAnalyze.js`): a
+  confidence gate on each (BPM: winning lag's autocorrelation as a fraction
+  of the zero-lag value, must clear 0.15 — real tracks scored ~0.35, the
+  sine tone scored 0.07; key: requires both a minimum correlation score
+  against the best-matching profile AND at least 2 independently-lit chroma
+  bins, since a single sustained pitch alone can still score deceptively
+  high against a profile's own tonic weighting — confirmed directly, the
+  sine tone's "A maj" scored 0.68, as strong as a real correct answer).
+  Below the gate, both return `null` rather than a guess — the same
+  "detected but editable, never a wrong-looking guess" contract Add Audio's
+  transition detection already uses. Also added: parabolic interpolation
+  across the winning lag's neighbors for sub-frame BPM precision (closed a
+  real track's 161.5-vs-160 gap), and octave canonicalization (double/halve
+  into an 85-170 "typical" range — the same convention rekordbox/Serato/
+  Mixed In Key use, since a tempo and its exact half/double are
+  fundamentally indistinguishable to any autocorrelation-based detector).
+- Re-enabled `analyzeAudio` for real; Upload Song's "BPM/Key aren't
+  auto-detected" copy (stale since the feature was disabled) updated to
+  reflect current, accurate state per-field.
+- Verified end-to-end via the real Upload Song UI (`setInputFiles`, not a
+  synthetic call) against: the 160 BPM/B major track (correctly prefilled
+  161 BPM / B maj), a second real track with an ambiguous/atonal chroma
+  (correctly prefilled a cross-validated ~110 BPM, correctly left Key
+  blank rather than guessing), and the original sine-tone failure case
+  (correctly left both blank, with an honest explanation shown).
+
 ### Done this pass (round 14 — implemented all four round-13 audit recommendations)
 
 Asked directly to implement round 13's four findings, then verify the

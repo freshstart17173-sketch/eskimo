@@ -79,7 +79,12 @@ export default function UploadSongPage({ onAddSong, onViewSong, existingCount })
           )}
           {!analyzing && analyzed && (
             <div className="detected-summary">
-              Detected {Math.round(analyzed.durationSec)}s — BPM/Key aren't auto-detected, type them in above.
+              Detected {Math.round(analyzed.durationSec)}s
+              {analyzed.bpm != null || analyzed.key ? ' — ' : ''}
+              {analyzed.bpm != null && analyzed.key ? `${Math.round(analyzed.bpm)} BPM, ${analyzed.key} detected — still editable above.`
+                : analyzed.bpm != null ? `${Math.round(analyzed.bpm)} BPM detected — still editable above. Key wasn't confident enough to guess; type it in if you know it.`
+                : analyzed.key ? `${analyzed.key} detected — still editable above. BPM wasn't confident enough to guess; type it in if you know it.`
+                : ' — BPM/Key weren’t confident enough to guess (a quiet, sparse, or heavily processed track can do this); type them in above.'}
             </div>
           )}
         </Field>
