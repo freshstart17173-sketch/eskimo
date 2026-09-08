@@ -25,7 +25,7 @@ export default function PerformPage(props) {
   );
 }
 
-function PerformPageInner({ songs, setSongs, edges, session, setSession, venueName, goUpload, goLibrary, onLoadExample, onDeleteSong }) {
+function PerformPageInner({ songs, setSongs, edges, session, setSession, venueName, goUpload, goLibrary, onLoadExample }) {
   const rf = useReactFlow();
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -676,7 +676,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <Icon path={ICONS.target} size={13} /> Focus active
         </button>
         <button className="toolbar-btn" onClick={arrangeForMe} data-tooltip="Auto-arrange the graph">
-          <Icon path={ICONS.grid} size={13} /> Arrange for me
+          <Icon path={ICONS.grid} size={13} /> Autoarrange
         </button>
 
         <div className="toolbar-spacer" />
@@ -796,7 +796,6 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           onDisconnectAll={(id) => { disconnectAll(id); closeContextMenu(); }}
           onEditInLibrary={() => { goLibrary(); closeContextMenu(); }}
           onRemoveFromGraph={(id) => { removeFromCanvas(id); closeContextMenu(); }}
-          onDeleteSong={(id) => { onDeleteSong(id); closeContextMenu(); }}
           onDisconnectStart={() => { disconnectStart(); closeContextMenu(); }}
           onDisconnectEnd={(id) => { disconnectSong(id); closeContextMenu(); }}
         />
@@ -816,7 +815,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 // dropdowns do: a mousedown outside the menu, or Escape.
 function ContextMenu({
   menu, activePlaylist, onClose,
-  onAddNodeHere, onArrangeForMe, onAutoconnectAll, onFocus, onSetAsStart, onAutoconnectNode, onDisconnectAll, onEditInLibrary, onRemoveFromGraph, onDeleteSong,
+  onAddNodeHere, onArrangeForMe, onAutoconnectAll, onFocus, onSetAsStart, onAutoconnectNode, onDisconnectAll, onEditInLibrary, onRemoveFromGraph,
   onDisconnectStart, onDisconnectEnd,
 }) {
   const ref = useRef(null);
@@ -834,7 +833,7 @@ function ContextMenu({
     items = (
       <>
         <button className="context-menu-item" onClick={onAddNodeHere}>Add node here</button>
-        <button className="context-menu-item" onClick={onArrangeForMe}>Arrange for me</button>
+        <button className="context-menu-item" onClick={onArrangeForMe}>Autoarrange</button>
         {/* Wires every real produced Transition already leading out of every
             placed song at once — see autoconnectFullGraph's own comment
             (core.js) for why this deliberately only ever touches
@@ -851,12 +850,11 @@ function ContextMenu({
         <button className="context-menu-item" onClick={() => onDisconnectAll(menu.nodeId)}>Disconnect all wires</button>
         <button className="context-menu-item" onClick={onEditInLibrary}>Edit in Library</button>
         <div className="context-menu-sep" />
-        {/* Removing a node from the graph is a much lower-stakes action than
-            deleting the song outright (it stays in the Library, can be
-            re-added later) — kept as its own separate, non-danger item so
-            it doesn't read as destructive the way Delete song does. */}
+        {/* Deleting a song outright is a Library-only action now — this menu
+            only ever offers removing the node from the graph (it stays in
+            the Library, can be re-added later), never the destructive
+            delete, which doesn't belong on a menu you can reach mid-set. */}
         <button className="context-menu-item" onClick={() => onRemoveFromGraph(menu.nodeId)}>Remove from graph</button>
-        <button className="context-menu-item context-menu-danger" onClick={() => onDeleteSong(menu.nodeId)}>Delete song</button>
       </>
     );
   } else if (menu.nodeType === 'start') {
