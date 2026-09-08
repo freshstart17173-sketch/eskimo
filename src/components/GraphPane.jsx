@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useEffect, useState, createContext, useCon
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode, useViewport } from '@xyflow/react';
 import { END, START } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphLayout.js';
-import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext } from './GraphNodes.jsx';
+import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext, MultiSelectionContext } from './GraphNodes.jsx';
 import { useTheme } from '../theme.js';
 import { usePalette } from './shared.jsx';
 
@@ -155,7 +155,7 @@ export default function GraphPane({
   hoveredId, setHoveredId, matchIds, searchActive,
   onDragSongPosition, endQueued, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
-  onPaneContextMenu, onNodeContextMenu,
+  onPaneContextMenu, onNodeContextMenu, onSelectionContextMenu, onMultiSelectionChange,
 }) {
   const { isDark } = useTheme();
   const lineColor = isDark ? LINE_COLOR.dark : LINE_COLOR.light;
@@ -163,6 +163,22 @@ export default function GraphPane({
 
   const initialNodes = useMemo(() => buildNodes(), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  // React Flow's own selection-box drag (selectionOnDrag, below) already
+  // marks every node inside the box `selected: true` individually — real
+  // per-node multi-select, not just a bounding outline — this just reads
+  // that back out so the app can actually do something with it: a shared
+  // accent ring (see .node-card.state-multi-selected) distinct from the
+  // single `selectedId` cursor the detail pane follows, and a context menu
+  // that applies its actions across the whole set (PerformPage.jsx). A
+  // plain single click also fires this (with exactly one node), which is
+  // why every consumer gates on `length > 1` — single-select's own
+  // existing `selectedId`/detail-pane behavior must stay untouched.
+  const [multiSelectedIds, setMultiSelectedIds] = useState([]);
+  const onSelectionChange = useCallback(({ nodes: selected }) => {
+    const ids = selected.map(n => n.id);
+    setMultiSelectedIds(ids);
+    if (onMultiSelectionChange) onMultiSelectionChange(ids);
+  }, [onMultiSelectionChange]);
 
   function buildNodes() {
     const list = Object.values(songs).map(s => nodeFor(s.id));
@@ -393,10 +409,13 @@ export default function GraphPane({
   const onEdgeMouseEnter = useCallback((_, edge) => setHoveredEdgeId(edge.id), []);
   const onEdgeMouseLeave = useCallback(() => setHoveredEdgeId(null), []);
 
+  const multiSelectionValue = useMemo(() => ({ count: multiSelectedIds.length }), [multiSelectedIds.length]);
+
   return (
     <NowPlayingContext.Provider value={nowPlayingValue}>
       <HoveredNodeContext.Provider value={hoveredNodeValue}>
       <SearchDimContext.Provider value={searchDimValue}>
+      <MultiSelectionContext.Provider value={multiSelectionValue}>
       <HoveredEdgeContext.Provider value={hoveredEdgeValue}>
         <ReactFlow
           nodes={nodes}
@@ -404,10 +423,12 @@ export default function GraphPane({
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
           onSelectionDragStop={onSelectionDragStop}
+          onSelectionChange={onSelectionChange}
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
           onPaneContextMenu={onPaneContextMenu}
           onNodeContextMenu={onNodeContextMenu}
+          onSelectionContextMenu={onSelectionContextMenu}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onConnect={onConnect}
@@ -441,6 +462,7 @@ export default function GraphPane({
           <Background variant={BackgroundVariant.Dots} gap={22} size={1.4} color={dotColor} />
         </ReactFlow>
       </HoveredEdgeContext.Provider>
+      </MultiSelectionContext.Provider>
       </SearchDimContext.Provider>
       </HoveredNodeContext.Provider>
     </NowPlayingContext.Provider>

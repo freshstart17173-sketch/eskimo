@@ -51,6 +51,12 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // actually place the new song, in the canvas's own coordinate space.
   const [contextMenu, setContextMenu] = useState(null);
   const [addSongAt, setAddSongAt] = useState(null); // { x, y } in flow space, or null when the modal's closed
+  // React Flow's own selection-box drag result (see GraphPane.jsx's
+  // onSelectionChange) — a real per-node multi-select, tracked entirely
+  // separately from `selectedId` above (the detail pane's own cursor,
+  // which a multi-selection must never change — see its own comment).
+  // Only ever used to decide which context menu a right-click opens.
+  const [multiSelectedIds, setMultiSelectedIds] = useState([]);
 
   const onPaneContextMenu = useCallback((event) => {
     event.preventDefault();
@@ -58,9 +64,28 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setContextMenu({ kind: 'pane', screenX: event.clientX, screenY: event.clientY, flowX: flowPos.x, flowY: flowPos.y });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rf]);
+  // Right-clicking a node that's part of a real (2+) multi-selection opens
+  // the group menu instead of that one node's own — matches the
+  // multi-selection's own visual ring (GraphNodes.jsx): once 2+ nodes are
+  // selected, actions apply to the whole set, not just whichever one
+  // happened to catch the right-click.
   const onNodeContextMenu = useCallback((event, node) => {
     event.preventDefault();
+    if (multiSelectedIds.length > 1 && multiSelectedIds.includes(node.id)) {
+      setContextMenu({ kind: 'multi', screenX: event.clientX, screenY: event.clientY, nodeIds: multiSelectedIds });
+      return;
+    }
     setContextMenu({ kind: 'node', screenX: event.clientX, screenY: event.clientY, nodeId: node.id, nodeType: node.type });
+  }, [multiSelectedIds]);
+  // React Flow renders a `.react-flow__nodesselection-rect` overlay across
+  // the whole multi-selection's bounding box (it's what makes dragging any
+  // of the selected nodes move the whole group) — a right-click landing
+  // inside that box hits the overlay, not any one node's own element, so
+  // onNodeContextMenu above never fires for it. This is React Flow's own
+  // dedicated hook for exactly that click.
+  const onSelectionContextMenu = useCallback((event, selectedNodes) => {
+    event.preventDefault();
+    setContextMenu({ kind: 'multi', screenX: event.clientX, screenY: event.clientY, nodeIds: selectedNodes.map(n => n.id) });
   }, []);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -395,6 +420,32 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     setSession(prev => ({ ...prev, activePlaylist: autoconnectFullGraph(visibleEdges, prev.activePlaylist, ids) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleEdges, placedSongs]);
+  // The multi-selection context menu's own versions of the per-node
+  // actions above — folds the same core.js function over every selected
+  // id in one setSession, not one call per node, so this is one undo-
+  // worthy state change instead of `songIds.length` of them.
+  const onAutoconnectSelection = useCallback((songIds) => {
+    setSession(prev => ({
+      ...prev,
+      activePlaylist: songIds.reduce((pl, id) => autoconnectNodeTransitions(visibleEdges, pl, id), prev.activePlaylist),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleEdges]);
+  const onDisconnectAllSelection = useCallback((songIds) => {
+    setSession(prev => ({
+      ...prev,
+      activePlaylist: songIds.reduce((pl, id) => disconnectAllWires(pl, id), prev.activePlaylist),
+    }));
+  }, []);
+  const onRemoveFromGraphSelection = useCallback((songIds) => {
+    setSession(prev => ({
+      ...prev,
+      canvasIds: (prev.canvasIds || Object.keys(songs)).filter(id => !songIds.includes(id)),
+      activePlaylist: songIds.reduce((pl, id) => disconnectAllWires(pl, id), prev.activePlaylist),
+    }));
+    setSelectedId(prev => (songIds.includes(prev) ? null : prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [songs]);
 
   // Start Set's own wire — see wireStart (core.js) for why this needs a
   // dedicated pointer instead of reusing endMode/nextSongId the way every
@@ -732,6 +783,8 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             endQueued={endWired}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
             onPaneContextMenu={onPaneContextMenu} onNodeContextMenu={onNodeContextMenu}
+            onSelectionContextMenu={onSelectionContextMenu}
+            onMultiSelectionChange={setMultiSelectedIds}
           />
         </div>
         {selectedSong && (
@@ -814,6 +867,9 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           onRemoveFromGraph={(id) => { removeFromCanvas(id); closeContextMenu(); }}
           onDisconnectStart={() => { disconnectStart(); closeContextMenu(); }}
           onDisconnectEnd={(id) => { disconnectSong(id); closeContextMenu(); }}
+          onAutoconnectSelection={(ids) => { onAutoconnectSelection(ids); closeContextMenu(); }}
+          onDisconnectAllSelection={(ids) => { onDisconnectAllSelection(ids); closeContextMenu(); }}
+          onRemoveFromGraphSelection={(ids) => { onRemoveFromGraphSelection(ids); closeContextMenu(); }}
         />
       )}
 
@@ -832,7 +888,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 function ContextMenu({
   menu, activePlaylist, onClose,
   onAddNodeHere, onArrangeForMe, onAutoconnectAll, onFocus, onSetAsStart, onAutoconnectNode, onDisconnectAll, onEditInLibrary, onRemoveFromGraph,
-  onDisconnectStart, onDisconnectEnd,
+  onDisconnectStart, onDisconnectEnd, onAutoconnectSelection, onDisconnectAllSelection, onRemoveFromGraphSelection,
 }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -845,7 +901,20 @@ function ContextMenu({
 
   const style = { left: menu.screenX, top: menu.screenY };
   let items;
-  if (menu.kind === 'pane') {
+  if (menu.kind === 'multi') {
+    // Same three per-node actions the single-node menu below offers,
+    // applied across every selected node at once (see onAutoconnectSelection
+    // etc., PerformPage.jsx) — Set as Start/Focus here/Edit in Library
+    // stay single-node-only concepts, so they're not offered here.
+    items = (
+      <>
+        <div className="context-menu-heading">{menu.nodeIds.length} songs selected</div>
+        <button className="context-menu-item" onClick={() => onAutoconnectSelection(menu.nodeIds)}>Autoconnect transitions</button>
+        <button className="context-menu-item" onClick={() => onDisconnectAllSelection(menu.nodeIds)}>Disconnect all wires</button>
+        <button className="context-menu-item" onClick={() => onRemoveFromGraphSelection(menu.nodeIds)}>Remove from graph</button>
+      </>
+    );
+  } else if (menu.kind === 'pane') {
     items = (
       <>
         <button className="context-menu-item" onClick={onAddNodeHere}>Add node here</button>

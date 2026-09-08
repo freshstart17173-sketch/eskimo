@@ -74,6 +74,16 @@ export const NowPlayingContext = createContext({ nowPlayingId: null, elapsed: 0,
 // DOM — it never touches React Flow's node graph at all.
 export const HoveredNodeContext = createContext({ hoveredId: null });
 export const SearchDimContext = createContext({ searchActive: false, matchIds: null });
+// How many nodes React Flow's own selection-box drag currently has
+// selected — same context-not-data reasoning as the two above. React Flow
+// already gives every custom node a `selected` prop for free (its own
+// internal per-node flag, set true by a plain single click same as a
+// multi-node box-drag), so SongNode only needs the *count* from here to
+// tell the two apart: `selected && count > 1` is a real multi-selection
+// ring; `selected && count === 1` is just this session's already-existing
+// single-select cursor (`selectedId`/state==='selected' below), which
+// must keep rendering exactly as it always has.
+export const MultiSelectionContext = createContext({ count: 0 });
 
 // Fixed, per-type socket colors — Blender-node-style (a Geometry socket is
 // always teal, a Boolean always pink, regardless of which node it's on).
@@ -252,7 +262,7 @@ function SocketList({ side, types, availability, active, onToggle, cueOffsetSec,
 // really playing; Selected is purely "what was last clicked". No more
 // Playing/Next/Later: a node either is or isn't currently sounding, and
 // either is or isn't what the right-side detail pane is showing.
-export function SongNode({ data }) {
+export function SongNode({ data, selected }) {
   const {
     song, state, inCount, outCount, onEnter, onLeave, playing, onSelect,
     leftAvailable, rightAvailable, leftActive, rightActive, leftEdgeId, rightEdgeId,
@@ -261,10 +271,21 @@ export function SongNode({ data }) {
   const nowPlaying = useContext(NowPlayingContext);
   const { hoveredId } = useContext(HoveredNodeContext);
   const { searchActive, matchIds } = useContext(SearchDimContext);
+  const { count: multiSelectedCount } = useContext(MultiSelectionContext);
   const hovered = hoveredId === song.id;
   const dimmed = searchActive && matchIds && !matchIds.has(song.id);
   const position = (playing && nowPlaying.nowPlayingId === song.id) ? nowPlaying : null;
-  const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
+  // A real multi-node box-drag selection (React Flow's own `selected`,
+  // gated on more than one node actually being selected — see
+  // MultiSelectionContext above) gets the same accent ring the single
+  // `selectedId` cursor already uses, layered the same way hover already
+  // is (see .node-card.state-multi-selected below) rather than a second
+  // competing visual language for "this is part of what I clicked".
+  const multiSelected = selected && multiSelectedCount > 1;
+  const cls = [
+    'node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed',
+    multiSelected && 'node-multi-selected',
+  ].filter(Boolean).join(' ');
   // Color match (dominantColor.js) only ever applies to the Active card now
   // — Selected is a plain UI cursor, not a performance state, so it gets a
   // plain CSS accent background (see .node-card.state-selected) rather
