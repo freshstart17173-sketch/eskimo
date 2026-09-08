@@ -1005,6 +1005,59 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
+### Done this pass (round 16 — three real graph bugs, root-caused against reproductions; example set doubled)
+
+Four things reported directly in one message, from a screenshot of
+Autoarrange drawing a genuinely broken layout:
+
+1. **Autoarrange placing a multi-output destination nowhere near its real
+   source** (the reported "huge diagonal link"). Root cause had nothing to
+   do with cycles, despite how it looked — `computeDagreLayout` only ever
+   fed dagre a node's `nextSongId` (the single most-recently-wired
+   transition); a node's *other* transition(s) were completely invisible
+   to the layout, so that destination had zero positional link to its
+   real source and landed wherever dagre parks a disconnected node. Fixed
+   with a new `allDestinationIds(node)` (core.js) that enumerates every
+   real destination, not just the first; `graphLayout.js` now feeds dagre
+   one edge per destination. Verified against the exact reported scenario
+   (both destinations now land in the same downstream column) and against
+   a genuine closed loop (a supported feature) to confirm the one
+   unavoidable closing edge still renders as a clean curve.
+2. **A second transition silently dropping the first**, still reproducible
+   on any node whose data predates the `transitions` array —
+   `addTransitionConnection` rebuilt its candidate list from
+   `node.transitions` alone, no fallback to the old singular
+   `endEdgeId`/`nextSongId` fields the way `playlistNextHop` and
+   `removeTransitionConnection` already correctly had. Pulled the
+   fallback into one shared `existingTransitions()` helper used by all
+   three, so a fourth call site can't drift out of sync the same way
+   again. This (not a UI/interaction bug) is what "still can't have
+   multiple inputs/outputs" actually was — multi-output/multi-input
+   already worked correctly for freshly-wired data; it only broke on
+   anything wired before this feature existed.
+3. **Clicking empty canvas didn't clear a selected node** — `selectedId`
+   is plain component state, never tied to React Flow's own
+   node-selection, so React Flow's own pane-click deselection was never
+   going to touch it. Wired a real `onPaneClick` handler through
+   `GraphPane` into `PerformPage`.
+4. **The example set doubled** (26 songs → 50) with a third real,
+   recognizable tracklist (*Whole Lotta Red*, Playboi Carti — same
+   factual-metadata-only treatment as the existing two, original flat-
+   color swatch covers, no redistributed artwork) and, critically, wired
+   *active* on load now (`loadExample` runs `autoconnectFullGraph` over
+   the whole set) rather than handing over 50 songs of unwired sockets —
+   deliberately including a multi-output node (Pi'erre's last track
+   branches to both Kanye's and Carti's openers), a multi-input
+   convergence (Carti's opener receives from both of those), a second,
+   unrelated multi-input example mid-chain, and a full three-artist
+   closed loop (Carti's closer back to Pi'erre's opener) — the example
+   now demonstrates every one of the bugs above being fixed, not just a
+   bigger version of the same one straight chain.
+
+All four verified against real reproductions (Playwright, real drag-connect
+gestures and real Autoarrange runs) before and after each fix, not just
+against the example set's own happy path.
+
 ### Done this pass (round 15 — BPM/key detection re-enabled, root-caused against real music)
 
 `audioAnalyze.js`'s BPM/key detection had been disabled since well before this

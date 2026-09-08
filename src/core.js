@@ -58,6 +58,10 @@ const YEEZUS_COVERS = [
   swatchCover('#f0f0ee', '#d32f1e'), swatchCover('#f0f0ee', '#2f6ed3'), swatchCover('#f0f0ee', '#d3a02f'),
   swatchCover('#f0f0ee', '#2fa88a'), swatchCover('#f0f0ee', '#a82f8a'),
 ];
+const WLR_COVERS = [
+  swatchCover('#c41e3a'), swatchCover('#d4344f'), swatchCover('#a01530'), swatchCover('#e0455f'),
+  swatchCover('#8f1029'), swatchCover('#b82840'),
+];
 
 export function sampleSongsForTests() {
   // The Life of Pi'erre 4 — Pi'erre Bourne. All 16 tracks, transitioning
@@ -68,13 +72,24 @@ export function sampleSongsForTests() {
     ['Romeo Must Die', 161], ['Racer', 295], ['Stereotypes', 188], ['Doublemint', 188],
     ['Horoscopes', 147], ['Juice', 143], ['Guillotine', 180], ['Speed Dial', 151],
   ];
-  // Yeezus — Kanye West. All 10 tracks, placed on the canvas unwired (no
-  // transitions specified between them) — a second library's worth of
-  // songs to wire up by hand or with Autoconnect.
+  // Yeezus — Kanye West. All 10 tracks.
   const yeezus = [
     ['On Sight', 156], ['Black Skinhead', 188], ['I Am a God', 231], ['New Slaves', 256],
     ['Hold My Liquor', 326], ['I’m In It', 234], ['Blood on the Leaves', 360], ['Guilt Trip', 243],
     ['Send It Up', 178], ['Bound 2', 229],
+  ];
+  // Whole Lotta Red — Playboi Carti. All 24 tracks (standard edition) — the
+  // third artist added to roughly double the example set's size, asked for
+  // directly to stress-test multi-input/output wiring and Autoarrange at a
+  // scale actually worth testing against (see sampleEdgesForTests below for
+  // the bridge/branch/convergence/loop wiring across all three artists).
+  const wholeLottaRed = [
+    ['Rockstar Made', 233], ['Go2DaMoon', 143], ['Stop Breathing', 181], ['Beno!', 176],
+    ['JumpOutTheHouse', 153], ['New Tank', 135], ['Teen X', 217], ['Slay3r', 186],
+    ['Vamp Anthem', 135], ['New N3on', 194], ['Punk Monk', 203], ['On That Time', 146],
+    ['M3tamorphosis', 233], ['Not Playing', 195], ['Sky', 187], ['Meh', 149],
+    ['Die4Guy', 207], ['Place', 188], ['ILoveUIHateU', 194], ['Over', 153],
+    ['King Vamp', 185], ['Control', 216], ['Panel Kant', 161], ['F33l Lik3 Dyin', 255],
   ];
   const songs = {};
   const cols = 8, colSpacing = 260, rowSpacing = 220;
@@ -92,16 +107,53 @@ export function sampleSongsForTests() {
       bpm: 110, key: 'C min', durationSec, coverUrl: YEEZUS_COVERS[i % YEEZUS_COVERS.length],
     };
   });
+  wholeLottaRed.forEach(([title, durationSec], i) => {
+    songs['c' + (i + 1)] = {
+      id: 'c' + (i + 1), title, artist: 'Playboi Carti',
+      x: 40 + (i % cols) * colSpacing, y: 1020 + Math.floor(i / cols) * rowSpacing,
+      bpm: 145, key: 'G min', durationSec, coverUrl: WLR_COVERS[i % WLR_COVERS.length],
+    };
+  });
   return songs;
 }
 export function sampleEdgesForTests() {
   const edges = [
     { id: 'e-p-intro', type: 'intro', r: 'p1', verified: true },
     { id: 'e-p-outro', type: 'outro', l: 'p16', verified: true },
+    { id: 'e-c-outro', type: 'outro', l: 'c24', verified: true },
   ];
   for (let i = 1; i < 16; i++) {
     edges.push({ id: 'e-p' + i + '-' + (i + 1), type: 'transition', l: 'p' + i, r: 'p' + (i + 1), verified: true });
   }
+  for (let i = 1; i < 10; i++) {
+    edges.push({ id: 'e-y' + i + '-' + (i + 1), type: 'transition', l: 'y' + i, r: 'y' + (i + 1), verified: true });
+  }
+  for (let i = 1; i < 24; i++) {
+    edges.push({ id: 'e-c' + i + '-' + (i + 1), type: 'transition', l: 'c' + i, r: 'c' + (i + 1), verified: true });
+  }
+  // Cross-artist wiring — bridges the three chains into one graph and
+  // deliberately exercises every scenario asked for in the same pass that
+  // fixed them, rather than leaving that to chance:
+  //  - p16 (end of the Pi'erre chain) gets a SECOND transition target
+  //    alongside its existing outro — a real multi-output fan-out, the
+  //    exact shape Autoarrange used to mis-place (see graphLayout.js).
+  //  - c1 (start of the Carti chain) receives from both p16 and y10 — a
+  //    real multi-input convergence, the exact shape that used to lose
+  //    its first wire the moment a second one was dragged in (see
+  //    addTransitionConnection, core.js).
+  //  - p8 also transitions directly into c12, a second, unrelated
+  //    multi-input example away from the chain seams.
+  //  - c24 transitions back to p1, closing all three artists into one
+  //    loop — transition-only autoplay can run through it forever, and
+  //    Autoarrange needs to render that closing edge as a clean curve,
+  //    not a diagonal mess (see graphLayout.js's own cycle handling).
+  edges.push(
+    { id: 'e-bridge-p16-y1', type: 'transition', l: 'p16', r: 'y1', verified: true },
+    { id: 'e-bridge-p16-c1', type: 'transition', l: 'p16', r: 'c1', verified: true },
+    { id: 'e-bridge-y10-c1', type: 'transition', l: 'y10', r: 'c1', verified: true },
+    { id: 'e-multiinput-p8-c12', type: 'transition', l: 'p8', r: 'c12', verified: true },
+    { id: 'e-loop-c24-p1', type: 'transition', l: 'c24', r: 'p1', verified: true },
+  );
   return edges;
 }
 

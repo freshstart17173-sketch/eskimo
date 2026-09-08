@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
-import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed, autoconnectFullGraph } from './core.js';
 import { engine, performAdvance, prefetchHop, PREFETCH_LOOKAHEAD_SEC, buildHopDecision, syncSessionFromFiredPlan } from './audioEngine.js';
 import Sidebar from './components/Sidebar.jsx';
 
@@ -261,9 +261,18 @@ export default function App() {
   // real library: the first real song/audio added while it's showing wipes
   // the example first, regardless of which page that add happens from.
   const loadExample = useCallback(() => {
-    setSongs(sampleSongsForTests());
-    setEdges(sampleEdgesForTests());
-    setSession(emptySession());
+    const exampleSongs = sampleSongsForTests();
+    const exampleEdges = sampleEdgesForTests();
+    setSongs(exampleSongs);
+    setEdges(exampleEdges);
+    // Pre-wired, not just structurally available — autoconnecting every
+    // produced transition at once means the example actually demonstrates
+    // its own multi-input/output/loop wiring (see sampleEdgesForTests'
+    // own comment) the moment it loads, rather than handing over 50 songs
+    // of hollow, unwired sockets to build by hand first.
+    const base = emptySession();
+    const activePlaylist = autoconnectFullGraph(getVisibleEdges(exampleEdges), base.activePlaylist, Object.keys(exampleSongs));
+    setSession({ ...base, activePlaylist });
     setVenueName(v => v || 'Example set');
     setIsDemo(true);
     setTab('perform');
