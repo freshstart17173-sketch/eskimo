@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useEffect, useState, createContext, useContext } from 'react';
-import { ReactFlow, Background, BackgroundVariant, MarkerType, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode, useViewport } from '@xyflow/react';
+import { ReactFlow, Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode, useViewport } from '@xyflow/react';
 import { END, START } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphLayout.js';
 import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext } from './GraphNodes.jsx';
@@ -327,7 +327,6 @@ export default function GraphPane({
         data: offset === 0 && !isActive ? undefined : { offset, onDisconnect: () => (isActive ? onDisconnectTransition(e.l, e.id) : onDisconnectSong(e.l)) },
         animated: isActive && mixingEdgeId === e.id,
         style: { stroke: color, strokeWidth: isActive ? 3 : 1.5, strokeDasharray: isActive ? undefined : '2 4' },
-        markerEnd: { type: MarkerType.ArrowClosed, color, width: 10, height: 10 },
       };
     });
     Object.keys(activePlaylist.nodes).forEach(songId => {
@@ -341,7 +340,6 @@ export default function GraphPane({
           type: 'active',
           data: { onDisconnect: () => onDisconnectSong(songId) },
           style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
-          markerEnd: { type: MarkerType.ArrowClosed, color: lineColor.ink, width: 10, height: 10 },
         });
       }
     });
@@ -359,7 +357,6 @@ export default function GraphPane({
         type: 'active',
         data: { onDisconnect: onDisconnectStart },
         style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
-        markerEnd: { type: MarkerType.ArrowClosed, color: lineColor.ink, width: 10, height: 10 },
       });
     }
     return edgesOut;
