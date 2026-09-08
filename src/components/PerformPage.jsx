@@ -3,9 +3,9 @@ import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
   END, START, getVisibleEdges, inOutCounts, clamp, leftSocketAvailability, rightSocketAvailability,
-  unwireOutput, wireConnection, wireStart, unwireStart, disconnectAllWires, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
-  introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, hopSummary, occludedTransitions,
-  addTransitionConnection, removeTransitionConnection, autoconnectNodeTransitions, autoconnectFullGraph,
+  wireConnection, wireStart, unwireStart, disconnectAllWires, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
+  introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, hopSummary, occludedTransitions, nodeOutputs, removeOutput,
+  addTransitionConnection, autoconnectNodeTransitions, autoconnectFullGraph,
 } from '../core.js';
 import { engine } from '../audioEngine.js';
 import { useTransportControls } from '../playbackControls.js';
@@ -338,13 +338,16 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       // wire exists, it wins the display since that's the structural line
       // actually drawn into this socket — Start's own edge (see GraphPane)
       // still renders at its own correct handle regardless of which one
-      // wins here.
+      // wins here. Left/arrival stays single-slot by direct instruction
+      // ("multiple intros/outros/transitions per destination should be
+      // off the table for now") — only the right/output side below can
+      // have more than one type active at once.
       const ordinaryLeftMode = node ? node.startMode : 'none';
       const startFeedsThis = activePlaylist.startSongId === id;
       const leftActive = ordinaryLeftMode !== 'none' ? ordinaryLeftMode : (startFeedsThis ? activePlaylist.startMode : 'none');
       const leftFromStart = leftActive !== 'none' && ordinaryLeftMode === 'none' && startFeedsThis;
-      const rightActive = node ? node.endMode : 'none';
-      let leftOptions = [], rightOptions = [], rightCueSeconds = null;
+      const leftEdgeId = leftFromStart ? activePlaylist.startEdgeId : (node ? node.startEdgeId : null);
+      let leftOptions = [];
       // A longer Intro/Outro candidate can start diverging from the plain
       // master well before its own cue point (see occludedTransitions,
       // core.js) — silently hiding a produced Transition off/onto this
@@ -361,57 +364,90 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           return { id: e.id, label: e.label || 'Intro', occludedTitles };
         });
       }
-      if (rightActive === 'outro') {
+
+      // Right/output side: a song can now have an active None wire to one
+      // place, an active Outro to another, and one-or-more Transitions to
+      // others, all at once (reported directly, exactly this shape) — so
+      // this is a *set* of active types, each with its own edge/options/
+      // cue-ring data, not a single active mode the way the left side
+      // above still is.
+      const outputs = node ? nodeOutputs(node) : [];
+      const rightActiveTypes = [];
+      outputs.forEach(o => { if (!rightActiveTypes.includes(o.type)) rightActiveTypes.push(o.type); });
+      const outroEntry = outputs.find(o => o.type === 'outro');
+      // A node can carry several simultaneous Transition destinations now;
+      // the physical card only has one "Transition" row to show a
+      // label/dropdown/cue-ring on, so that row represents the FIRST wired
+      // transition destination — every destination still renders its own
+      // real line on the graph (GraphPane) and is still a real candidate
+      // for the random hop (playlistNextHop) regardless of what this one
+      // row displays. Matches the already-established scope for "several
+      // transitions, no per-destination UI beyond random pick" (see
+      // TODO.md) — this just extends it to coexist with None/Outro too.
+      const transitionEntry = outputs.find(o => o.type === 'transition');
+      const rightOptionsByType = {}, rightEdgeIdByType = {}, rightCueSecondsByType = {};
+      if (outroEntry) {
+        rightEdgeIdByType.outro = outroEntry.edgeId;
         const candidates = outroEdgesFor(visibleEdges, id);
-        if (candidates.length > 1) rightOptions = candidates.map(e => {
+        if (candidates.length > 1) rightOptionsByType.outro = candidates.map(e => {
           const occluded = occludedTransitions(visibleEdges, { type: 'outro', l: id, outSeconds: e.outSeconds });
           const occludedTitles = occluded.map(o => (songs[o.r] || {}).title).filter(Boolean);
           return { id: e.id, label: e.label || 'Outro', outSeconds: e.outSeconds, occludedTitles };
         });
-      } else if (rightActive === 'transition' && node.nextSongId) {
-        const candidates = transitionEdgesBetween(visibleEdges, id, node.nextSongId);
-        if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Transition', outSeconds: e.outSeconds }));
+        const edge = visibleEdges.find(e => e.id === outroEntry.edgeId);
+        if (edge && edge.outSeconds != null) rightCueSecondsByType.outro = edge.outSeconds;
       }
-      // The countdown ring (GraphNodes.jsx) needs the cue point behind
-      // whichever edge is actually wired right now — Outro and Transition
-      // both keep it on endEdgeId, so one lookup covers both.
-      if ((rightActive === 'outro' || rightActive === 'transition') && node.endEdgeId) {
-        const edge = visibleEdges.find(e => e.id === node.endEdgeId);
-        if (edge && edge.outSeconds != null) rightCueSeconds = edge.outSeconds;
+      if (transitionEntry) {
+        rightEdgeIdByType.transition = transitionEntry.edgeId;
+        const candidates = transitionEdgesBetween(visibleEdges, id, transitionEntry.targetId);
+        if (candidates.length > 1) rightOptionsByType.transition = candidates.map(e => ({ id: e.id, label: e.label || 'Transition', outSeconds: e.outSeconds }));
+        const edge = visibleEdges.find(e => e.id === transitionEntry.edgeId);
+        if (edge && edge.outSeconds != null) rightCueSecondsByType.transition = edge.outSeconds;
       }
+
       map[id] = {
         leftAvailable: leftSocketAvailability(visibleEdges, id), rightAvailable: rightSocketAvailability(visibleEdges, id),
-        leftActive, rightActive, leftFromStart,
-        leftEdgeId: leftFromStart ? activePlaylist.startEdgeId : (node ? node.startEdgeId : null),
-        rightEdgeId: node ? node.endEdgeId : null,
-        leftOptions, rightOptions, rightCueSeconds,
+        leftActive, rightActiveTypes, leftFromStart,
+        leftEdgeId, leftOptions,
+        rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType,
       };
     });
     return map;
   }, [placedSongs, visibleEdges, activePlaylist, songs]);
 
-  // A socket click toggles None/Intro/Outro directly (clicking the type
-  // that's already active turns it back off, to None); a Transition
-  // socket is only ever set by a real drag-connect — see TODO.md. Intro
-  // and Outro don't need a destination to mean something on their own
-  // ("this song always starts with its intro" / "ends with its outro,
-  // even if nothing's wired after it yet") — dragging a connection later
-  // can still attach a specific next song on top of either.
+  // A socket click toggles None/Intro/Outro directly (clicking a type
+  // that's already active turns just that one back off, leaving any other
+  // active type on this same node — of either side — untouched); a
+  // Transition socket is only ever set by a real drag-connect — see
+  // TODO.md. Intro and Outro don't need a destination to mean something
+  // on their own ("this song always starts with its intro" / "ends with
+  // its outro, even if nothing's wired after it yet") — dragging a
+  // connection later can still attach a specific next song on top of
+  // either, without disturbing whichever other output type(s) are
+  // already active.
   const toggleSocket = useCallback((songId, side, type) => {
     setSession(prev => {
       const node = prev.activePlaylist.nodes[songId];
-      const base = node || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null };
       if (side === 'left') {
+        const base = node || { startMode: 'none', startEdgeId: null, outputs: [] };
         const turningOn = base.startMode !== type;
         const startMode = turningOn ? type : 'none';
         const startEdgeId = startMode === 'intro' ? ((findEdge(e => e.type === 'intro' && e.r === songId) || {}).id || null) : null;
         const nodes = { ...prev.activePlaylist.nodes, [songId]: { ...base, startMode, startEdgeId } };
         return { ...prev, activePlaylist: { ...prev.activePlaylist, nodes } };
       }
-      const turningOn = base.endMode !== type;
-      if (!turningOn) return { ...prev, activePlaylist: unwireOutput(prev.activePlaylist, songId) };
-      const endEdgeId = type === 'outro' ? ((findEdge(e => e.type === 'outro' && e.l === songId) || {}).id || null) : null;
-      const nodes = { ...prev.activePlaylist.nodes, [songId]: { ...base, endMode: type, endEdgeId } };
+      const outputs = node ? nodeOutputs(node) : [];
+      const turningOn = !outputs.some(o => o.type === type);
+      if (!turningOn) {
+        const existing = outputs.find(o => o.type === type);
+        return { ...prev, activePlaylist: removeOutput(prev.activePlaylist, songId, type, existing.edgeId) };
+      }
+      const edgeId = type === 'outro' ? ((findEdge(e => e.type === 'outro' && e.l === songId) || {}).id || null) : null;
+      const startMode = node ? node.startMode : 'none', startEdgeId = node ? node.startEdgeId : null;
+      const nodes = {
+        ...prev.activePlaylist.nodes,
+        [songId]: { startMode, startEdgeId, outputs: [...outputs, { type, edgeId, targetId: null }] },
+      };
       return { ...prev, activePlaylist: { ...prev.activePlaylist, nodes } };
     });
   }, [setSession, findEdge]);
@@ -427,8 +463,12 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   const commitAddTransition = useCallback((source, target, edgeId) => {
     setSession(prev => ({ ...prev, activePlaylist: addTransitionConnection(prev.activePlaylist, source, target, edgeId) }));
   }, [setSession]);
-  const onDisconnectTransition = useCallback((source, edgeId) => {
-    setSession(prev => ({ ...prev, activePlaylist: removeTransitionConnection(prev.activePlaylist, source, edgeId) }));
+  // The general "remove exactly one active output entry" handler — a
+  // hover-✕ on any rendered wire (a Transition, or a plain None/Outro
+  // link) calls this with its own {type, edgeId}, leaving any other
+  // active output on that same song, of any type, untouched.
+  const onDisconnectOutput = useCallback((songId, type, edgeId) => {
+    setSession(prev => ({ ...prev, activePlaylist: removeOutput(prev.activePlaylist, songId, type, edgeId) }));
   }, [setSession]);
 
   // Node context menu's "Autoconnect transitions" — wires every real
@@ -508,7 +548,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // is even allowed to visually snap, so an invalid drop never gets this
   // far in the first place.
   //
-  // These handlers (and toggleSocket/commitWire/disconnectSong/
+  // These handlers (and toggleSocket/commitWire/onDisconnectOutput/
   // selectVariant above and below) are wrapped in useCallback so their
   // identity only changes when something they actually depend on does —
   // GraphPane threads them into each edge's `data`, and an edge rendered
@@ -584,7 +624,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // on activePlaylist's own startEdgeId instead of the song's ordinary
   // node entry, or the switch would silently do nothing to what Start
   // actually plays (see wireStart's comment in core.js).
-  const selectVariant = useCallback((songId, side, edgeId) => {
+  const selectVariant = useCallback((songId, side, type, oldEdgeId, edgeId) => {
     setSession(prev => {
       if (side === 'left' && prev.activePlaylist.startSongId === songId
         && (!prev.activePlaylist.nodes[songId] || prev.activePlaylist.nodes[songId].startMode === 'none')) {
@@ -594,17 +634,25 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
         ...prev,
         activePlaylist: side === 'left'
           ? setStartVariant(prev.activePlaylist, songId, edgeId)
-          : setEndVariant(prev.activePlaylist, songId, edgeId),
+          : setEndVariant(prev.activePlaylist, songId, type, oldEdgeId, edgeId),
       };
     });
   }, [setSession]);
 
-  // The hover-✕ on an active wire (see GraphPane's edge rendering) —
-  // deliberately not "click the wire itself", which would make a stray
-  // click destroy part of a built playlist the same way clicking to end
-  // a set used to risk before that got a confirm modal of its own.
-  const disconnectSong = useCallback((songId) => {
-    setSession(prev => ({ ...prev, activePlaylist: unwireOutput(prev.activePlaylist, songId) }));
+  // The End node's own context-menu "Disconnect" — removes just whichever
+  // output entry is the one pointing at End, leaving any other active
+  // output on that song (of any type) untouched. Deliberately not "click
+  // the wire itself" for the hover-✕ case (see onDisconnectOutput above),
+  // which would make a stray click destroy part of a built playlist the
+  // same way clicking to end a set used to risk before that got a confirm
+  // modal of its own.
+  const disconnectEnd = useCallback((songId) => {
+    setSession(prev => {
+      const node = prev.activePlaylist.nodes[songId];
+      const entry = node && nodeOutputs(node).find(o => o.targetId === END);
+      if (!entry) return prev;
+      return { ...prev, activePlaylist: removeOutput(prev.activePlaylist, songId, entry.type, entry.edgeId) };
+    });
   }, [setSession]);
 
   // ---------------- search (Fuse.js) ----------------
@@ -711,7 +759,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // one-shot manual queue, which nothing writes into anymore now that the
   // Next list and the explicit End Set trigger are both gone.
   const endWired = useMemo(
-    () => Object.keys(activePlaylist.nodes).some(id => activePlaylist.nodes[id].nextSongId === END),
+    () => Object.keys(activePlaylist.nodes).some(id => nodeOutputs(activePlaylist.nodes[id]).some(o => o.targetId === END)),
     [activePlaylist]
   );
   const selectedSong = selectedId ? placedSongs[selectedId] : null;
@@ -801,8 +849,8 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <GraphPane
             songs={placedSongs} positions={positions} transitionEdgesRaw={transitionEdgesRaw} activePlaylist={activePlaylist}
             socketDataById={socketDataById} onToggleSocket={toggleSocket} onSelectVariant={selectVariant} mixingEdgeId={mixingEdgeId}
-            onConnect={handleConnect} isValidConnection={isValidConnection} onDisconnectSong={disconnectSong}
-            onDisconnectTransition={onDisconnectTransition} onDisconnectStart={disconnectStart}
+            onConnect={handleConnect} isValidConnection={isValidConnection}
+            onDisconnectOutput={onDisconnectOutput} onDisconnectStart={disconnectStart}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
@@ -893,7 +941,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           onEditInLibrary={() => { goLibrary(); closeContextMenu(); }}
           onRemoveFromGraph={(id) => { removeFromCanvas(id); closeContextMenu(); }}
           onDisconnectStart={() => { disconnectStart(); closeContextMenu(); }}
-          onDisconnectEnd={(id) => { disconnectSong(id); closeContextMenu(); }}
+          onDisconnectEnd={(id) => { disconnectEnd(id); closeContextMenu(); }}
           onAutoconnectSelection={(ids) => { onAutoconnectSelection(ids); closeContextMenu(); }}
           onDisconnectAllSelection={(ids) => { onDisconnectAllSelection(ids); closeContextMenu(); }}
           onRemoveFromGraphSelection={(ids) => { onRemoveFromGraphSelection(ids); closeContextMenu(); }}
@@ -973,7 +1021,7 @@ function ContextMenu({
     const wired = !!activePlaylist.startSongId;
     items = <button className="context-menu-item" disabled={!wired} onClick={onDisconnectStart}>{wired ? 'Disconnect' : 'Not wired'}</button>;
   } else {
-    const wiredFrom = Object.keys(activePlaylist.nodes).find(id => activePlaylist.nodes[id].nextSongId === END);
+    const wiredFrom = Object.keys(activePlaylist.nodes).find(id => nodeOutputs(activePlaylist.nodes[id]).some(o => o.targetId === END));
     items = <button className="context-menu-item" disabled={!wiredFrom} onClick={() => onDisconnectEnd(wiredFrom)}>{wiredFrom ? 'Disconnect' : 'Not wired'}</button>;
   }
   return <div className="context-menu" style={style} ref={ref}>{items}</div>;

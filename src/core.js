@@ -237,90 +237,110 @@ export function unwireStart(playlist) {
 }
 
 function playlistNode(playlist, songId) {
-  return playlist.nodes[songId] || { startMode: 'none', startEdgeId: null, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] };
+  return playlist.nodes[songId] || { startMode: 'none', startEdgeId: null, outputs: [] };
 }
 
-// A node's real transition set, reconstructed from the old singular
-// endEdgeId/nextSongId fields when `transitions` itself is missing or
-// empty — every one of transition-mode's three real touch points
-// (reading who plays next, adding a new transition, removing one) needs
-// this exact same fallback, since any node touched only by `wireConnection`
-// or created before `transitions` existed carries the singular fields but
-// no array. Originally only `playlistNextHop` and `removeTransitionConnection`
-// had it; `addTransitionConnection` didn't, which meant dragging a SECOND
-// transition onto a node still in the old singular shape silently discarded
-// the first one instead of adding to it (reported directly, reproduced
-// exactly: the first transition visibly downgraded to a dashed, unwired
-// line the moment a second one was dragged in).
-function existingTransitions(node) {
-  if (node.endMode !== 'transition') return [];
-  if (node.transitions && node.transitions.length) return node.transitions;
-  return node.endEdgeId ? [{ edgeId: node.endEdgeId, targetId: node.nextSongId }] : [];
+// A node's outgoing wiring, unified: `outputs` is a flat list of
+// { type: 'none'|'outro'|'transition', edgeId, targetId } entries, and a
+// node can carry active entries of MORE THAN ONE TYPE AT ONCE now — a song
+// can simultaneously have an active None wire to one place, an active
+// Outro wire to another, and one-or-more active Transitions to others,
+// with the random hop below picking a type first, then a destination
+// within it (reported directly, from a screenshot showing exactly this:
+// two differently-typed lines both leaving one song at once, asking for
+// the earlier "one active endMode" design to become "several, at once").
+// At most one None entry and one Outro entry per node — dragging a new
+// one of either replaces the old one of that SAME type only, same
+// single-slot-per-type behavior none/outro always had; Transition alone
+// can carry several simultaneously (addTransitionConnection below),
+// unchanged from before this rework. A destination's own arrival
+// (startMode/startEdgeId) stays single-slot — out of scope here by
+// direct instruction ("multiple intros/outros/transitions per destination
+// should be off the table for now").
+//
+// `nodeOutputs` also carries the fallback for data saved before `outputs`
+// existed (the old singular endMode/endEdgeId/nextSongId, with
+// `transitions` only ever populated when endMode==='transition') — new
+// writes always populate `outputs` directly and never re-create the old
+// fields, so this fallback only ever fires for a node untouched since
+// before this rework.
+export function nodeOutputs(node) {
+  if (node.outputs) return node.outputs;
+  if (node.endMode === 'transition') {
+    if (node.transitions && node.transitions.length) return node.transitions.map(t => ({ type: 'transition', edgeId: t.edgeId, targetId: t.targetId }));
+    return node.endEdgeId ? [{ type: 'transition', edgeId: node.endEdgeId, targetId: node.nextSongId }] : [];
+  }
+  if ((node.endMode === 'none' || node.endMode === 'outro') && node.nextSongId) {
+    return [{ type: node.endMode, edgeId: node.endEdgeId || null, targetId: node.nextSongId }];
+  }
+  return [];
 }
 
-// Every destination a node's own outgoing wiring actually reaches — one
-// for a plain None/Outro cut, but *all* of them for a Transition (which
-// can carry more than one, see addTransitionConnection). graphLayout.js's
-// Autoarrange needs this same "every one, not just the first" view for
-// its own dagre edges: it used to read `nextSongId` alone, which only
-// ever holds the most-recently-wired transition — a node's other
-// transition(s) were completely invisible to the layout, leaving that
+// Every destination a node's own outgoing wiring actually reaches, across
+// every active type at once. graphLayout.js's Autoarrange needs this same
+// "every one, not just the first" view for its own dagre edges — a node's
+// other output(s) used to be completely invisible to it, leaving that
 // destination with no positional relationship to its real source at all
 // and dumping it wherever dagre parks an otherwise-disconnected node
 // (reported directly as Autoarrange drawing a huge, pointless diagonal
 // line back across the whole graph).
 export function allDestinationIds(node) {
-  if (node.endMode === 'transition') return existingTransitions(node).map(t => t.targetId);
-  return node.nextSongId ? [node.nextSongId] : [];
+  return nodeOutputs(node).map(o => o.targetId).filter(Boolean);
 }
 
-// Wires one full connection — a Transition drag (endEdgeId names the
-// produced edge, toId is just edge.r) and a None/Outro/Intro drag (toId is
-// whatever node the DJ dropped on, endEdgeId is the outro edge if any, the
-// destination's startEdgeId is its intro edge if any) both resolve through
-// this same function, always updating both ends together so the playlist
-// can never end up with a dangling half-wire only one side knows about.
-export function wireConnection(playlist, fromId, toId, endMode, endEdgeId, startMode, startEdgeId) {
+// Wires one full connection for a given output `type` — a Transition drag
+// (edgeId names the produced edge, toId is just edge.r) and a None/Outro
+// drag (toId is whatever node the DJ dropped on, edgeId is the outro edge
+// if any, the destination's startEdgeId is its intro edge if any) both
+// resolve through this same function, always updating both ends together
+// so the playlist can never end up with a dangling half-wire only one
+// side knows about. Replaces whichever entry of this SAME `type` already
+// existed on `fromId` (None/Outro's single-slot-per-type rule) — every
+// other type's own entries are carried forward untouched, which is the
+// whole point of this rework. Use addTransitionConnection instead for a
+// Transition drag, which adds rather than replaces.
+export function wireConnection(playlist, fromId, toId, type, edgeId, startMode, startEdgeId) {
+  const node = playlistNode(playlist, fromId);
+  const outputs = nodeOutputs(node).filter(o => o.type !== type);
+  outputs.push({ type, edgeId: edgeId || null, targetId: toId });
   const nodes = { ...playlist.nodes };
-  nodes[fromId] = { ...playlistNode(playlist, fromId), endMode, endEdgeId: endEdgeId || null, nextSongId: toId };
+  nodes[fromId] = { startMode: node.startMode, startEdgeId: node.startEdgeId, outputs };
   nodes[toId] = { ...playlistNode(playlist, toId), startMode, startEdgeId: startEdgeId || null };
   return { ...playlist, nodes };
 }
 
-// Disconnects songId's ENTIRE outgoing wire — every simultaneous
-// transition it carries (see addTransitionConnection below) included, not
-// just one — clearing whatever it pointed to back to 'none' rather than
-// leaving that node silently claiming a connection that's no longer
-// there. Use removeTransitionConnection instead when only one specific
-// transition among several should go.
+// Disconnects songId's ENTIRE outgoing wire — every active type and every
+// simultaneous transition within it, not just one — clearing every
+// destination it pointed to back to 'none' rather than leaving any of
+// them silently claiming a connection that's no longer there. Use
+// removeOutput instead when only one specific type/edge among several
+// active ones should go.
 export function unwireOutput(playlist, songId) {
   const node = playlistNode(playlist, songId);
-  const hasTransitions = node.endMode === 'transition' && node.transitions && node.transitions.length > 0;
-  if (!node.nextSongId && !hasTransitions) return playlist;
+  const outputs = nodeOutputs(node);
+  if (outputs.length === 0) return playlist;
   const nodes = { ...playlist.nodes };
-  const destIds = hasTransitions ? node.transitions.map(t => t.targetId) : (node.nextSongId ? [node.nextSongId] : []);
-  nodes[songId] = { ...node, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] };
-  destIds.forEach(destId => {
-    if (nodes[destId]) nodes[destId] = { ...nodes[destId], startMode: 'none', startEdgeId: null };
+  nodes[songId] = { startMode: node.startMode, startEdgeId: node.startEdgeId, outputs: [] };
+  outputs.forEach(o => {
+    if (o.targetId && nodes[o.targetId]) nodes[o.targetId] = { ...nodes[o.targetId], startMode: 'none', startEdgeId: null };
   });
   return { ...playlist, nodes };
 }
 
-// A song can carry more than one simultaneous Transition now — dragging a
-// second one in adds to the set rather than silently replacing the first
-// (this is also what "Autoconnect" below wires up in bulk). Which one
-// actually plays is picked at random each time (playlistNextHop) until a
-// real weighting system exists; the graph itself still shows every wired
-// candidate as a solid active line, so nothing about what's *possible* is
-// hidden the way a blind shuffle would. A no-op if this exact edge is
-// already wired.
+// A song can carry more than one simultaneous Transition — dragging a
+// second one in adds to the set rather than replacing the first (this is
+// also what "Autoconnect" below wires up in bulk), and leaves any active
+// None/Outro entries on the same node alone too. Which one actually plays
+// is picked at random each time (playlistNextHop) until a real weighting
+// system exists; the graph itself still shows every wired candidate as a
+// solid active line, so nothing about what's *possible* is hidden the way
+// a blind shuffle would. A no-op if this exact edge is already wired.
 export function addTransitionConnection(playlist, fromId, toId, edgeId) {
   const node = playlistNode(playlist, fromId);
-  const existing = existingTransitions(node);
-  if (existing.some(t => t.edgeId === edgeId)) return playlist;
-  const transitions = [...existing, { edgeId, targetId: toId }];
+  const outputs = nodeOutputs(node);
+  if (outputs.some(o => o.type === 'transition' && o.edgeId === edgeId)) return playlist;
   const nodes = { ...playlist.nodes };
-  nodes[fromId] = { ...node, endMode: 'transition', endEdgeId: edgeId, nextSongId: toId, transitions };
+  nodes[fromId] = { startMode: node.startMode, startEdgeId: node.startEdgeId, outputs: [...outputs, { type: 'transition', edgeId, targetId: toId }] };
   // Input stays single-choice (v1) — if more than one song ends up wiring a
   // transition into the same destination, whichever wrote last wins here,
   // same as any other pre-existing wiring collision on a shared socket.
@@ -328,22 +348,30 @@ export function addTransitionConnection(playlist, fromId, toId, edgeId) {
   return { ...playlist, nodes };
 }
 
-// Removes exactly one transition from a song's set, leaving any others it
-// carries untouched — the counterpart to addTransitionConnection, and
-// what a hover-✕ on one specific transition edge (or unchecking one
-// candidate) should call instead of the blanket unwireOutput.
-export function removeTransitionConnection(playlist, fromId, edgeId) {
-  const node = playlistNode(playlist, fromId);
-  const current = existingTransitions(node);
-  const removed = current.find(t => t.edgeId === edgeId);
+// Removes exactly one output entry — identified by its `type` plus
+// `edgeId` (None's is always null, Outro's is its one produced clip,
+// Transition's picks out one of possibly several) — leaving every other
+// active output on this node, of any type, untouched. Replaces the old
+// per-transition-only removeTransitionConnection: None/Outro's single
+// slot and Transition's multi-slot list are the same kind of thing now
+// (one entry in `outputs`), so removing one of either is the same
+// operation. What a hover-✕ on one specific line (or unchecking one
+// candidate) calls, instead of the blanket unwireOutput.
+export function removeOutput(playlist, songId, type, edgeId) {
+  const node = playlistNode(playlist, songId);
+  const outputs = nodeOutputs(node);
+  const removed = outputs.find(o => o.type === type && o.edgeId === (edgeId || null));
   if (!removed) return playlist;
-  const transitions = current.filter(t => t.edgeId !== edgeId);
   const nodes = { ...playlist.nodes };
-  nodes[fromId] = transitions.length === 0
-    ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] }
-    : { ...node, endEdgeId: transitions[0].edgeId, nextSongId: transitions[0].targetId, transitions };
-  const dest = nodes[removed.targetId];
-  if (dest && dest.startEdgeId === edgeId) nodes[removed.targetId] = { ...dest, startMode: 'none', startEdgeId: null };
+  nodes[songId] = { startMode: node.startMode, startEdgeId: node.startEdgeId, outputs: outputs.filter(o => o !== removed) };
+  const dest = removed.targetId && nodes[removed.targetId];
+  // Only clear the destination's shared arrival field if it's still
+  // pointing at exactly the entry being removed — some other active
+  // output (from this node or another) may have since claimed it, and
+  // that claim isn't ours to erase.
+  if (dest && dest.startMode === type && dest.startEdgeId === (edgeId || null)) {
+    nodes[removed.targetId] = { ...dest, startMode: 'none', startEdgeId: null };
+  }
   return { ...playlist, nodes };
 }
 
@@ -374,39 +402,47 @@ export function autoconnectFullGraph(visibleEdges, playlist, songIds) {
 }
 
 // The node context menu's "Disconnect all wires" — clears every wire that
-// touches songId in one action: its own outgoing wire(s), whichever other
-// songs (there can be more than one now, if they each wired a different
-// Transition here) point their own output at songId, and Start Set's wire
-// if that's what points here. A non-transition source pointing at songId
-// gets its whole output unwired (it only ever has the one); a transition
-// source only loses the specific transition(s) that targeted songId,
-// leaving any others it carries alone.
+// touches songId in one action: its own outgoing wire(s) of every active
+// type, whichever other songs (there can be more than one now, across
+// any mix of types) point their own output at songId, and Start Set's
+// wire if that's what points here. Only the specific output entries that
+// actually targeted songId are removed from each other node — any of its
+// own other active outputs, of any type, are left alone.
 export function disconnectAllWires(playlist, songId) {
   let next = unwireOutput(playlist, songId);
   Object.keys(next.nodes).forEach(id => {
-    const n = next.nodes[id];
-    if (n.endMode === 'transition' && n.transitions && n.transitions.length) {
-      n.transitions.filter(t => t.targetId === songId).forEach(t => { next = removeTransitionConnection(next, id, t.edgeId); });
-    } else if (n.nextSongId === songId) {
-      next = unwireOutput(next, id);
-    }
+    nodeOutputs(next.nodes[id]).filter(o => o.targetId === songId).forEach(o => { next = removeOutput(next, id, o.type, o.edgeId); });
   });
   if (next.startSongId === songId) next = unwireStart(next);
   return next;
 }
 
-// Switches which produced edge a socket that's already active is using,
-// without touching endMode/startMode/nextSongId — the "Transition" (or
-// Intro/Outro) row stays put, only the specific candidate underneath it
-// changes. A Transition's edge is picked on the output side only (the
-// same "one direction of truth" as wireConnection), so switching it also
-// updates the destination's mirrored startEdgeId; Intro/Outro are each a
-// single song's own fragment choice with no other side to keep in sync.
-export function setEndVariant(playlist, songId, edgeId) {
+// Switches which produced edge one specific active output entry is
+// using, without touching startMode/targetId or any other active
+// output on this node — the row stays put, only the candidate under it
+// changes. Identified by {type, oldEdgeId} rather than just `type` since
+// a node can now carry several Transition entries at once (one per
+// destination) — None has no real edgeId (always null, and has no
+// candidates to switch between in the first place), Outro and each
+// Transition destination each pick their variant independently. A
+// Transition's edge is picked on the output side only (the same "one
+// direction of truth" as wireConnection), so switching it also updates
+// the destination's mirrored startEdgeId — but only if that destination
+// hadn't already been reclaimed by some other active output since (same
+// "don't erase a claim that isn't ours" rule as removeOutput).
+export function setEndVariant(playlist, songId, type, oldEdgeId, newEdgeId) {
   const node = playlistNode(playlist, songId);
-  const nodes = { ...playlist.nodes, [songId]: { ...node, endEdgeId: edgeId } };
-  if (node.endMode === 'transition' && node.nextSongId) {
-    nodes[node.nextSongId] = { ...playlistNode(playlist, node.nextSongId), startEdgeId: edgeId };
+  const outputs = nodeOutputs(node);
+  const idx = outputs.findIndex(o => o.type === type && o.edgeId === oldEdgeId);
+  if (idx === -1) return playlist;
+  const target = outputs[idx].targetId;
+  const nodes = {
+    ...playlist.nodes,
+    [songId]: { startMode: node.startMode, startEdgeId: node.startEdgeId, outputs: outputs.map((o, i) => (i === idx ? { ...o, edgeId: newEdgeId } : o)) },
+  };
+  const dest = target && nodes[target];
+  if (dest && dest.startMode === type && dest.startEdgeId === oldEdgeId) {
+    nodes[target] = { ...dest, startEdgeId: newEdgeId };
   }
   return { ...playlist, nodes };
 }
@@ -423,14 +459,8 @@ export function removeSongFromPlaylist(playlist, songId) {
   for (const id of Object.keys(playlist.nodes)) {
     if (id === songId) continue;
     const node = playlist.nodes[id];
-    if (node.endMode === 'transition' && node.transitions && node.transitions.length) {
-      const transitions = node.transitions.filter(t => t.targetId !== songId);
-      nodes[id] = transitions.length === node.transitions.length ? node
-        : transitions.length === 0 ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null, transitions: [] }
-        : { ...node, endEdgeId: transitions[0].edgeId, nextSongId: transitions[0].targetId, transitions };
-    } else {
-      nodes[id] = node.nextSongId === songId ? { ...node, endMode: 'none', endEdgeId: null, nextSongId: null } : node;
-    }
+    const outputs = nodeOutputs(node).filter(o => o.targetId !== songId);
+    nodes[id] = { startMode: node.startMode, startEdgeId: node.startEdgeId, outputs };
   }
   const wasStart = playlist.startSongId === songId;
   const startSongId = wasStart ? null : playlist.startSongId;
@@ -445,22 +475,34 @@ export function removeSongFromPlaylist(playlist, songId) {
 // through the same commitTransition/commitCutOrOutro path, and the real
 // audio engine never needs to know whether a hop came from a click or a
 // wired connection.
+//
+// Two-stage random now that a song can end several different ways at
+// once (reported directly, exactly this shape: a song with an active
+// None wire to one place AND an active Transition to another,
+// simultaneously) — first pick which TYPE fires among whichever are
+// actually active, uniformly, then pick a destination within that type
+// (only Transition can have more than one candidate there; None/Outro
+// each have exactly one, so that second draw is a no-op for them). This
+// is a real generalization of the old single-type "pick a Transition
+// destination at random" — with only one type ever active, picking a
+// type first and then its one destination is exactly the old behavior.
 export function playlistNextHop(playlist, songId) {
   const node = playlist.nodes[songId];
-  if (!node || !node.nextSongId) return null;
-  if (node.endMode === 'transition') {
-    // A song can carry more than one simultaneous Transition (see
-    // addTransitionConnection) — picked uniformly at random each time,
-    // until a real weighting system exists.
-    const options = existingTransitions(node);
-    if (options.length === 0) return null;
-    const pick = options[Math.floor(Math.random() * options.length)];
+  if (!node) return null;
+  const outputs = nodeOutputs(node).filter(o => o.targetId);
+  if (outputs.length === 0) return null;
+  const types = [];
+  outputs.forEach(o => { if (!types.includes(o.type)) types.push(o.type); });
+  const chosenType = types[Math.floor(Math.random() * types.length)];
+  const candidates = outputs.filter(o => o.type === chosenType);
+  const pick = candidates[Math.floor(Math.random() * candidates.length)];
+  if (chosenType === 'transition') {
     return { id: pick.targetId, mode: 'transition', edgeId: pick.edgeId };
   }
-  const destNode = playlist.nodes[node.nextSongId];
+  const destNode = playlist.nodes[pick.targetId];
   return {
-    id: node.nextSongId, mode: 'cut',
-    ending: node.endMode === 'outro' ? 'outro' : 'cut',
+    id: pick.targetId, mode: 'cut',
+    ending: chosenType === 'outro' ? 'outro' : 'cut',
     // The outro clip's own edgeId, so transitionTriggerElapsed (below) can
     // hand off at *its* real cue point the same way a transition already
     // does — without this, an outro-ending hop had no way to find its own
@@ -469,7 +511,7 @@ export function playlistNextHop(playlist, songId) {
     // started from its own beginning, which (per the "render with the
     // original still attached" upload convention) duplicates whatever tail
     // portion the outro clip overlaps with.
-    edgeId: node.endMode === 'outro' ? node.endEdgeId : null,
+    edgeId: chosenType === 'outro' ? pick.edgeId : null,
     starting: (destNode && destNode.startMode === 'intro') ? 'intro' : 'cut',
   };
 }

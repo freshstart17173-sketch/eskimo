@@ -1005,6 +1005,55 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
+### Done this pass (round 18 — a node's output side now supports multiple simultaneous active types)
+
+Follow-up to round 16's multi-io fix, which only covered multiple
+*Transition* wires out of/into a socket. Sent a screenshot of two lines
+converging on one destination and clarified the real ask: a single node
+should be able to have **None AND Outro AND Transition all active at
+once**, each with its own destination(s), not just several Transitions
+of the *same* type — random playback picks the socket type first
+(None/Outro/Transition), then the destination within that type. The
+arrival/input side stays single-slot on purpose ("multiple intros/outros/
+transitions per destination should be off the table for now").
+
+Implemented by generalizing every place that used to assume "a node has
+at most one active output" into one shared shape: `nodes[id].outputs` is
+now always an array of `{type, edgeId, targetId}` entries (any mix of
+types, each independently addable/removable), read through one exported
+helper, `nodeOutputs(node)`, that also synthesizes this shape on the fly
+from the old single-mode fields (`endMode`/`nextSongId`/`endEdgeId`) so
+nothing already saved needs a migration. `wireConnection`,
+`addTransitionConnection`, and the new `removeOutput` (replaces
+`removeTransitionConnection`) all read/write through this one shape;
+`removeOutput` only clears a destination's shared arrival field
+(`startMode`/`startEdgeId`) when it's still pointing at exactly the entry
+being removed, since some other active output — from this node or
+another — may have since claimed it. `playlistNextHop` does the two-stage
+random pick: uniform over active types, then uniform over that type's
+destinations. `GraphPane.jsx` draws one edge per active non-Transition
+entry (previously "at most one plain link per node") alongside the
+existing one-edge-per-produced-Transition loop; `GraphNodes.jsx`'s
+`SocketList` now takes `activeTypes`/`optionsByType`/etc. (arrays/maps)
+instead of a single active value, so a socket column can show more than
+one row bolded at once.
+
+Verified: a 4000-draw Monte Carlo on `playlistNextHop` confirms the
+two-stage pick is uniform within both stages; a live-rendering test wired
+one node to three simultaneous destinations (None/Outro/Transition) and
+confirmed all three edges render with the right handles and all three
+socket rows show active; re-ran the round-16 multi-output/multi-input
+drag tests and the legacy-shaped-node fallback test against the new
+unified model with zero regressions; confirmed a hover-✕ disconnect or a
+socket-dot toggle on one type never touches another active type on the
+same node (including the destination's shared arrival field only
+clearing when it was actually pointing at the removed entry); confirmed
+toggling a type on with no destination chosen yet shows the socket as
+active without drawing a phantom edge. One early run of the rendering
+test showed a missing edge — traced to invalid test fixture data (a
+destination node's `startMode` set to `'outro'`, which was never a legal
+arrival-side value; the real bug list is otherwise empty).
+
 ### Done this pass (round 17 — shared live crates, producer-friend collaboration)
 
 Asked directly for a shareable link so producer friends can open the real

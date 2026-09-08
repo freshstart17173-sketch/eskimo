@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useState, createContext, useContext } from 'react';
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode, useViewport } from '@xyflow/react';
-import { END, START } from '../core.js';
+import { END, START, nodeOutputs } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphLayout.js';
 import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext, MultiSelectionContext } from './GraphNodes.jsx';
 import { useTheme } from '../theme.js';
@@ -150,7 +150,7 @@ const edgeTypes = { fanned: FannedEdge, active: ActiveEdge };
 
 export default function GraphPane({
   songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId,
-  onConnect, isValidConnection, onDisconnectSong, onDisconnectTransition, onDisconnectStart,
+  onConnect, isValidConnection, onDisconnectOutput, onDisconnectStart,
   stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
   onDragSongPosition, endQueued, onSelectSong,
@@ -322,33 +322,37 @@ export default function GraphPane({
       seen.set(pairKey, dupIndex + 1);
       const offset = dupIndex === 0 ? 0 : Math.ceil(dupIndex / 2) * 26 * (dupIndex % 2 === 1 ? 1 : -1);
       const sourceNode = activePlaylist.nodes[e.l];
-      // A song can carry more than one simultaneous Transition now (see
-      // addTransitionConnection, core.js) — check membership in the whole
-      // set, not equality against a single endEdgeId, so autoconnect (or a
-      // second manual drag) shows every wired one as active, not just
-      // whichever happens to be "primary".
-      const isActive = !!sourceNode && sourceNode.endMode === 'transition' && (
-        (sourceNode.transitions && sourceNode.transitions.length)
-          ? sourceNode.transitions.some(t => t.edgeId === e.id)
-          : sourceNode.endEdgeId === e.id
-      );
+      // A song can carry more than one simultaneous Transition, to more
+      // than one destination, alongside its own active None/Outro entries
+      // now (see core.js's nodeOutputs) — check membership in the whole
+      // set, not equality against a single "primary" edge, so autoconnect
+      // (or a second manual drag) shows every wired one as active.
+      const isActive = !!sourceNode && nodeOutputs(sourceNode).some(o => o.type === 'transition' && o.edgeId === e.id);
       const color = isActive ? lineColor.ink : lineColor.grey;
       return {
         id: e.id, source: e.l, target: e.r,
         sourceHandle: 'right-transition', targetHandle: 'left-transition',
         type: isActive ? 'active' : (offset === 0 ? 'default' : 'fanned'),
         // A hover-✕ on one active Transition line only ever removes that
-        // specific edge — see onDisconnectTransition, unlike the synthetic
-        // None/Outro link edges below, which still only ever have the one.
-        data: offset === 0 && !isActive ? undefined : { offset, onDisconnect: () => (isActive ? onDisconnectTransition(e.l, e.id) : onDisconnectSong(e.l)) },
+        // specific edge, leaving any other active output on this same
+        // node (of any type) untouched.
+        data: !isActive ? undefined : { offset, onDisconnect: () => onDisconnectOutput(e.l, 'transition', e.id) },
         animated: isActive && mixingEdgeId === e.id,
         style: { stroke: color, strokeWidth: isActive ? 3 : 1.5, strokeDasharray: isActive ? undefined : '2 4' },
       };
     });
-    // Multiple *different* songs can each independently wire a plain None/
-    // Outro link into the same destination's input (see core.js's
-    // wireConnection — each source's own nextSongId/endMode is untouched
-    // by another source separately wiring into the same target; only the
+    // Every active None/Outro entry gets its own synthetic edge (there's
+    // no produced audio piece behind a None wire to filter from
+    // transitionEdgesRaw the way a Transition/Outro's real clip does) —
+    // one node can now show BOTH an active None line to one place AND an
+    // active Outro line to another simultaneously (reported directly,
+    // exactly this shape), so this is a flatMap over every active
+    // non-transition entry per node, not "at most one link per node" the
+    // way it was when a node's output was a single exclusive mode.
+    // Multiple *different* songs can also each independently wire a plain
+    // None/Outro link into the same destination's input (core.js's
+    // wireConnection — each source's own output entries are untouched by
+    // another source separately wiring into the same target; only the
     // destination's own arrival-style choice, startMode/startEdgeId, is
     // shared between them, correctly, since "does this song play its own
     // intro when cut into" is a property of the destination, not of
@@ -358,20 +362,20 @@ export default function GraphPane({
     const seenTargets = new Map();
     Object.keys(activePlaylist.nodes).forEach(songId => {
       const node = activePlaylist.nodes[songId];
-      if (node.nextSongId && node.endMode !== 'transition') {
-        const dupIndex = seenTargets.get(node.nextSongId) || 0;
-        seenTargets.set(node.nextSongId, dupIndex + 1);
+      nodeOutputs(node).filter(o => o.type !== 'transition' && o.targetId).forEach(o => {
+        const dupIndex = seenTargets.get(o.targetId) || 0;
+        seenTargets.set(o.targetId, dupIndex + 1);
         const offset = dupIndex === 0 ? 0 : Math.ceil(dupIndex / 2) * 26 * (dupIndex % 2 === 1 ? 1 : -1);
-        const destNode = activePlaylist.nodes[node.nextSongId];
+        const destNode = activePlaylist.nodes[o.targetId];
         const startMode = (destNode && destNode.startMode) || 'none';
         edgesOut.push({
-          id: 'link-' + songId, source: songId, target: node.nextSongId,
-          sourceHandle: 'right-' + node.endMode, targetHandle: 'left-' + startMode,
+          id: 'link-' + songId + '-' + o.type, source: songId, target: o.targetId,
+          sourceHandle: 'right-' + o.type, targetHandle: 'left-' + startMode,
           type: 'active',
-          data: { offset, onDisconnect: () => onDisconnectSong(songId) },
+          data: { offset, onDisconnect: () => onDisconnectOutput(songId, o.type, o.edgeId) },
           style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
         });
-      }
+      });
     });
     if (activePlaylist.startSongId && songs[activePlaylist.startSongId]) {
       // Start's own arrival choice — activePlaylist.startMode, NOT the
@@ -390,7 +394,7 @@ export default function GraphPane({
       });
     }
     return edgesOut;
-  }, [transitionEdgesRaw, activePlaylist, songs, lineColor, mixingEdgeId, onDisconnectSong, onDisconnectTransition, onDisconnectStart]);
+  }, [transitionEdgesRaw, activePlaylist, songs, lineColor, mixingEdgeId, onDisconnectOutput, onDisconnectStart]);
 
   const onNodeDragStop = useCallback((_, node) => {
     onDragSongPosition(node.id, node.position.x, node.position.y);

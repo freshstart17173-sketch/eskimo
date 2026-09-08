@@ -243,17 +243,31 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
   );
 }
 
-function SocketList({ side, types, availability, active, onToggle, cueOffsetSec, songId, options, selectedEdgeId, onSelectVariant }) {
+// `activeTypes` is a *set* now, not a single mode — a node's right/output
+// side can have more than one type active at once (None to one place,
+// Outro to another, one-or-more Transitions to others, all
+// simultaneously — reported directly, exactly this shape). The left/
+// arrival side still only ever has zero or one active type (out of scope
+// to change, by direct instruction), so it's just always passed as a
+// one-or-zero-element array here for one shared interface instead of two.
+// `optionsByType`/`selectedEdgeIdByType`/`cueOffsetSecByType` are keyed by
+// type for the same reason — each active type gets its own independent
+// dropdown/cue-ring data now, not one shared value gated on a single
+// "which type is active" check.
+function SocketList({ side, types, availability, activeTypes, onToggle, cueOffsetSecByType = {}, songId, optionsByType = {}, selectedEdgeIdByType = {}, onSelectVariant }) {
   return (
     <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
-      {types.map((type) => (
-        <SocketRow
-          key={type} side={side} type={type} available={!!availability[type]} active={active === type}
-          cueOffsetSec={active === type ? cueOffsetSec : null} songId={active === type ? songId : null} onToggle={onToggle}
-          options={active === type ? options : undefined} selectedEdgeId={active === type ? selectedEdgeId : undefined}
-          onSelectVariant={active === type ? onSelectVariant : undefined}
-        />
-      ))}
+      {types.map((type) => {
+        const isActive = activeTypes.includes(type);
+        return (
+          <SocketRow
+            key={type} side={side} type={type} available={!!availability[type]} active={isActive}
+            cueOffsetSec={isActive ? (cueOffsetSecByType[type] ?? null) : null} songId={isActive ? songId : null} onToggle={onToggle}
+            options={isActive ? optionsByType[type] : undefined} selectedEdgeId={isActive ? selectedEdgeIdByType[type] : undefined}
+            onSelectVariant={(edgeId) => onSelectVariant(type, selectedEdgeIdByType[type], edgeId)}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -265,8 +279,8 @@ function SocketList({ side, types, availability, active, onToggle, cueOffsetSec,
 export function SongNode({ data, selected }) {
   const {
     song, state, inCount, outCount, onEnter, onLeave, playing, onSelect,
-    leftAvailable, rightAvailable, leftActive, rightActive, leftEdgeId, rightEdgeId,
-    leftOptions, rightOptions, rightCueSeconds, onToggleSocket, onSelectVariant,
+    leftAvailable, rightAvailable, leftActive, rightActiveTypes, leftEdgeId,
+    leftOptions, rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType, onToggleSocket, onSelectVariant,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
   const { hoveredId } = useContext(HoveredNodeContext);
@@ -328,14 +342,14 @@ export function SongNode({ data, selected }) {
       <div className="node-socket-section">
         <div className="node-socket-columns">
           <SocketList
-            side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} active={leftActive} onToggle={onToggle}
-            songId={ringSongId} options={leftOptions} selectedEdgeId={leftEdgeId}
-            onSelectVariant={(edgeId) => onSelectVariant(song.id, 'left', edgeId)}
+            side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} activeTypes={leftActive === 'none' ? [] : [leftActive]} onToggle={onToggle}
+            songId={ringSongId} optionsByType={{ [leftActive]: leftOptions }} selectedEdgeIdByType={{ [leftActive]: leftEdgeId }}
+            onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'left', type, oldEdgeId, edgeId)}
           />
           <SocketList
-            side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} active={rightActive} onToggle={onToggle}
-            cueOffsetSec={rightCueSeconds} songId={ringSongId} options={rightOptions} selectedEdgeId={rightEdgeId}
-            onSelectVariant={(edgeId) => onSelectVariant(song.id, 'right', edgeId)}
+            side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} activeTypes={rightActiveTypes} onToggle={onToggle}
+            cueOffsetSecByType={rightCueSecondsByType} songId={ringSongId} optionsByType={rightOptionsByType} selectedEdgeIdByType={rightEdgeIdByType}
+            onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'right', type, oldEdgeId, edgeId)}
           />
         </div>
       </div>
