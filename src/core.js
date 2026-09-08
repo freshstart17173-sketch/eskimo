@@ -36,8 +36,28 @@ const STORAGE_KEY = 'djflow:v3';
 // anyone's actual artwork. BPM/Key weren't supplied, so these are round
 // illustrative placeholders, not verified figures — don't rely on them
 // for actual mixing.
-const PIERRE4_COVER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Crect width='300' height='300' fill='%236a5490'/%3E%3C/svg%3E";
-const YEEZUS_COVER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Crect width='300' height='300' fill='%23f0f0ee'/%3E%3Crect x='190' y='55' width='95' height='95' fill='%23d32f1e' transform='rotate(10 237 102)'/%3E%3C/svg%3E";
+// One shared swatch per artist used to look flatly monochrome across a
+// whole 16- or 10-song group (real per-song variety is exactly what the
+// color-match feature exists to show off) — a small cycling palette per
+// artist instead, each still a simple original flat-color/geometric
+// shape, never a specific real cover redrawn, so the same "don't
+// redistribute anyone's actual artwork" constraint above holds per swatch,
+// not just for one shared one.
+function swatchCover(bg, accent) {
+  const accentRect = accent
+    ? "%3Crect x='190' y='55' width='95' height='95' fill='" + encodeURIComponent(accent) + "' transform='rotate(10 237 102)'/%3E"
+    : '';
+  return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Crect width='300' height='300' fill='"
+    + encodeURIComponent(bg) + "'/%3E" + accentRect + "%3C/svg%3E";
+}
+const PIERRE4_COVERS = [
+  swatchCover('#6a5490'), swatchCover('#7a4fa8'), swatchCover('#4f3a78'), swatchCover('#8a5fc2'),
+  swatchCover('#5a4098'), swatchCover('#6a3a8a'), swatchCover('#8a70b8'), swatchCover('#3f2f68'),
+];
+const YEEZUS_COVERS = [
+  swatchCover('#f0f0ee', '#d32f1e'), swatchCover('#f0f0ee', '#2f6ed3'), swatchCover('#f0f0ee', '#d3a02f'),
+  swatchCover('#f0f0ee', '#2fa88a'), swatchCover('#f0f0ee', '#a82f8a'),
+];
 
 export function sampleSongsForTests() {
   // The Life of Pi'erre 4 — Pi'erre Bourne. All 16 tracks, transitioning
@@ -62,14 +82,14 @@ export function sampleSongsForTests() {
     songs['p' + (i + 1)] = {
       id: 'p' + (i + 1), title, artist: "Pi'erre Bourne",
       x: 40 + (i % cols) * colSpacing, y: 40 + Math.floor(i / cols) * rowSpacing,
-      bpm: 140, key: 'F min', durationSec, coverUrl: PIERRE4_COVER,
+      bpm: 140, key: 'F min', durationSec, coverUrl: PIERRE4_COVERS[i % PIERRE4_COVERS.length],
     };
   });
   yeezus.forEach(([title, durationSec], i) => {
     songs['y' + (i + 1)] = {
       id: 'y' + (i + 1), title, artist: 'Kanye West',
       x: 40 + (i % 5) * colSpacing, y: 520 + Math.floor(i / 5) * rowSpacing,
-      bpm: 110, key: 'C min', durationSec, coverUrl: YEEZUS_COVER,
+      bpm: 110, key: 'C min', durationSec, coverUrl: YEEZUS_COVERS[i % YEEZUS_COVERS.length],
     };
   });
   return songs;

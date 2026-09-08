@@ -289,8 +289,8 @@ a { color: var(--accent); }
 .icon-btn-dark { background: rgba(252, 252, 252, .14); color: var(--paper); width: 20px; height: 20px; }
 
 .tag {
-  display: inline-flex; font-family: var(--font-mono); font-size: 10px; font-weight: 400; padding: 1px 5px;
-  border-radius: 0; line-height: 1.6; border: 1px solid var(--ink); color: var(--ink); background: transparent;
+  display: inline-flex; font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; padding: 1.5px 4px;
+  border-radius: 0; line-height: 1.4; border: 1px solid var(--ink); color: var(--ink); background: transparent;
 }
 .tag-accent, .tag-good, .tag-warn, .tag-purple, .tag-neutral, .tag-on-dark { border-color: var(--ink); color: var(--ink); background: transparent; }
 .tag-row { display: flex; gap: 5px; margin-bottom: 14px; }
@@ -377,24 +377,24 @@ a { color: var(--accent); }
    Active) node's full specifics show now that clicking a node no longer
    starts anything on its own. */
 .detail-pane {
-  width: 260px; flex: none; border-left: 1px solid var(--line-soft); background: var(--paper);
-  padding: 16px 14px; overflow-y: auto; position: relative;
+  width: 272px; flex: none; border-left: 1px solid var(--line-soft); background: var(--paper);
+  padding: 16px 15px; overflow-y: auto; position: relative;
 }
 .detail-pane-close { position: absolute; top: 10px; right: 10px; }
-.detail-pane-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding-right: 20px; }
-.detail-pane-art { width: 44px; height: 44px; flex: none; border-radius: 5px; }
-.detail-pane-title { font-weight: 700; font-size: 14px; line-height: 1.3; }
-.detail-pane-artist { font-size: 12px; color: var(--muted); }
-.detail-pane-tags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 12px; }
-.detail-pane-play { width: 100%; justify-content: center; margin-bottom: 16px; }
-.detail-pane-section { margin-bottom: 12px; }
+.detail-pane-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding-right: 22px; }
+.detail-pane-art { width: 48px; height: 48px; flex: none; border-radius: 5px; }
+.detail-pane-title { font-weight: 700; font-size: 15px; line-height: 1.3; }
+.detail-pane-artist { font-size: 12.5px; color: var(--muted); }
+.detail-pane-tags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 14px; }
+.detail-pane-play { width: 100%; justify-content: center; margin-bottom: 18px; }
+.detail-pane-section { margin-bottom: 16px; }
 .detail-pane-section-title {
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--faint);
-  margin-bottom: 3px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--faint);
+  margin-bottom: 6px;
 }
 .detail-pane-count { font-family: var(--font-mono); text-transform: none; letter-spacing: 0; }
-.detail-pane-row { font-size: 12.5px; color: var(--ink); }
+.detail-pane-row { font-size: 13px; font-weight: 600; color: var(--ink); }
 .detail-pane-cue { color: var(--muted); }
 .sequence-pane {
   width: 320px; flex: none; border-left: 1px solid var(--line-soft); background: var(--paper);
@@ -588,7 +588,7 @@ a { color: var(--accent); }
    old dark Playing card, since it sits as a thin strip above the graph
    rather than a whole card of its own. */
 .player-bar {
-  display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+  display: flex; align-items: center; gap: 13px; padding: 9px 15px;
   background: var(--panel); flex: none;
 }
 /* Sits at the very bottom of the page now (below the graph/detail-pane
@@ -596,14 +596,14 @@ a { color: var(--accent); }
    border separates it from the canvas above instead of the bottom border
    a top-of-page strip used. */
 .player-bar-bottom { border-top: 1px solid var(--line); border-bottom: none; }
-.player-bar-now { display: flex; align-items: center; gap: 8px; min-width: 0; flex: none; width: 170px; }
-.player-bar-art { width: 32px; height: 32px; flex: none; border-radius: 4px; }
+.player-bar-now { display: flex; align-items: center; gap: 9px; min-width: 0; flex: none; width: 180px; }
+.player-bar-art { width: 34px; height: 34px; flex: none; border-radius: 4px; }
 .player-bar-text { min-width: 0; }
 .player-bar-title { font-weight: 600; font-size: 12.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-bar-artist { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-bar-time { font-size: 10.5px; color: var(--muted); flex: none; width: 32px; }
 .player-bar-time:last-of-type { text-align: right; }
-.player-bar-scrub { flex: 1; min-width: 80px; }
+.player-bar-scrub { flex: 1; min-width: 100px; }
 .player-bar .playhead-track { background: rgba(19, 19, 19, .12); margin-top: 0; }
 /* The volume control collapses to a plain icon and only opens a slider on
    click (see VolumeControl, PerformPage.jsx) — "most things should
@@ -678,7 +678,7 @@ a { color: var(--accent); }
    side never take much vertical space; a variant picker opens directly
    from whichever row is active (see .node-socket-row-picker below), not
    as a separate line under both columns. */
-.node-socket-columns { display: flex; justify-content: space-between; gap: 10px; }
+.node-socket-columns { display: flex; justify-content: space-between; gap: 22px; }
 /* Rows deliberately stretch to the *column's* full width on both sides
    (no align-items override here) rather than shrink-wrapping to their
    label text — the socket dot is `position: absolute` and so takes no
@@ -692,14 +692,14 @@ a { color: var(--accent); }
    pack the label against the row's own right edge, is what makes the
    left and right offsets in `.node-socket-row .node-socket` actually
    symmetric. */
-.node-socket-side { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.node-socket-side { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
 .node-socket-row {
-  position: relative; display: flex; align-items: center; gap: 5px;
-  height: 15px; min-width: 0;
+  position: relative; display: flex; align-items: center; gap: 6px;
+  height: 22px; min-width: 0; padding: 0 4px 0 8px;
 }
-.node-socket-row-right { flex-direction: row-reverse; }
+.node-socket-row-right { flex-direction: row-reverse; padding: 0 8px 0 4px; }
 .node-socket-label {
-  font-size: 9.5px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden;
+  font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; pointer-events: none;
 }
 .node-socket-row-active .node-socket-label { color: var(--ink); font-weight: 700; }
@@ -732,18 +732,28 @@ a { color: var(--accent); }
    ring (see SocketRow in GraphNodes.jsx) — the whole point of building
    this instead of a native <select>, which can only ever show plain text. */
 .node-socket-listbox {
-  position: absolute; top: calc(100% + 3px); left: 0; width: 190px; z-index: 20;
+  position: absolute; top: calc(100% + 4px); left: 0; width: 200px; z-index: 20;
   background: var(--paper); border-radius: 5px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .18); overflow: hidden auto; max-height: 160px;
 }
 .node-socket-row-right .node-socket-listbox { left: auto; right: 0; }
 .node-socket-option {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;
-  width: 100%; padding: 5px 7px; font-size: 10px; color: var(--ink); text-align: left;
+  width: 100%; padding: 8px 10px; font-size: 11.5px; color: var(--ink); text-align: left;
 }
 .node-socket-option:hover { background: var(--panel); }
 .node-socket-option-selected { font-weight: 700; }
 .node-socket-option-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Flags an Intro/Outro candidate that would silently occlude an
+   already-built Transition off/onto this same song (see
+   occludedTransitions, core.js) — not disabled, just flagged: occluding
+   an existing transition is a real, sometimes-intended tradeoff (e.g.
+   deliberately retiring it), not a hard error. */
+.node-socket-option-warn {
+  flex: none; width: 13px; height: 13px; border-radius: 50%; font-size: 9px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--danger-bg); color: var(--danger);
+}
 
 /* A ring, not a bar — cheaper on card width, just as readable, and its
    color sweep (green -> red, computed in GraphNodes.jsx) does the same
@@ -755,19 +765,31 @@ a { color: var(--accent); }
 .state-active .socket-countdown-track { stroke: rgba(252, 252, 252, .25); }
 
 /* One dot style, everywhere, full stop — no socket looks like an
-   exception. Every *available* socket (active or not) renders identically:
-   solid, filled with its type's color, straddling the card's edge at the
-   same offset. The only extra treatment is a ring/glow on the active one.
-   An *unavailable* socket (no produced edge for this song) is flat grey
-   and inert — still occupies its row, per the fixed three-row layout, but
+   exception, and no longer color-coded by type (Intro/Outro/Transition)
+   either — matches docs/design/socket-redesign-v6.html's own "Corrected
+   after review: sockets are all plain circles now... type is shown by
+   label text and column (left = input, right = output) only" call,
+   carried through unchanged into screen-atlas.html (whose own
+   --sock-intro/-outro/-transition tokens turned out to be unused leftover
+   copies of the real app's token block — never actually referenced by
+   its own component CSS — not a signal to keep the per-type color).
+   Every *available* socket is a hollow outline (grey border, panel fill)
+   until it's the row actually in use, which fills solid ink instead —
+   the same active/inactive contrast the row's own label text already
+   uses (.node-socket-row-active), just applied to the dot too, and a
+   more legible "chosen vs. not" signal than the old scheme (every
+   available dot solid-filled, active only getting an extra ring). An
+   *unavailable* socket (no produced edge for this song) is flat grey and
+   inert — still occupies its row, per the fixed three-row layout, but
    can't be dragged, clicked, or connected to. */
 .graph-pane .react-flow__handle.node-socket {
   position: absolute; top: 50%; transform: translateY(-50%);
-  width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--socket-border);
-  background: var(--socket-border); z-index: 3; opacity: 1; pointer-events: auto; flex: none;
+  width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--line);
+  background: var(--panel); z-index: 3; opacity: 1; pointer-events: auto; flex: none;
 }
-/* The visible dot stays tiny (9px, matching the row's scale) but the real
-   clickable/draggable target is a much bigger invisible circle around it —
+/* The visible dot stays modest (13px, matching the row's scale) but the
+   real clickable/draggable target is a much bigger invisible circle
+   around it —
    a `::before` pseudo-element doesn't change the handle's own measured
    `getBoundingClientRect` (what React Flow registers as this handle's
    position for connection-radius math), only what the browser's own
@@ -783,16 +805,18 @@ a { color: var(--accent); }
    land on whichever one happened to win the DOM order, not whichever you
    were actually closest to (confirmed directly: the same screen point hit
    .node-socket-intro's hit-area instead of the .node-socket-none it was
-   closest to). 16px keeps this proportional to canvas zoom like the dot
-   itself and everything else on the card — still nearly double the bare
-   9px dot at any zoom level, and safely inside the 19px canvas-unit
-   spacing between stacked rows (`.node-socket-row` height 15px + `gap`
-   4px) so neighboring rows' hit-areas don't meaningfully overlap. */
+   closest to). 20px keeps this proportional to canvas zoom like the dot
+   itself and everything else on the card, and — recomputed for the bigger
+   13px dot and 22px row (socket-redesign-v6/screen-atlas sizing) — still
+   safely inside the 23px canvas-unit spacing between stacked rows
+   (`.node-socket-row` height 22px + `.node-socket-side` gap 1px): two
+   adjacent 20px hit-circles leave a 3px clear buffer between them, the
+   same margin the original 16px-vs-19px math had. */
 .graph-pane .react-flow__handle.node-socket::before {
-  content: ''; position: absolute; top: 50%; left: 50%; width: 16px; height: 16px;
+  content: ''; position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
   transform: translate(-50%, -50%);
 }
-.node-socket-row .node-socket { left: -14px; }
+.node-socket-row .node-socket { left: -16px; }
 /* `left` and `right` are different properties, so the ruleset above never
    gets "overridden" by this one just for coming later — both values apply
    at once, and per the absolute-positioning spec, a fixed (non-auto)
@@ -801,8 +825,13 @@ a { color: var(--accent); }
    positioned by the LEFT rule above (relative to the row's left edge, the
    wrong side entirely) — this is what made right-side arrows look like
    they came out of nowhere on the card, not just an offset tweak. */
-.node-socket-row-right .node-socket { left: auto; right: -14px; }
-.graph-pane .react-flow__handle.node-socket.node-socket-active { box-shadow: 0 0 0 3px var(--socket-ring); }
+.node-socket-row-right .node-socket { left: auto; right: -16px; }
+/* The dot actually in use for this row fills solid ink — no separate
+   ring/glow needed once "chosen" already reads as a fill-color change
+   from the hollow default (see the big comment above); the hover ring
+   below is a distinct, temporary "you're over something" cue, not this
+   permanent state, so the two were never really the same effect. */
+.graph-pane .react-flow__handle.node-socket.node-socket-active { background: var(--ink); border-color: var(--ink); }
 .node-socket-clickable { cursor: pointer; }
 .node-socket-clickable:hover { box-shadow: 0 0 0 4px var(--socket-ring); }
 .node-socket-draggable { cursor: crosshair; }
@@ -817,10 +846,24 @@ a { color: var(--accent); }
   background: var(--line); border-color: var(--line); pointer-events: none; cursor: default;
 }
 
-.node-socket-none { --socket-border: var(--muted); --socket-ring: rgba(154, 154, 154, .3); }
-.node-socket-intro { --socket-border: #3f9e82; --socket-ring: rgba(63, 158, 130, .3); }
-.node-socket-outro { --socket-border: #c98a3e; --socket-ring: rgba(201, 138, 62, .3); }
-.node-socket-transition { --socket-border: #8b6fc9; --socket-ring: rgba(139, 111, 201, .3); }
+/* One neutral hover-ring color for every type now (see the big comment
+   above on why type no longer colors the dot itself). */
+.node-socket-none, .node-socket-intro, .node-socket-outro, .node-socket-transition {
+  --socket-ring: rgba(19, 19, 19, .2);
+}
+/* On the dark Active card, a hollow grey-on-panel dot (and a solid black
+   "chosen" dot) would both disappear against the card's own dark fill —
+   the same light-on-dark swap the row's own label/section-border already
+   get (see .state-active .node-socket-label etc.), applied to the dot. */
+.graph-pane .node-card.state-active .react-flow__handle.node-socket {
+  border-color: rgba(252, 252, 252, .4); background: rgba(252, 252, 252, .12);
+}
+.graph-pane .node-card.state-active .react-flow__handle.node-socket.node-socket-active {
+  background: var(--paper-fixed); border-color: var(--paper-fixed);
+}
+.graph-pane .node-card.state-active .react-flow__handle.node-socket:not(.node-socket-available) {
+  background: rgba(252, 252, 252, .25); border-color: rgba(252, 252, 252, .25);
+}
 
 /* Visual snap feedback while dragging a connection: React Flow marks the
    closest compatible handle within `connectionRadius` with `.valid` (and
@@ -848,7 +891,7 @@ a { color: var(--accent); }
 }
 
 .node-card {
-  width: 208px; border-radius: var(--radius); padding: 9px;
+  width: 224px; border-radius: var(--radius); padding: 10px;
   background: var(--paper); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .14);
   user-select: none; transition: box-shadow .16s ease, background .16s ease, transform .16s ease;
   position: relative; transform: scale(1); transform-origin: center;
@@ -890,10 +933,10 @@ a { color: var(--accent); }
 }
 .node-card.node-dimmed { opacity: .28; }
 .node-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.node-title { font-weight: 600; font-size: 13px; line-height: 1.3; }
+.node-title { font-weight: 600; font-size: 13.5px; line-height: 1.3; }
 .node-artist { font-size: 11px; margin-bottom: 6px; color: var(--muted); line-height: 1.3; }
 .state-active .node-artist { color: rgba(252, 252, 252, .7); }
-.node-art { width: 26px; height: 26px; flex: none; border-radius: 3px; }
+.node-art { width: 56px; height: 56px; flex: none; border-radius: 4px; }
 .node-tags-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .node-tags { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .state-active .tag { border-color: rgba(252, 252, 252, .55); color: var(--paper-fixed); }

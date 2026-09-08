@@ -4,7 +4,7 @@ import Fuse from 'fuse.js';
 import {
   END, START, getVisibleEdges, inOutCounts, clamp, leftSocketAvailability, rightSocketAvailability,
   unwireOutput, wireConnection, wireStart, unwireStart, disconnectAllWires, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
-  introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, hopSummary,
+  introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, hopSummary, occludedTransitions,
   addTransitionConnection, removeTransitionConnection, autoconnectNodeTransitions, autoconnectFullGraph,
 } from '../core.js';
 import { engine } from '../audioEngine.js';
@@ -294,13 +294,29 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       const leftFromStart = leftActive !== 'none' && ordinaryLeftMode === 'none' && startFeedsThis;
       const rightActive = node ? node.endMode : 'none';
       let leftOptions = [], rightOptions = [], rightCueSeconds = null;
+      // A longer Intro/Outro candidate can start diverging from the plain
+      // master well before its own cue point (see occludedTransitions,
+      // core.js) — silently hiding a produced Transition off/onto this
+      // same song whose own cue falls inside that span. Add Audio already
+      // warns about this before a *new* one is saved; the picker itself
+      // is the other place picking one matters, since switching *which*
+      // built variant is active is exactly this same silent-occlusion
+      // risk, just for an edge that's already been saved.
       if (leftActive === 'intro') {
         const candidates = introEdgesFor(visibleEdges, id);
-        if (candidates.length > 1) leftOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Intro' }));
+        if (candidates.length > 1) leftOptions = candidates.map(e => {
+          const occluded = occludedTransitions(visibleEdges, { type: 'intro', r: id, inSeconds: e.inSeconds });
+          const occludedTitles = occluded.map(o => (songs[o.l] || {}).title).filter(Boolean);
+          return { id: e.id, label: e.label || 'Intro', occludedTitles };
+        });
       }
       if (rightActive === 'outro') {
         const candidates = outroEdgesFor(visibleEdges, id);
-        if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Outro', outSeconds: e.outSeconds }));
+        if (candidates.length > 1) rightOptions = candidates.map(e => {
+          const occluded = occludedTransitions(visibleEdges, { type: 'outro', l: id, outSeconds: e.outSeconds });
+          const occludedTitles = occluded.map(o => (songs[o.r] || {}).title).filter(Boolean);
+          return { id: e.id, label: e.label || 'Outro', outSeconds: e.outSeconds, occludedTitles };
+        });
       } else if (rightActive === 'transition' && node.nextSongId) {
         const candidates = transitionEdgesBetween(visibleEdges, id, node.nextSongId);
         if (candidates.length > 1) rightOptions = candidates.map(e => ({ id: e.id, label: e.label || 'Transition', outSeconds: e.outSeconds }));
@@ -321,7 +337,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       };
     });
     return map;
-  }, [placedSongs, visibleEdges, activePlaylist]);
+  }, [placedSongs, visibleEdges, activePlaylist, songs]);
 
   // A socket click toggles None/Intro/Outro directly (clicking the type
   // that's already active turns it back off, to None); a Transition

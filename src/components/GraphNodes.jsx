@@ -218,6 +218,12 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
               onClick={(e) => { e.stopPropagation(); onSelectVariant(opt.id); setOpen(false); }}
             >
               <span className="node-socket-option-label">{opt.label}</span>
+              {opt.occludedTitles && opt.occludedTitles.length > 0 && (
+                <span
+                  className="node-socket-option-warn"
+                  data-tooltip={'Would hide already-built transition' + (opt.occludedTitles.length > 1 ? 's' : '') + ': ' + opt.occludedTitles.join(', ')}
+                >!</span>
+              )}
               {songId != null && opt.outSeconds != null && <CountdownRing cueOffsetSec={opt.outSeconds} songId={songId} />}
             </button>
           ))}
@@ -261,10 +267,12 @@ export function SongNode({ data }) {
   const cls = ['node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed'].filter(Boolean).join(' ');
   // Color match (dominantColor.js) only ever applies to the Active card now
   // — Selected is a plain UI cursor, not a performance state, so it gets a
-  // plain CSS accent border/background (see .node-card.state-selected)
-  // rather than a cover-derived tint.
+  // plain CSS accent background (see .node-card.state-selected) rather
+  // than a cover-derived tint. No borderColor here any more — the card's
+  // borderless/shadow-elevated (see .node-card), so a border color would
+  // have nothing to color.
   const palette = nowPlaying.palette;
-  const dynamicStyle = (state === 'active' && palette) ? { background: palette.playing, borderColor: palette.playing } : undefined;
+  const dynamicStyle = (state === 'active' && palette) ? { background: palette.playing } : undefined;
   const onToggle = (side, type) => onToggleSocket(song.id, side, type);
   // Only the song actually playing has a live elapsed clock to count down
   // against — a wired-but-not-yet-playing outro/transition just shows its
