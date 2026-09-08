@@ -36,7 +36,14 @@ export function usePalette(coverUrl) {
   useEffect(() => {
     let cancelled = false;
     if (!resolvedUrl) { setPalette(null); return undefined; }
-    extractDominantColor(resolvedUrl).then((rgb) => { if (!cancelled) setPalette(derivePalette(rgb)); });
+    // extractDominantColor is designed to always resolve, never reject —
+    // this catch is just insurance against a future bug there (or in
+    // derivePalette) turning into an unhandled rejection instead of
+    // quietly falling back to the fixed accent-blue palette like every
+    // other real failure path here already does.
+    extractDominantColor(resolvedUrl)
+      .then((rgb) => { if (!cancelled) setPalette(derivePalette(rgb)); })
+      .catch(() => { if (!cancelled) setPalette(null); });
     return () => { cancelled = true; };
   }, [resolvedUrl]);
   return palette;

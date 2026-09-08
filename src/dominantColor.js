@@ -9,7 +9,22 @@
 // k-means/quantized "dominant cluster" — good enough to feel like it
 // matches the art without pulling in a color-quantization library for it.
 
-const colorCache = new Map(); // url -> {r,g,b} | null (cached even on failure, so a bad/untaintable image isn't retried every render)
+// url -> {r,g,b} | null (cached even on failure, so a bad/untaintable image
+// isn't retried every render). Capped so a long session that cycles through
+// many covers (local-upload blob: URLs especially — a fresh one every time
+// a song's art gets replaced) can't grow this without bound; a plain FIFO
+// evict-the-oldest is enough since this is a speed cache, not a source of
+// truth — losing an old entry only costs one re-decode if that exact URL
+// ever comes back.
+const colorCache = new Map();
+const COLOR_CACHE_MAX = 300;
+function cacheColor(url, result) {
+  if (colorCache.size >= COLOR_CACHE_MAX) {
+    const oldest = colorCache.keys().next().value;
+    colorCache.delete(oldest);
+  }
+  colorCache.set(url, result);
+}
 
 function averageFromImage(img) {
   const SIZE = 24;
@@ -40,10 +55,10 @@ export function extractDominantColor(url) {
     img.onload = () => {
       let result = null;
       try { result = averageFromImage(img); } catch (e) { result = null; } // tainted canvas (no CORS) — fall back to the default palette
-      colorCache.set(url, result);
+      cacheColor(url, result);
       resolve(result);
     };
-    img.onerror = () => { colorCache.set(url, null); resolve(null); };
+    img.onerror = () => { cacheColor(url, null); resolve(null); };
     img.src = url;
   });
 }
@@ -66,7 +81,12 @@ const BLACK = { r: 0, g: 0, b: 0 };
 // art is; "next"/"later" progressively lighten toward white, same
 // relationship as the static palette's own three blues.
 export function derivePalette(rgb) {
-  if (!rgb) return null;
+  // Guards against more than just a missing `rgb` — a malformed-but-truthy
+  // value (any future bug upstream that hands this something other than a
+  // real {r,g,b} triple) falls back to null (the fixed accent-blue
+  // palette) the same as no color at all, rather than computing/rendering
+  // `rgb(NaN, NaN, NaN)` on every consumer of this palette.
+  if (!rgb || !Number.isFinite(rgb.r) || !Number.isFinite(rgb.g) || !Number.isFinite(rgb.b)) return null;
   const luminance = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
   // A light cover (e.g. mostly-white art) needs a bigger push toward black
   // to still read as a dark "playing" background; a color that's already
