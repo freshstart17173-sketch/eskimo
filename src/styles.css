@@ -666,6 +666,21 @@ a { color: var(--accent); }
 .graph-pane .react-flow { background: var(--panel); overflow: hidden; }
 .graph-pane .react-flow__attribution { display: none; }
 .graph-pane .react-flow__edge-path { stroke-linecap: round; }
+/* React Flow's own drag-select box ships hardcoded to its library default
+   (a saturated blue, `rgba(0, 89, 220, ...)`) via `--xy-selection-*`
+   custom properties it defines on `.react-flow` itself — never overridden
+   here before, so it was the one remaining stock-blue element left after
+   the whole app moved to an ink + single pastel-accent palette (see
+   `.node-multi-selected` below, which rings the *result* of this same
+   gesture in `--accent`). Rgba literals here, not `var(--accent)` inside
+   `rgba()` (that's not valid CSS — a var can't be substituted into a
+   function's color-component list), matching `--accent`'s one fixed hex
+   value (#7fb3d9 → 127,179,217), which doesn't change between light/dark
+   themes. */
+.graph-pane .react-flow {
+  --xy-selection-background-color: rgba(127, 179, 217, .12);
+  --xy-selection-border: 1px dotted rgba(127, 179, 217, .9);
+}
 .graph-pane .react-flow__handle { opacity: 0; pointer-events: none; }
 /* `!important`, not just this selector, is load-bearing here: React Flow's
    own base.css sets `.react-flow__node.draggable { cursor: grab; }`, which
@@ -912,6 +927,17 @@ a { color: var(--accent); }
    box motionless throughout the whole gesture. */
 .graph-pane .react-flow__handle.connectingto.valid {
   box-shadow: 0 0 0 5px var(--socket-ring);
+}
+/* The other half of the same feedback: a candidate handle React Flow has
+   marked incompatible (wrong side, wrong type, already wired — whatever
+   `isValidConnection` rejected) gets a muted danger-tinted ring instead of
+   the ink one above, so getting close to a real-but-illegal target reads
+   as "not this one" rather than looking identical to empty canvas. Same
+   box-shadow-only approach as `.valid` and for the same reason — no
+   `scale()`, so the handle's measured box never moves mid-drag. */
+.graph-pane .react-flow__handle.connectingto.invalid {
+  box-shadow: 0 0 0 5px var(--danger-bg);
+  border-color: var(--danger);
 }
 
 .node-card {

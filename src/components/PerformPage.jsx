@@ -266,7 +266,25 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // this memo's own dependency) snaps them straight back to the default
   // spawn spot. Reported directly as a bug: nudge Start, then nudge any
   // other node, and Start jumps back.
+  //
+  // Quantized to the same 22px unit as GraphPane's own dot-grid background
+  // (`gap={22}`) before it's persisted — the grid was purely decorative
+  // until now, implying an alignment nothing actually honored (a Blender
+  // node-editor audit flagged this directly: the visible grid promises
+  // structure a drag never delivered). Snapping here, once, on drop —
+  // not live during the drag itself, and not on GraphPane's own internal
+  // `node.position` while the gesture is in flight — means the free-form
+  // feel of an in-progress drag is untouched; only the value that actually
+  // gets saved (and which the position-sync effect in GraphPane.jsx then
+  // reflects back onto the node) lands on the grid. Deliberately NOT
+  // applied to arrangeForMe's dagre output above — that math already
+  // produces its own well-spaced layout, and quantizing *node-to-node*
+  // proximity (rather than to a fixed grid) is exactly the variant of
+  // snapping Blender's own users report as unpredictable.
+  const GRID = 22;
+  const snapToGrid = (v) => Math.round(v / GRID) * GRID;
   function onDragSongPosition(id, x, y) {
+    x = snapToGrid(x); y = snapToGrid(y);
     if (id === START) { setSession(prev => ({ ...prev, startPos: { x, y } })); return; }
     if (id === END) { setSession(prev => ({ ...prev, endPos: { x, y } })); return; }
     setSongs(prev => (prev[id] ? { ...prev, [id]: { ...prev[id], x, y } } : prev));

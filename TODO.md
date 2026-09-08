@@ -1005,6 +1005,41 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
+### Done this pass (round 14 — implemented all four round-13 audit recommendations)
+
+Asked directly to implement round 13's four findings, then verify the
+whole live site end-to-end. All four are in and Playwright-verified
+against a real dev server (drag gestures, not teleporting clicks):
+
+- **Connecting-handle `.invalid` state** — `styles.css`, right next to the
+  pre-existing `.valid` rule (which, corrected from round 13's own
+  research, already existed — a bad grep pattern caused a false "missing"
+  finding there; only `.invalid` was actually new). Same box-shadow-only
+  technique, `var(--danger-bg)`/`var(--danger)` instead of the ink ring.
+- **Selection box recolored** off React Flow's stock blue — `.graph-pane
+  .react-flow` now sets `--xy-selection-background-color`/`--xy-selection-
+  border` to rgba literals matching `--accent`.
+- **Middle-mouse-button pan** — `panOnDrag={[1]}` in `GraphPane.jsx`,
+  additive alongside the untouched Shift-drag/box-select split.
+- **Grid-snap on drag release** — `onDragSongPosition` (`PerformPage.jsx`)
+  quantizes to the nearest 22px (matching the dot-grid background) before
+  persisting; deliberately not applied to Autoarrange's own dagre output.
+
+Full end-to-end QA pass after: fresh build (clean), and a real Playwright
+run through every screen (Graph/Library/Upload Song/Add Audio/Settings)
+and every graph interaction (play/pause via the detail pane, search,
+single- and multi-select with their respective context menus — confirmed
+"Delete song" is still gone and "Autoarrange" still correctly named,
+socket variant picker, light/dark theme toggle). No console errors or
+regressions found — the only failed network requests seen were Google
+Fonts and Supabase auth being unreachable from this sandboxed dev
+environment specifically (Supabase anonymous sign-in is real but not yet
+flipped on in the dashboard — a known, already-documented manual step,
+not a code bug); neither would be an issue on the real deployed site.
+`docs/blender-node-editor-audit.md` updated in place to mark all four
+recommendations implemented and correct the `.valid`-state research
+mistake.
+
 ### Done this pass (round 13 — Blender node-editor UX audit, documentation only)
 
 Asked directly, after round 12 finished the full screen port: look through

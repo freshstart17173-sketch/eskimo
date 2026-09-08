@@ -461,7 +461,18 @@ export default function GraphPane({
           // closing it. selectionKeyCode is turned off (null) since Shift's
           // one job here is panOnDrag's activation key, not also a second,
           // conflicting way to trigger the selection box.
-          panOnDrag={false}
+          //
+          // `[1]` (not `false`/`true`) — React Flow accepts an array of
+          // mouse button indices here, so this means "plain left-drag
+          // (button 0) still draws a selection box; middle-mouse-drag
+          // (button 1) always pans, no modifier key needed." Additive
+          // alongside the existing Shift+left-drag pan
+          // (`panActivationKeyCode`, below) rather than a replacement for
+          // it — a Blender node-editor audit flagged plain Shift-held-down
+          // panning as mildly awkward for a long continuous pan gesture,
+          // and MMB is unclaimed by anything else on this canvas (left
+          // drags/selects, right opens context menus).
+          panOnDrag={[1]}
           selectionOnDrag
           selectionKeyCode={null}
           panActivationKeyCode="Shift"

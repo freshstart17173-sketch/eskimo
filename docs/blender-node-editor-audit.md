@@ -53,6 +53,8 @@ users.
 **Recommendation**: add `panOnDrag={[1]}` to React Flow's own prop (button
 index 1 = middle mouse) — additive, doesn't require touching the
 Shift-drag or selection-box logic at all. Low effort.
+**Implemented**: `panOnDrag={[1]}` in `GraphPane.jsx`, alongside the
+unchanged `selectionOnDrag`/`panActivationKeyCode="Shift"` pair.
 
 ### 1.3 Zoom/pan smoothness under trackpad input
 **Blender**: pinch-to-zoom and two-finger pan on a trackpad are smooth
@@ -102,6 +104,11 @@ use `var(--accent)` at low opacity for the fill and a dotted `var(--ink)`
 or `var(--accent)` border — matching the ring color nodes get once
 actually selected, so the box and its result read as the same visual
 language. Low effort, CSS-only.
+**Implemented**: `.graph-pane .react-flow` now sets
+`--xy-selection-background-color`/`--xy-selection-border` to rgba literals
+matching `--accent`'s one fixed hex value (a CSS var can't be interpolated
+into an `rgba()` component list, so the hex was hand-converted once,
+`#7fb3d9` → `127,179,217`).
 
 ### 2.2 Add-to-selection modifier key
 **Blender**: Shift+click adds a single node to the current selection.
@@ -138,33 +145,23 @@ you release, so you can tell you're about to make a valid connection
 succeeds or silently fails.
 **Eskimo**: `@xyflow/react` ships this exact mechanism for free — it adds
 `.connectingfrom` / `.connectingto` / `.valid` classes to handles during
-an active connection drag (see the library's own connection-line
-handling). **Confirmed nothing in `src/styles.css` styles any of these
-classes** (grepped for `handle-connecting`, `handle-valid`, `.valid`,
-`connectionline` — zero matches in `src/`). The socket dots
-(`.graph-pane .react-flow__handle.node-socket`) have exactly one dynamic
-state styled today: `.node-socket-active` (a *committed* wire, not a
-drag-in-progress preview) plus the existing `:hover`/`.node-socket-
-clickable`/`.node-socket-draggable` rules, which only fire for the
-pointer's *own* hovered socket, not for candidate targets lighting up
-while a connection drawn from elsewhere is in flight.
-**Verdict**: genuine gap, and it's exactly the "snap anticipation" the
-user named. Right now, dragging a wire toward a socket gives zero visual
-feedback about whether that socket is a legal target until the drop
-either connects or silently does nothing (`isValidConnection` rejects it).
-Given `connectionRadius={40}` is already fairly generous (a drop doesn't
-have to be pixel-perfect on the dot), the lack of any preview affordance
-means a user gets the *forgiving hit-test* without the *visual confidence*
-that should come with it — the two are supposed to work together.
-**Recommendation**: style `.react-flow__handle.connectingto.valid` (grows
-the dot / adds an ink ring, similar treatment to the existing hover-ring
-math already in this file) and `.react-flow__handle.connectingto.invalid`
-(a muted/red-tinted treatment) during an active connection drag. This is
-CSS-only — no JS changes, since React Flow already computes and applies
-these classes; nothing here has been wired to *look* like anything yet.
-Medium effort (needs the same anti-overlap sizing care already documented
-for the base socket dot, since a "grows on approach" state must not bleed
-into an adjacent row at the current 23px socket-row spacing).
+an active connection drag. **Correction to this audit's own first pass**:
+the initial research grepped for `handle-connecting`/`handle-valid` (the
+wrong class names) and reported zero matches — the real selector,
+`.graph-pane .react-flow__handle.connectingto.valid`, was already in
+`styles.css` from much earlier in the project (a box-shadow-only ring,
+deliberately never `scale()`, per a detailed comment there tracing a real
+past bug where a `transform: scale()` on a connecting handle desynced
+React Flow's own live position-tracking mid-drag). So the *valid* half of
+this was never actually missing. What genuinely was missing: the
+*invalid* half — no `.connectingto.invalid` rule existed anywhere, so a
+drag hovering a real-but-incompatible socket looked identical to hovering
+one that would connect.
+**Verdict**: partial gap, now closed. Added
+`.graph-pane .react-flow__handle.connectingto.invalid` right next to the
+existing `.valid` rule — same box-shadow-only approach (no `scale()`, for
+the same reason), a muted `var(--danger-bg)` ring with a `var(--danger)`
+border instead of the ink ring `.valid` gets. CSS-only, no JS changes.
 
 ### 3.2 Auto-offset (dropping a node onto an existing wire)
 **Blender**: dropping a node with one matching input and one matching
@@ -231,6 +228,13 @@ Blender's own optional/toggleable framing of this feature — just quantize
 on release). Low-medium effort; must confirm it doesn't fight the
 existing Autoarrange (dagre) layout math, which presumably produces its
 own non-grid-aligned coordinates today.
+**Implemented**: quantized in `onDragSongPosition` (`PerformPage.jsx`) —
+the single choke point every drag path (`onNodeDragStop`,
+`onSelectionDragStop`, and Start/End's own drag) already funnels through,
+so one change covers all of them. Deliberately left `arrangeForMe`
+(dagre) untouched — it never calls `onDragSongPosition`, so Autoarrange's
+own coordinates are unaffected, confirming the "must not fight Autoarrange"
+condition holds.
 
 ### 4.2 Node header color-coding by category
 **Blender**: node headers are color-coded by node type/category (Input,
@@ -346,27 +350,27 @@ later.
 
 ---
 
-## Summary — concrete, scoped recommendations (in priority order)
+## Summary — concrete, scoped recommendations (all four now implemented)
 
 1. **Style the connection-drag valid/invalid handle states** (§3.1) — the
-   single most direct hit against "snap anticipation," CSS-only, uses
-   classes React Flow already applies for free.
-2. **Recolor the selection box** off React Flow's stock blue onto
-   `var(--accent)`/`var(--ink)` (§2.1) — CSS-only, closes the last
+   single most direct hit against "snap anticipation." The `.valid` half
+   already existed (this audit's own first pass missed it via a bad grep
+   pattern — corrected in §3.1 above); the missing `.invalid` half was
+   added, same box-shadow-only technique, danger-tinted.
+2. **Recolor the selection box** off React Flow's stock blue onto rgba
+   literals matching `var(--accent)` (§2.1) — CSS-only, closes the last
    remaining stock-blue element after this session's whole visual-fidelity
    pass.
 3. **Add middle-mouse-button pan** alongside the existing Shift-drag
-   (§1.2) — one-line additive prop change, zero risk to the existing,
-   deliberately-chosen Shift-drag/box-select split.
+   (§1.2) — `panOnDrag={[1]}`, zero risk to the existing, deliberately-
+   chosen Shift-drag/box-select split.
 4. **Snap node positions to the 22px background grid on drag release**
    (§4.1) — makes the already-visible dot grid mean something; grid-only
    (not node-to-node — see §3.4's cited Blender complaint about exactly
-   that variant), and only on drop, not live during the drag.
+   that variant), quantized once on drop in `onDragSongPosition`, not live
+   during the drag, and not touching Autoarrange's own dagre output.
 
 Everything else above (§1.3, §1.4, §2.2, §2.3, §4.2, §4.3, §4.4-folded-
 into-§3.1, all of §5) is either already handled, already correctly
 rejected with reasoning, or genuinely doesn't map onto what Eskimo's graph
-actually is. None of the four recommendations above have been implemented
-as part of this pass — this document is the research/audit deliverable
-that was explicitly asked for; implementing any of them is a separate,
-not-yet-authorized next step.
+actually is.
