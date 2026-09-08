@@ -345,16 +345,30 @@ export default function GraphPane({
         style: { stroke: color, strokeWidth: isActive ? 3 : 1.5, strokeDasharray: isActive ? undefined : '2 4' },
       };
     });
+    // Multiple *different* songs can each independently wire a plain None/
+    // Outro link into the same destination's input (see core.js's
+    // wireConnection — each source's own nextSongId/endMode is untouched
+    // by another source separately wiring into the same target; only the
+    // destination's own arrival-style choice, startMode/startEdgeId, is
+    // shared between them, correctly, since "does this song play its own
+    // intro when cut into" is a property of the destination, not of
+    // whichever source happens to be the one currently leading into it).
+    // Same overlap problem as the produced-transition fan-out above, just
+    // keyed by shared *target* instead of a shared source/target pair.
+    const seenTargets = new Map();
     Object.keys(activePlaylist.nodes).forEach(songId => {
       const node = activePlaylist.nodes[songId];
       if (node.nextSongId && node.endMode !== 'transition') {
+        const dupIndex = seenTargets.get(node.nextSongId) || 0;
+        seenTargets.set(node.nextSongId, dupIndex + 1);
+        const offset = dupIndex === 0 ? 0 : Math.ceil(dupIndex / 2) * 26 * (dupIndex % 2 === 1 ? 1 : -1);
         const destNode = activePlaylist.nodes[node.nextSongId];
         const startMode = (destNode && destNode.startMode) || 'none';
         edgesOut.push({
           id: 'link-' + songId, source: songId, target: node.nextSongId,
           sourceHandle: 'right-' + node.endMode, targetHandle: 'left-' + startMode,
           type: 'active',
-          data: { onDisconnect: () => onDisconnectSong(songId) },
+          data: { offset, onDisconnect: () => onDisconnectSong(songId) },
           style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
         });
       }
