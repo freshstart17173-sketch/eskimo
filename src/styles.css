@@ -302,15 +302,28 @@ a { color: var(--accent); }
 .field { margin-bottom: 12px; }
 .field-label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--muted); font-weight: 500; }
 
-.form-card { border-radius: var(--radius); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 2px; }
+/* Borderless/shadow-elevated, same recipe as .node-card/.context-menu —
+   a real card floating on the page background, not a flat grey panel.
+   Kept the same small `gap` rather than porting the mockup's own bigger
+   one verbatim: most children here are `.field`s, which already carry
+   their own margin-bottom, so a bigger flex gap would compound with that
+   into far more space than intended — this gap only ever matters for
+   stacking non-`.field` children (a settings-row, a trailing button). */
+.form-card { border-radius: 6px; background: var(--paper); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); padding: 20px; display: flex; flex-direction: column; gap: 2px; }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
+/* Settings' own card — same borderless/shadow language as .form-card,
+   but its own smaller padding since each .settings-row already carries
+   real vertical padding and its own divider (a settings page is a list
+   of rows, not a stack of labeled fields). */
+.settings-card { background: var(--paper); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); border-radius: 6px; padding: 6px 16px; }
 /* The label/description column is the one allowed to actually shrink or
    wrap — the control on the right (a segmented toggle, an on/off switch)
    never should, or its own labels start clipping instead of the prose
    next to it wrapping a line, as "Dark" briefly did here. */
-.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--line-soft); }
+.settings-row:last-child { border-bottom: none; }
 .settings-row > *:first-child { flex: 1 1 auto; min-width: 0; }
 .settings-row > *:last-child { flex: none; }
 .settings-row-title { font-size: 13px; font-weight: 600; }
@@ -1024,10 +1037,11 @@ a { color: var(--accent); }
 .hover-ending-btn:disabled { opacity: .35; cursor: not-allowed; }
 
 /* ---------------------------------------------------------------
-   Library — flat accordion list
+   Library — a stack of individually elevated rows, not a flat bordered
+   accordion list — same borderless/shadow-elevated recipe as .node-card.
    --------------------------------------------------------------- */
-.lib-row { border-bottom: 1px solid var(--line-soft); }
-.lib-row-head { display: flex; align-items: center; gap: 12px; padding: 10px 6px; cursor: pointer; }
+.lib-row { border-radius: 6px; background: var(--paper); box-shadow: 0 1px 3px rgba(0, 0, 0, .14); margin-bottom: 7px; }
+.lib-row-head { display: flex; align-items: center; gap: 12px; padding: 10px 13px; cursor: pointer; }
 .lib-row-head:hover { background: rgba(19, 19, 19, .025); }
 .lib-chevron { flex: none; color: var(--faint); transition: transform .1s ease; }
 .lib-row-open .lib-chevron { transform: rotate(90deg); }
@@ -1063,11 +1077,13 @@ a { color: var(--accent); }
    with shared dividers. Forcing a background here previously fought with
    dark-context buttons (e.g. seq-ending-btn) and left near-white text on a
    near-white pill — exactly the invisible-button bug to watch for. */
-.segmented { display: flex; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
-.segmented > button { flex: 1; border-radius: 0; border: 0; border-right: 1px solid var(--line); }
-.segmented > button:last-child { border-right: 0; }
-.seq-now-card .segmented { border-color: rgba(252, 252, 252, .18); }
-.seq-now-card .segmented > button { border-right-color: rgba(252, 252, 252, .18); }
+/* Borderless/shadow now (matches the mockup), not divided by borders
+   between buttons — still deliberately not forcing its own background/
+   text color for the same reason as above (a dark-context usage here,
+   e.g. seq-ending-btn, needs its own resting colors to survive), a
+   box-shadow doesn't touch either so it's safe to add unconditionally. */
+.segmented { display: flex; border-radius: var(--radius); overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+.segmented > button { flex: 1; border-radius: 0; }
 
 /* ---------------------------------------------------------------
    Add Audio: detected summary / cue preview
@@ -1139,21 +1155,34 @@ a { color: var(--accent); }
 .queue-arrow { color: var(--faint); font-size: 12px; flex: none; }
 .queue-bar-empty { font-size: 11.5px; color: var(--faint); }
 
-.autoplay-card { border-radius: var(--radius); background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-.autoplay-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.autoplay-row-title { font-size: 12.5px; font-weight: 600; }
-.autoplay-row-sub { font-size: 11px; color: var(--muted); }
 .switch { width: 34px; height: 19px; border-radius: 10px; background: var(--line); position: relative; flex: none; transition: background .15s ease; }
 .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--paper); transition: transform .15s ease; }
-.switch.on { background: var(--accent); }
+/* Ink, not accent blue, when on — matches the mockup and the app's own
+   near-monochrome + one-pastel-accent palette (same call already made
+   for .toolbar-start-set-btn): accent is reserved for something more
+   deliberate than a routine settings toggle. */
+.switch.on { background: var(--ink); }
 .switch.on::after { transform: translateX(15px); }
 .estimate-note { font-size: 11px; color: var(--muted); border-top: 1px solid var(--line-soft); padding-top: 9px; }
 .estimate-note .mono-num { color: var(--ink); font-weight: 600; }
 
 .lib-select-bar {
   position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; background: var(--ink); color: var(--paper); padding: 9px 12px; border-radius: var(--radius); margin-bottom: 10px;
+  gap: 10px; background: var(--accent-bg); color: var(--accent-text); padding: 9px 12px; border-radius: var(--radius); margin-bottom: 10px;
 }
 .lib-select-bar-count { font-size: 12.5px; font-weight: 600; }
-.lib-checkbox { width: 16px; height: 16px; flex: none; accent-color: var(--accent); }
+/* A real checkbox (native semantics/keyboard/screen-reader behavior kept
+   intact via `appearance: none` + styling, not a fake div) drawn to match
+   the mockup's own custom checkmark box instead of the browser's native
+   checkbox chrome (which also let a stray `accent-color` blue sneak in
+   here, off-palette from the rest of this near-monochrome app). */
+.lib-checkbox {
+  appearance: none; -webkit-appearance: none; width: 15px; height: 15px; margin: 0; flex: none;
+  border: 1.5px solid var(--line); border-radius: 2px; position: relative; cursor: pointer;
+}
+.lib-checkbox:checked { background: var(--ink); border-color: var(--ink); }
+.lib-checkbox:checked::after {
+  content: '✓'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--paper); font-size: 10px; line-height: 1;
+}
 

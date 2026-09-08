@@ -44,7 +44,7 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
       <div className="page-sub">Data always lives in this browser first. See TODO.md to turn on cloud sync + audio storage.</div>
 
       <div className="section-label">Cloud sync</div>
-      <div className="form-card" style={{ marginBottom: 20 }}>
+      <div className="settings-card" style={{ marginBottom: 20 }}>
         <div className="settings-row">
           <div>
             <div className="settings-row-title">Supabase sync</div>
@@ -68,7 +68,7 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
       </div>
 
       <div className="section-label" style={{ marginTop: 24 }}>Appearance</div>
-      <div className="form-card">
+      <div className="settings-card">
         <div className="settings-row">
           <div>
             <div className="settings-row-title">Theme</div>
@@ -83,7 +83,7 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
       </div>
 
       <div className="section-label" style={{ marginTop: 24 }}>Backup</div>
-      <div className="form-card">
+      <div className="settings-card">
         <div className="settings-row">
           <div>
             <div className="settings-row-title">Download a backup</div>
@@ -103,18 +103,18 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
       </div>
 
       <div className="section-label" style={{ marginTop: 24 }}>Autoplay</div>
-      <div className="autoplay-card">
-        <div className="autoplay-row">
+      <div className="settings-card">
+        <div className="settings-row">
           <div>
-            <div className="autoplay-row-title">Autoplay</div>
-            <div className="autoplay-row-sub">picks randomly when nothing's queued</div>
+            <div className="settings-row-title">Autoplay</div>
+            <div className="settings-row-sub">picks randomly when nothing's queued</div>
           </div>
           <button className={'switch' + (session.autoplay ? ' on' : '')} onClick={() => onSetAutoplay(!session.autoplay)} />
         </div>
-        <div className="autoplay-row">
+        <div className="settings-row">
           <div>
-            <div className="autoplay-row-title">Transition-only</div>
-            <div className="autoplay-row-sub">a dead end stops the set instead of cutting</div>
+            <div className="settings-row-title">Transition-only</div>
+            <div className="settings-row-sub">a dead end stops the set instead of cutting</div>
           </div>
           <button className={'switch' + (session.transitionOnly ? ' on' : '')} onClick={() => onSetTransitionOnly(!session.transitionOnly)} />
         </div>
@@ -128,7 +128,7 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
       </div>
 
       <div className="section-label" style={{ marginTop: 24 }}>Reset</div>
-      <div className="form-card">
+      <div className="settings-card">
         <div className="settings-row">
           <div>
             <div className="settings-row-title">Clear all data</div>
