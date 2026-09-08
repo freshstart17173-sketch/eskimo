@@ -16,16 +16,28 @@ import { Icon, ICONS, AlbumArt } from './shared.jsx';
 // elapsed-time readout, and more/thinner bars reads more like a real
 // spectrum than a few wide ones.
 const WAVEFORM_BARS = 14;
+// Real analyser reads jump around frame to frame (that's what "live"
+// audio data actually looks like) — snapping each bar straight to its
+// raw reading every frame read as flicker rather than motion. A per-bar
+// smoothed value chases the raw target each frame instead of jumping to
+// it, with a faster attack than decay (a real VU meter's own convention)
+// so a hit still reads as instant while the settle afterward looks like
+// motion, not a twitch.
+const WAVEFORM_ATTACK = 0.55, WAVEFORM_DECAY = 0.18;
 function LiveWaveform() {
   const barRefs = useRef([]);
+  const smoothedRef = useRef(new Float32Array(WAVEFORM_BARS));
   useEffect(() => {
     let raf;
     function tick() {
       const levels = engine.getLevels(WAVEFORM_BARS);
+      const smoothed = smoothedRef.current;
       barRefs.current.forEach((el, i) => {
         if (!el) return;
-        const pct = levels ? Math.round(15 + levels[i] * 85) : 15;
-        el.style.height = pct + '%';
+        const target = levels ? levels[i] : 0;
+        const rate = target > smoothed[i] ? WAVEFORM_ATTACK : WAVEFORM_DECAY;
+        smoothed[i] += (target - smoothed[i]) * rate;
+        el.style.height = Math.round(15 + smoothed[i] * 85) + '%';
       });
       raf = requestAnimationFrame(tick);
     }
