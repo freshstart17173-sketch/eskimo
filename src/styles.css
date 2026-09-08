@@ -986,41 +986,44 @@ a { color: var(--accent); }
    the one real risk that mattered — `box-sizing: border-box` is global
    (see `*` above), so a border's width was never part of the box React
    Flow measures live during drag-connect; only the box itself is, and
-   this doesn't touch it. No `transform: scale(...)` on hover — see the
-   long note above `.connectingto.valid` on why: it changes the card's
-   (and every socket nested inside it) measured bounding box, which React
-   Flow reads live while a connection is being dragged. A card the
-   pointer merely passes over on its way to a real target doesn't need to
-   grow for that to register — the shadow lift alone reads as "hovered"
-   fine. */
+   this doesn't touch it. No `transform: scale(...)` anywhere on this card
+   — not on hover (see the long note above `.connectingto.valid` on why:
+   it changes the card's, and every socket nested inside it, measured
+   bounding box, which React Flow reads live while a connection is being
+   dragged) and, since a real connection can be dragged onto or off of a
+   card that's currently Active just as easily as any other, not on
+   `.state-active` either — that used to scale to 1.08, which measurably
+   shifted every socket's real screen position and, with it, the drawn
+   endpoint of any wire in or out of that card the moment it started
+   playing. Active is color/animation only now; its footprint on the
+   canvas never changes. */
 .node-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, .1); }
 .node-card.state-active {
   background: var(--state-playing); color: var(--paper-fixed);
-  animation: pulseRing 2.4s ease-in-out infinite; transform: scale(1.08); z-index: 5;
+  animation: pulseRing 2.4s ease-in-out infinite; z-index: 5;
 }
-/* Selected is a plain UI cursor ("what the detail pane is showing"), not a
-   performance state — a flat accent ring via box-shadow (not a border,
-   which would fight the border-radius on an otherwise-borderless card),
-   clearly distinct from Active's full color-matched fill. */
-.node-card.state-selected { box-shadow: 0 0 0 3px var(--accent); }
 .node-card.node-hovered { box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }
-/* Hovering a selected card used to lose the accent ring entirely — both
-   rules above set `box-shadow` at equal specificity (two classes each),
-   so whichever was declared later won outright instead of the two
-   effects combining, and a selected card looked identically unselected
-   the moment the pointer touched it. Layer both shadows (ring + lift)
-   in one higher-specificity rule instead, covering both the JS-tracked
-   `.node-hovered` (GraphNodes.jsx) and a plain native `:hover`, so the
-   ring stays visible under either. */
-.node-card.state-selected:hover, .node-card.state-selected.node-hovered {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .16), 0 0 0 3px var(--accent);
-}
-/* A real multi-node box-drag selection (see MultiSelectionContext,
-   GraphNodes.jsx) reuses the exact same accent ring as the single
-   `selectedId` cursor above, including the same hover-combining fix. */
-.node-card.node-multi-selected { box-shadow: 0 0 0 3px var(--accent); }
-.node-card.node-multi-selected:hover, .node-card.node-multi-selected.node-hovered {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .16), 0 0 0 3px var(--accent);
+/* The accent selection ring — shared by the single `selectedId` cursor
+   ("what the detail pane is showing") and a real multi-node box-drag
+   selection alike, since both mean the same thing visually. Rendered on
+   `::after`, a separate paint layer from the card's own `box-shadow`,
+   deliberately: `.state-active` drives its own `box-shadow` via the
+   `pulseRing` animation, and a CSS animation always wins the cascade for
+   whatever property it's animating, even against a same-element rule of
+   higher specificity — a plain `box-shadow` ring here would have been
+   silently overridden the instant a selected card also went Active,
+   which is exactly the "no combined active+selected highlight" gap
+   reported directly. A separate layer sidesteps the conflict entirely
+   instead of fighting for the one property: this ring now shows over
+   *any* combination of hover/active/dimmed state a card can be in. Same
+   reasoning retroactively fixes the old hover-vs-ring clobbering this
+   replaced (two same-specificity `box-shadow` rules on the base element,
+   whichever came later in the cascade winning outright) — with the ring
+   on its own layer, the base element's own hover lift never has anything
+   to clobber. */
+.node-card.node-selected-ring::after, .node-card.node-multi-selected::after {
+  content: ''; position: absolute; inset: -3px; border-radius: calc(var(--radius) + 3px);
+  box-shadow: 0 0 0 3px var(--accent); pointer-events: none;
 }
 .node-card.node-dimmed { opacity: .28; }
 .node-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -1071,15 +1074,19 @@ a { color: var(--accent); }
 .end-node-hint { font-size: 10px; margin-top: 2px; color: var(--faint); }
 /* The Start node's own play trigger — mirrors the toolbar's Start button
    (same ink/paper colors) so it reads as the same action, just reachable
-   without leaving the canvas. Only rendered while nothing's playing yet
-   and a real entry point is wired (see StartNode/GraphPane's canStartPlay) —
-   once a set is running the toolbar's Pause/Resume/Stop take over, same as
-   the toolbar button it mirrors. */
+   without leaving the canvas. Rendered whenever nothing's playing yet
+   (see StartNode/GraphPane's canStartPlay), whether or not a real entry
+   point is wired — greyed out and inert until one is, same convention
+   every unavailable socket row already uses, rather than disappearing
+   outright (which read as a missing button, not an inert one). Once a
+   set is running the toolbar's Pause/Resume/Stop take over, same as the
+   toolbar button it mirrors. */
 .start-node-play-btn {
   display: flex; align-items: center; justify-content: center; flex: none;
   width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--paper);
 }
 .start-node-play-btn:hover { filter: brightness(1.3); }
+.start-node-play-btn:disabled { opacity: .3; cursor: not-allowed; filter: none; }
 
 /* Right-click menus — empty canvas ("add song", "arrange for me") and a
    specific node (focus/wire/disconnect/delete). Fixed-position (screen

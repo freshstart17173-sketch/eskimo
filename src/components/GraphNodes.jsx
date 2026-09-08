@@ -81,8 +81,8 @@ export const SearchDimContext = createContext({ searchActive: false, matchIds: n
 // multi-node box-drag), so SongNode only needs the *count* from here to
 // tell the two apart: `selected && count > 1` is a real multi-selection
 // ring; `selected && count === 1` is just this session's already-existing
-// single-select cursor (`selectedId`/state==='selected' below), which
-// must keep rendering exactly as it always has.
+// single-select cursor (`selectedId`/isSelected below), which must keep
+// rendering exactly as it always has.
 export const MultiSelectionContext = createContext({ count: 0 });
 
 // Fixed, per-type socket colors — Blender-node-style (a Geometry socket is
@@ -174,7 +174,7 @@ function CountdownRing({ cueOffsetSec, songId }) {
 // clicking the row (not the dot — the dot keeps its own toggle-click)
 // opens a listbox of the other candidates. A Transition row's dot has no
 // click handler at all, so the row's own click can't conflict with it.
-function SocketRow({ side, type, available, active, cueOffsetSec, songId, onToggle, options = [], selectedEdgeId, onSelectVariant }) {
+function SocketRow({ side, type, available, active, cueOffsetSec, songId, onToggle, options = [], selectedEdgeId, filledLabel, onSelectVariant }) {
   const isInput = side === 'left';
   const hasPicker = !!(active && options.length > 1);
   const [open, setOpen] = useState(false);
@@ -217,7 +217,17 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
         ].filter(Boolean).join(' ')}
         onClick={(!available || type === 'transition') ? undefined : (e) => { e.stopPropagation(); onToggle(side, type); }}
       />
-      <span className="node-socket-label">{hasPicker ? selected.label : SOCKET_TITLE[type]}</span>
+      {/* Only ever show the bare type name ("None"/"Intro"/"Outro"/
+          "Transition") for an empty slot. Once something's actually
+          selected to play through this socket, name that instead — the
+          picker's own variant label when there's a real choice among
+          several built pieces (already distinguishes them, e.g. "Fast
+          cut" vs "Slow blend" to the very same song), otherwise the real
+          song this socket's audio actually connects to (filledLabel, see
+          socketDataById/PerformPage.jsx) — a plain type name told you
+          nothing once a slot had something real playing through it
+          (reported directly). */}
+      <span className="node-socket-label">{hasPicker ? selected.label : (filledLabel || SOCKET_TITLE[type])}</span>
       {active && cueOffsetSec != null && songId != null && <CountdownRing cueOffsetSec={cueOffsetSec} songId={songId} />}
       {open && (
         <div className="node-socket-listbox" onMouseDown={(e) => e.stopPropagation()}>
@@ -254,7 +264,7 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
 // type for the same reason — each active type gets its own independent
 // dropdown/cue-ring data now, not one shared value gated on a single
 // "which type is active" check.
-function SocketList({ side, types, availability, activeTypes = [], onToggle, cueOffsetSecByType = {}, songId, optionsByType = {}, selectedEdgeIdByType = {}, onSelectVariant }) {
+function SocketList({ side, types, availability, activeTypes = [], onToggle, cueOffsetSecByType = {}, songId, optionsByType = {}, selectedEdgeIdByType = {}, filledLabelByType = {}, onSelectVariant }) {
   return (
     <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
       {types.map((type) => {
@@ -264,6 +274,7 @@ function SocketList({ side, types, availability, activeTypes = [], onToggle, cue
             key={type} side={side} type={type} available={!!availability[type]} active={isActive}
             cueOffsetSec={isActive ? (cueOffsetSecByType[type] ?? null) : null} songId={isActive ? songId : null} onToggle={onToggle}
             options={isActive ? optionsByType[type] : undefined} selectedEdgeId={isActive ? selectedEdgeIdByType[type] : undefined}
+            filledLabel={isActive ? filledLabelByType[type] : null}
             onSelectVariant={(edgeId) => onSelectVariant(type, selectedEdgeIdByType[type], edgeId)}
           />
         );
@@ -272,15 +283,21 @@ function SocketList({ side, types, availability, activeTypes = [], onToggle, cue
   );
 }
 
-// state is one of null | 'active' | 'selected' — Active is whatever's
-// really playing; Selected is purely "what was last clicked". No more
-// Playing/Next/Later: a node either is or isn't currently sounding, and
-// either is or isn't what the right-side detail pane is showing.
+// `state` is 'active' or null — whether this song is really playing right
+// now (session.nowPlayingId), driving the full color-matched fill/pulse.
+// `isSelected` is a completely independent boolean — purely "what was
+// last clicked, so the detail pane is showing it" — driving a separate
+// accent ring (see .node-selected-ring below). They used to be a single
+// exclusive `state` value ('active' XOR 'selected'), which meant a node
+// that was both playing AND the one just clicked showed no selection
+// ring at all — reported directly, exactly this gap. Keeping them
+// independent is what makes "active AND selected at once" a real,
+// representable case instead of one silently winning over the other.
 export function SongNode({ data, selected }) {
   const {
-    song, state, inCount, outCount, onEnter, onLeave, playing, onSelect,
-    leftAvailable, rightAvailable, leftActive, rightActiveTypes, leftEdgeId,
-    leftOptions, rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType, onToggleSocket, onSelectVariant,
+    song, state, isSelected, inCount, outCount, onEnter, onLeave, playing, onSelect,
+    leftAvailable, rightAvailable, leftActive, rightActiveTypes, leftEdgeId, leftFilledLabel,
+    leftOptions, rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType, rightFilledLabelByType, onToggleSocket, onSelectVariant,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
   const { hoveredId } = useContext(HoveredNodeContext);
@@ -292,20 +309,18 @@ export function SongNode({ data, selected }) {
   // A real multi-node box-drag selection (React Flow's own `selected`,
   // gated on more than one node actually being selected — see
   // MultiSelectionContext above) gets the same accent ring the single
-  // `selectedId` cursor already uses, layered the same way hover already
-  // is (see .node-card.state-multi-selected below) rather than a second
-  // competing visual language for "this is part of what I clicked".
+  // `selectedId` cursor already uses (see .node-multi-selected below)
+  // rather than a second competing visual language for "this is part of
+  // what I clicked".
   const multiSelected = selected && multiSelectedCount > 1;
   const cls = [
     'node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed',
-    multiSelected && 'node-multi-selected',
+    isSelected && 'node-selected-ring', multiSelected && 'node-multi-selected',
   ].filter(Boolean).join(' ');
-  // Color match (dominantColor.js) only ever applies to the Active card now
-  // — Selected is a plain UI cursor, not a performance state, so it gets a
-  // plain CSS accent background (see .node-card.state-selected) rather
-  // than a cover-derived tint. No borderColor here any more — the card's
-  // borderless/shadow-elevated (see .node-card), so a border color would
-  // have nothing to color.
+  // Color match (dominantColor.js) only ever applies to the Active card —
+  // Selected is a plain UI cursor, not a performance state, so it only
+  // ever gets the accent ring (.node-selected-ring below), independent of
+  // whatever fill this card already has for other reasons.
   const palette = nowPlaying.palette;
   const dynamicStyle = (state === 'active' && palette) ? { background: palette.playing } : undefined;
   const onToggle = (side, type) => onToggleSocket(song.id, side, type);
@@ -345,11 +360,13 @@ export function SongNode({ data, selected }) {
           <SocketList
             side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} activeTypes={leftActive === 'none' ? [] : [leftActive]} onToggle={onToggle}
             songId={ringSongId} optionsByType={{ [leftActive]: leftOptions }} selectedEdgeIdByType={{ [leftActive]: leftEdgeId }}
+            filledLabelByType={{ [leftActive]: leftFilledLabel }}
             onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'left', type, oldEdgeId, edgeId)}
           />
           <SocketList
             side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} activeTypes={rightActiveTypes} onToggle={onToggle}
             cueOffsetSecByType={rightCueSecondsByType} songId={ringSongId} optionsByType={rightOptionsByType} selectedEdgeIdByType={rightEdgeIdByType}
+            filledLabelByType={rightFilledLabelByType}
             onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'right', type, oldEdgeId, edgeId)}
           />
         </div>
@@ -392,6 +409,13 @@ export function EndNode({ data }) {
 // has.
 export function StartNode({ data }) {
   const { wiredSongTitle, canPlay, onPlay } = data;
+  // `canPlay` only ever means "no set is running yet" now — it used to
+  // also require a wired song, which made the button disappear entirely
+  // on an unwired Start node instead of just being inert, and "the button
+  // isn't there" read as a real bug rather than "nothing to play yet"
+  // (reported directly). Every other not-yet-usable control on this
+  // canvas (an unavailable socket row, SocketRow) stays visible and just
+  // greys out instead of vanishing — this matches that same convention.
   return (
     <div className="end-node start-node">
       <div className="node-socket-row node-socket-row-right">
@@ -404,7 +428,11 @@ export function StartNode({ data }) {
       <div className="end-node-title-row">
         <div className="end-node-title"><Icon path={<polygon points="6,4 20,12 6,20" />} filled size={11} /> Start Set</div>
         {canPlay && (
-          <button className="start-node-play-btn" onClick={(e) => { e.stopPropagation(); onPlay(); }} data-tooltip={'Start playing from ' + wiredSongTitle}>
+          <button
+            className="start-node-play-btn" disabled={!wiredSongTitle}
+            onClick={(e) => { e.stopPropagation(); onPlay(); }}
+            data-tooltip={wiredSongTitle ? 'Start playing from ' + wiredSongTitle : 'Wire a song to Start first'}
+          >
             <Icon path={ICONS.play} filled size={12} />
           </button>
         )}

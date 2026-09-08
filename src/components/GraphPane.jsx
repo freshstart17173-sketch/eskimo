@@ -166,7 +166,7 @@ export default function GraphPane({
   onDragSongPosition, endQueued, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
   onPaneContextMenu, onNodeContextMenu, onSelectionContextMenu, onMultiSelectionChange, onPaneClick,
-  onStartPlay, canStartPlay,
+  onStartPlay, canStartPlay, selectedId,
 }) {
   const { isDark } = useTheme();
   const lineColor = isDark ? LINE_COLOR.dark : LINE_COLOR.light;
@@ -206,13 +206,13 @@ export default function GraphPane({
       leftAvailable: { none: true, intro: false, transition: false },
       rightAvailable: { none: true, outro: false, transition: false },
       leftActive: 'none', rightActiveTypes: [],
-      leftEdgeId: null, leftOptions: [],
-      rightOptionsByType: {}, rightEdgeIdByType: {}, rightCueSecondsByType: {}, rightTargetIdByType: {},
+      leftEdgeId: null, leftOptions: [], leftFilledLabel: null,
+      rightOptionsByType: {}, rightEdgeIdByType: {}, rightCueSecondsByType: {}, rightTargetIdByType: {}, rightFilledLabelByType: {},
     };
     return {
       id, type: 'song', position: pos, draggable: true,
       data: {
-        song: s, state, inCount: io.inCount, outCount: io.outCount,
+        song: s, state, isSelected: id === selectedId, inCount: io.inCount, outCount: io.outCount,
         onEnter: () => setHoveredId(id), onLeave: () => setHoveredId(null), onSelect: () => onSelectSong(id),
         onToggleSocket, onSelectVariant, ...socketData, playing: state === 'active',
       },
@@ -232,7 +232,7 @@ export default function GraphPane({
     const wiredSong = activePlaylist.startSongId ? songs[activePlaylist.startSongId] : null;
     return {
       id: START, type: 'start', position: pos, draggable: true,
-      data: { wiredSongTitle: wiredSong ? wiredSong.title : null, canPlay: !!(canStartPlay && wiredSong), onPlay: onStartPlay },
+      data: { wiredSongTitle: wiredSong ? wiredSong.title : null, canPlay: !!canStartPlay, onPlay: onStartPlay },
       style: START_STYLE,
     };
   }
@@ -285,7 +285,7 @@ export default function GraphPane({
       return { ...updated, position: n.position, selected: n.selected };
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs, stateFor, ioById, socketDataById, endQueued, activePlaylist.startSongId, nowPlayingId, onSelectSong, canStartPlay, onStartPlay]);
+  }, [songs, stateFor, ioById, socketDataById, endQueued, activePlaylist.startSongId, nowPlayingId, onSelectSong, canStartPlay, onStartPlay, selectedId]);
 
   // The one place `position` actually gets written from outside RF's own
   // drag handling: a real layout change (auto-arrange, or a song's stored

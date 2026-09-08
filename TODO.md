@@ -1005,7 +1005,77 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
-### Done this pass (round 19 — contributor attribution, extra-file attachments, a live-crossfade pulse, Start-node play, detail-pane destinations, and a real live-site crash fix)
+### Done this pass (round 20 — Autoarrange stopped collapsing into a line, socket rows name what's actually selected, Active dropped its size change, Selected+Active can show together, Start's button is always visible)
+
+Five node-editor UX reports in one message, all confirmed real and fixed:
+
+- **Autoarrange "just turns the graph into a line."** Two distinct real
+  causes, both in `computeDagreLayout` (graphLayout.js): (1) any song with
+  zero wiring has no edge for dagre's rank algorithm to place it by, so
+  every such song landed at the same rank, stacked one below the next —
+  confirmed directly: a library with no active wiring at all (the ordinary
+  state right after adding songs, before sequencing them) put all of them
+  in one long vertical column regardless of count. (2) a real, mostly-
+  linear DJ set — commonly dozens of songs chained in sequence — legitimately
+  ranks as one long chain, which dagre's LR layout draws as one long
+  horizontal strip with no notion of wrapping. Fixed both: songs with no
+  real connection to anything are now packed into their own grid instead of
+  fed to dagre at all; the wired portion's own ranks get grouped and
+  wrapped into bands capped at a fixed width once there are more than a
+  handful, snaking alternate rows back the other direction (like text
+  wrapping) so a wire crossing a row boundary only ever drops straight down
+  instead of jumping back across the whole canvas. Verified directly
+  against the real 50-song three-artist example graph (previously one
+  unbroken 50-card row) — now a legible multi-row grid, zero overlapping
+  positions, confirmed at several other graph shapes (fully unwired,
+  mixed wired/unwired, a chain feeding End Set) too.
+- **Socket labels only ever showed the bare type name.** The original plan
+  (raised early this session, tabled, now revived): "None"/"Intro"/
+  "Outro"/"Transition" only ever means "nothing picked here yet" — once a
+  slot is actually filled, the row should say what's really playing
+  through it. None keeps the plain type name always (a straight cut has
+  no real audio piece to name); Intro/Outro/Transition now resolve to the
+  *other* song actually involved — whichever song a filled Outro/
+  Transition leads to, or whichever song a filled Intro arrives from
+  (`leftFilledLabel`/`rightFilledLabelByType`, socketDataById in
+  PerformPage.jsx) — falling back to the type name only when there's
+  nothing real to name yet (toggled on, no destination chosen). A row with
+  several real candidate variants still shows the picker's own variant
+  label instead (already more specific than a bare destination name, e.g.
+  distinguishing two different built transitions to the very same song).
+- **Active made the card bigger and shifted its wires.** `.state-active`
+  carried `transform: scale(1.08)` since round 8 — despite a comment right
+  above it explaining exactly why hover deliberately never does this (a
+  transform changes the card's, and every socket nested inside it,
+  measured position, which is what any connected wire actually anchors to)
+  — active being the one exception was never revisited. Removed; Active is
+  color/animation only now, footprint unchanged.
+- **No visible highlight when a node is both Active and Selected.** Traced
+  to `state` being one exclusive value (`'active' XOR 'selected'`) — a
+  node that was both playing and the last-clicked one always showed only
+  Active's fill, never Selected's ring. Split them into two independent
+  signals (`stateFor` for Active, a separate `isSelected` threaded straight
+  from `selectedId`) and moved the selection ring onto its own `::after`
+  layer instead of the card's own `box-shadow` — necessary, not just
+  tidier: `.state-active` drives its own `box-shadow` via the `pulseRing`
+  animation, and a running CSS animation always wins the cascade for
+  whatever property it's animating, so a plain same-element ring would
+  have been silently overridden the instant a selected card also went
+  Active. A separate paint layer sidesteps the conflict outright. Also
+  retroactively fixes the old hover-vs-ring clobbering workaround (two
+  duplicate hover-combining rules, one for single-select one for multi-
+  select) — with the ring off on its own layer, the base element's hover
+  lift never has anything left to clobber, so both duplicate rules came
+  out entirely.
+- **"I don't see the play button on the play node."** The Start node's
+  play button (round 19) required both "nothing playing yet" *and* a real
+  wired entry point — with nothing wired, the button didn't render at all,
+  which read as broken rather than simply inert. Now it always renders
+  once nothing's playing, greyed out and disabled until a real song is
+  wired — the same convention every other not-yet-usable control on this
+  canvas (an unavailable socket row) already uses instead of vanishing.
+
+
 
 Six separate asks in one round, plus a live crash the user hit mid-pass:
 

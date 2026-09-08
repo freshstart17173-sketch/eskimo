@@ -299,18 +299,19 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   }
 
   // ---------------- the two graph highlight states: active / selected ----------------
-  // Active is whatever's really playing (session.nowPlayingId); Selected is
-  // purely "what was last clicked" (selectedId) — no more Playing/Next/Later.
-  // Deliberately still a plain useCallback with no hover-derived dependency:
-  // see the long comment this replaced for why folding a hover-driven value
-  // in here specifically broke hit-testing (GraphPane's node-rebuild effect
-  // depends on this function's identity). selectedId only changes on an
-  // explicit click, not a hover/keystroke, so it's safe to depend on here.
-  const stateFor = useCallback((id) => {
-    if (id === session.nowPlayingId) return 'active';
-    if (id === selectedId) return 'selected';
-    return null;
-  }, [session.nowPlayingId, selectedId]);
+  // Active (session.nowPlayingId) and Selected (selectedId, "what was last
+  // clicked") are independent now, not one exclusive `state` value — a
+  // node that's both playing AND the one just clicked needs to show both
+  // at once (the full color fill AND the selection ring), which a single
+  // string can't represent. `stateFor` only ever reports Active; Selected
+  // is threaded straight through as `selectedId` (see GraphPane's
+  // `isSelected: id === selectedId`) so the two compose independently in
+  // SongNode's own class list instead of one silently overriding the
+  // other. Deliberately still a plain useCallback with no hover-derived
+  // dependency: see the long comment this replaced for why folding a
+  // hover-driven value in here specifically broke hit-testing (GraphPane's
+  // node-rebuild effect depends on this function's identity).
+  const stateFor = useCallback((id) => (id === session.nowPlayingId ? 'active' : null), [session.nowPlayingId]);
 
   // ---------------- playlist-editor sockets (see TODO.md) ----------------
   // One entry per song. Every song shows the same fixed three rows per
@@ -414,11 +415,37 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       const rightTargetIdByType = {};
       outputs.forEach(o => { if (!(o.type in rightTargetIdByType)) rightTargetIdByType[o.type] = o.targetId; });
 
+      // The graph card's own socket rows show a real name once a slot is
+      // filled, not the bare type label forever — "None"/"Intro"/"Outro"/
+      // "Transition" only ever means "nothing picked here yet"; once
+      // something plays through that socket, the row should say what
+      // (reported directly: the whole point of a label at all is to know
+      // which of several possible ins/outs actually got picked). None
+      // stays as the plain type name always — a straight cut has no real
+      // audio piece of its own to be named after. Intro/Outro/Transition
+      // resolve to the *other* song involved: whichever song this song's
+      // one active Intro edge actually arrives from (leftFilledLabel), and
+      // whichever song each active Outro/Transition edge actually leads to
+      // (rightFilledLabelByType) — END reads as "Ends set", matching the
+      // detail pane's own destinationLabel. A song with no real produced
+      // edge behind it yet (edgeId/targetId still null — toggled on, no
+      // destination chosen) has nothing to name, so it still falls back to
+      // the type label; SocketRow is where the two actually combine.
+      const destName = (songId) => (songId === END ? 'Ends set' : (songs[songId] || {}).title || null);
+      let leftFilledLabel = null;
+      if (leftActive === 'intro' && leftEdgeId) {
+        const edge = visibleEdges.find(e => e.id === leftEdgeId);
+        if (edge && edge.l) leftFilledLabel = destName(edge.l);
+      }
+      const rightFilledLabelByType = {};
+      if (outroEntry && outroEntry.targetId) rightFilledLabelByType.outro = destName(outroEntry.targetId);
+      if (transitionEntry && transitionEntry.targetId) rightFilledLabelByType.transition = destName(transitionEntry.targetId);
+
       map[id] = {
         leftAvailable: leftSocketAvailability(visibleEdges, id), rightAvailable: rightSocketAvailability(visibleEdges, id),
         leftActive, rightActiveTypes, leftFromStart,
-        leftEdgeId, leftOptions,
-        rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType, rightTargetIdByType,
+        leftEdgeId, leftOptions, leftFilledLabel,
+        rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType, rightTargetIdByType, rightFilledLabelByType,
       };
     });
     return map;
@@ -866,7 +893,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             endQueued={endWired}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
             onPaneClick={onPaneClick}
-            onStartPlay={triggerStartSet} canStartPlay={!hasStarted}
+            onStartPlay={triggerStartSet} canStartPlay={!hasStarted} selectedId={selectedId}
             onPaneContextMenu={onPaneContextMenu} onNodeContextMenu={onNodeContextMenu}
             onSelectionContextMenu={onSelectionContextMenu}
             onMultiSelectionChange={setMultiSelectedIds}
