@@ -70,6 +70,15 @@
   --font: 'Jost', 'Avenir Next', 'Segoe UI', Arial, sans-serif;
   --font-display: 'Gnomon', var(--font);
   --font-mono: 'Drafting Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+
+  /* The whole main content area's own backdrop (everything except the
+     sidebar) — a hair off-white/off-black from --paper, not the same
+     color, so every borderless/shadow-elevated card floating on it
+     (.lib-row, .form-card, .settings-card, .node-card...) actually reads
+     as a distinct raised object instead of a shadow on a same-color page
+     with nothing to contrast against. The graph canvas already got this
+     contrast for free from its own dot-grid; every other page didn't. */
+  --canvas-bg: #f4f3f0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -78,12 +87,14 @@
     --accent-bg: #1c3040; --accent-light: #3d5972; --accent-text: #cfe6f5;
     --danger: #e8a89c; --danger-bg: #3a201c;
     --state-next-bg: #17293a; --state-later-bg: #182430;
+    --canvas-bg: #131416;
   }
 }
 :root[data-theme="dark"] { color-scheme: dark; --ink: #f1f0ed; --paper: #17181a; --panel: #232427; --line: #47494e; --line-soft: #2c2e31; --muted: #b7b8bd; --faint: #85878c;
   --accent-bg: #1c3040; --accent-light: #3d5972; --accent-text: #cfe6f5;
   --danger: #e8a89c; --danger-bg: #3a201c;
   --state-next-bg: #17293a; --state-later-bg: #182430;
+  --canvas-bg: #131416;
 }
 
 * { box-sizing: border-box; scrollbar-width: thin; }
@@ -196,7 +207,7 @@ a { color: var(--accent); }
 .edge-disconnect-btn:hover { background: var(--ink); color: var(--paper); }
 
 .sidebar {
-  width: 188px; flex: none; background: var(--panel);
+  width: 188px; flex: none; background: var(--paper);
   display: flex; flex-direction: column; padding: 18px 8px 16px;
   border-right: 1px solid var(--line-soft);
 }
@@ -208,12 +219,12 @@ a { color: var(--accent); }
   font-size: 13px; font-weight: 600; padding: 8px 9px; border-radius: var(--radius);
   text-align: left; width: 100%; color: var(--muted); margin-bottom: 1px;
 }
-.nav-btn:hover { background: rgba(19, 19, 19, .05); }
+.nav-btn:hover { background: var(--panel); }
 .nav-btn.active { color: var(--paper); background: var(--ink); }
 .nav-btn.active:hover { background: var(--ink); }
 .sidebar-footer { margin-top: auto; padding: 8px 9px 2px; font-size: 11px; color: var(--faint); line-height: 1.6; }
 
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; position: relative; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; position: relative; background: var(--canvas-bg); }
 /* React.lazy's Suspense fallback for a page whose own chunk (and, for
    Perform, React Flow/dagre/Fuse.js on top) is still downloading — plain
    background, no spinner, so a fast connection sees nothing but a blank
