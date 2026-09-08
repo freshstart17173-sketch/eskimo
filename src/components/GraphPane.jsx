@@ -155,7 +155,7 @@ export default function GraphPane({
   hoveredId, setHoveredId, matchIds, searchActive,
   onDragSongPosition, endQueued, onSelectSong,
   nowPlayingId, nowElapsedSec, nowDurationSec,
-  onPaneContextMenu, onNodeContextMenu, onSelectionContextMenu, onMultiSelectionChange,
+  onPaneContextMenu, onNodeContextMenu, onSelectionContextMenu, onMultiSelectionChange, onPaneClick,
 }) {
   const { isDark } = useTheme();
   const lineColor = isDark ? LINE_COLOR.dark : LINE_COLOR.light;
@@ -440,6 +440,7 @@ export default function GraphPane({
           onSelectionChange={onSelectionChange}
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
+          onPaneClick={onPaneClick}
           onPaneContextMenu={onPaneContextMenu}
           onNodeContextMenu={onNodeContextMenu}
           onSelectionContextMenu={onSelectionContextMenu}

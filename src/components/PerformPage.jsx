@@ -168,6 +168,14 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // reachable only through the detail pane's own Play button.
   const selectSong = useCallback((id) => setSelectedId(id), []);
 
+  // Clicking empty canvas while a node is selected used to do nothing —
+  // the detail pane just sat there with no obvious way to close it short
+  // of its own ✕. `selectedId` is plain component state, not tied to
+  // React Flow's own node-selection at all (see selectSong's own comment
+  // above on why), so React Flow deselecting its nodes on a pane click
+  // was never going to clear this on its own — needs its own handler.
+  const onPaneClick = useCallback(() => setSelectedId(null), []);
+
   // The detail pane's Play button — (re)starts playback from this exact
   // song right now, auto-picking Intro when one's produced, a hard cut
   // otherwise, same default a cold set start already used. Deliberately the
@@ -800,6 +808,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
             endQueued={endWired}
             nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
+            onPaneClick={onPaneClick}
             onPaneContextMenu={onPaneContextMenu} onNodeContextMenu={onNodeContextMenu}
             onSelectionContextMenu={onSelectionContextMenu}
             onMultiSelectionChange={setMultiSelectedIds}
