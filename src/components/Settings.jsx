@@ -4,12 +4,26 @@ import { estimateSeamlessLength } from '../graphEstimate.js';
 import { useTheme } from '../theme.js';
 import { Field } from './shared.jsx';
 
-export default function SettingsPage({ venueName, setVenueName, songs, edges, session, playlists, onClearAll, onRestore, onSetAutoplay, onSetTransitionOnly }) {
+export default function SettingsPage({
+  venueName, setVenueName, songs, edges, session, playlists, onClearAll, onRestore, onSetAutoplay, onSetTransitionOnly,
+  crateId, isCrateSyncConfigured, onStartSharedCrate, creatingCrate,
+}) {
   const estimate = useMemo(() => estimateSeamlessLength(songs, edges), [songs, edges]);
   const { theme, setTheme } = useTheme();
   const [confirmingReset, setConfirmingReset] = useState(false);
   const fileInputRef = useRef(null);
   const [importError, setImportError] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
+  const crateShareUrl = crateId ? window.location.origin + window.location.pathname + '?crate=' + crateId : '';
+  function copyCrateLink() {
+    navigator.clipboard.writeText(crateShareUrl).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    });
+  }
+  function leaveCrate() {
+    window.location.href = window.location.pathname;
+  }
 
   function downloadBackup() {
     const data = { songs, edges, session, venueName, playlists };
@@ -61,6 +75,49 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
         </div>
       </div>
 
+      <div className="section-label" style={{ marginTop: 20 }}>Shared crate</div>
+      <div className="settings-card" style={{ marginBottom: 20 }}>
+        {crateId ? (
+          <>
+            <div className="settings-row">
+              <div>
+                <div className="settings-row-title">You're in a shared crate</div>
+                <div className="settings-row-sub">Songs and audio pieces here are live-shared with anyone who has this link — your set wiring and playback stay private to this browser.</div>
+              </div>
+              <span className="tag tag-good">LIVE</span>
+            </div>
+            <div className="settings-row">
+              <div>
+                <div className="settings-row-title">Share link</div>
+                <div className="settings-row-sub" style={{ wordBreak: 'break-all' }}>{crateShareUrl}</div>
+              </div>
+              <button className="btn btn-ghost" onClick={copyCrateLink}>{linkCopied ? 'Copied!' : 'Copy link'}</button>
+            </div>
+            <div className="settings-row">
+              <div>
+                <div className="settings-row-title">Leave this crate</div>
+                <div className="settings-row-sub">Goes back to your own personal library — nothing shared here is deleted.</div>
+              </div>
+              <button className="btn btn-ghost" onClick={leaveCrate}>Leave…</button>
+            </div>
+          </>
+        ) : (
+          <div className="settings-row">
+            <div>
+              <div className="settings-row-title">Start a shared crate</div>
+              <div className="settings-row-sub">
+                {isCrateSyncConfigured
+                  ? 'Turns your current library into a live-shared one and gives you a link — send it to producer friends and they can open the real editor and add songs/audio straight into the same pool.'
+                  : 'Not set up yet — Supabase isn’t configured (see TODO.md).'}
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={onStartSharedCrate} disabled={!isCrateSyncConfigured || creatingCrate}>
+              {creatingCrate ? (<><span className="spinner" /> Creating…</>) : 'Start sharing'}
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="form-card">
         <Field label="Venue / session name">
           <input className="input" value={venueName} onChange={(e) => setVenueName(e.target.value)} placeholder="e.g. Friday Warehouse" />
@@ -91,14 +148,23 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
           </div>
           <button className="btn btn-ghost" onClick={downloadBackup}>Download</button>
         </div>
-        <div className="settings-row">
-          <div>
-            <div className="settings-row-title">Restore from a backup</div>
-            <div className="settings-row-sub">Replaces everything currently in the browser.</div>
+        {crateId ? (
+          <div className="settings-row">
+            <div>
+              <div className="settings-row-title">Restore from a backup</div>
+              <div className="settings-row-sub">Not available inside a shared crate — restoring would replace the whole shared pool for everyone. Leave the crate first if you need to restore your own library.</div>
+            </div>
           </div>
-          <button className="btn btn-ghost" onClick={() => fileInputRef.current && fileInputRef.current.click()}>Restore…</button>
-          <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => handleImportFile(e.target.files)} />
-        </div>
+        ) : (
+          <div className="settings-row">
+            <div>
+              <div className="settings-row-title">Restore from a backup</div>
+              <div className="settings-row-sub">Replaces everything currently in the browser.</div>
+            </div>
+            <button className="btn btn-ghost" onClick={() => fileInputRef.current && fileInputRef.current.click()}>Restore…</button>
+            <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={(e) => handleImportFile(e.target.files)} />
+          </div>
+        )}
         {importError && <div className="error-note">{importError}</div>}
       </div>
 
@@ -129,20 +195,29 @@ export default function SettingsPage({ venueName, setVenueName, songs, edges, se
 
       <div className="section-label" style={{ marginTop: 24 }}>Reset</div>
       <div className="settings-card">
-        <div className="settings-row">
-          <div>
-            <div className="settings-row-title">Clear all data</div>
-            <div className="settings-row-sub">Wipes every song, transition, and set state saved in this browser. This does not undo — download a backup first if you're not sure.</div>
-          </div>
-          {!confirmingReset ? (
-            <button className="btn btn-danger" onClick={() => setConfirmingReset(true)}>Clear…</button>
-          ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmingReset(false)}>Cancel</button>
-              <button className="btn btn-danger btn-sm" onClick={onClearAll}>Confirm — clear everything</button>
+        {crateId ? (
+          <div className="settings-row">
+            <div>
+              <div className="settings-row-title">Clear all data</div>
+              <div className="settings-row-sub">Not available inside a shared crate — this would wipe the shared pool for everyone, not just your own browser. Use "Leave this crate" above instead.</div>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="settings-row">
+            <div>
+              <div className="settings-row-title">Clear all data</div>
+              <div className="settings-row-sub">Wipes every song, transition, and set state saved in this browser. This does not undo — download a backup first if you're not sure.</div>
+            </div>
+            {!confirmingReset ? (
+              <button className="btn btn-danger" onClick={() => setConfirmingReset(true)}>Clear…</button>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setConfirmingReset(false)}>Cancel</button>
+                <button className="btn btn-danger btn-sm" onClick={onClearAll}>Confirm — clear everything</button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -209,11 +209,47 @@ side even if writes are already safe.
 
 ## Status
 
-Spec and design only — per the correctness-check process, the schema and
-sync code are not written until the W1/W2 question above is answered,
-since it changes which tables exist and what "safe by construction" even
-means here. Once decided, implementation is: the migration above (W1
-subset, or full set for W2), `crateStore.js` (mirroring `core.js`'s
-existing `Store` shape but per-crate and realtime-subscribed), a crate-id
-route check in `App.jsx`, and a "Share this crate" action somewhere in
-Settings that generates the link.
+**Implemented, scope W1.** The migration (`crates`/`crate_songs`/
+`crate_edges`, RLS policies, realtime publication) is live on the real
+Supabase project. `src/crateStore.js` holds the row↔app-object mapping and
+the create/fetch/push/delete/subscribe calls; `App.jsx` wires it in as a
+completely separate code path from the personal library (crate mode
+detected once via `?crate=<id>`, never touches `Store`/`library` at all)
+and does the local song/edge diff-push (reference-equality against the
+previous render, so every existing `setSongs`/`setEdges` call site — drag,
+Autoarrange, Autoconnect, undo, upload — is covered automatically without
+being touched individually) plus a remote-origin tracking set so an
+inbound realtime change doesn't immediately echo back out. Settings gained
+a "Shared crate" section: start one (seeds it from the current library,
+then reloads into crate mode), copy the link, or leave. `session`
+(playback + graph wiring) is never sent to a crate — confirmed by
+construction, not by a runtime guard: the code path that pushes to the
+crate only ever touches `songs`/`edges` state, and the debounced-save
+effect that touches `session` writes it to a crate-scoped **local**
+`localStorage` key, never to Supabase, whenever `CRATE_ID` is set. The
+"Clear all data" and "Restore from a backup" actions are disabled inside
+a crate (both would otherwise wipe the shared pool for every collaborator,
+not just the local browser) — "Leave this crate" is offered instead.
+
+**Verified:** the database layer directly — insert/read/update/delete
+against `crate_songs` via the real anon key over plain REST (curl,
+bypassing the browser entirely) confirmed the RLS policies genuinely allow
+anonymous read+write scoped by crate id, cascade-delete works, and the
+schema round-trips correctly. The non-crate personal-library path was
+re-run through the full existing smoke test after these changes with zero
+regressions.
+
+**Not verified end-to-end in this environment, and worth knowing why:**
+this development sandbox's outbound network goes through a proxy that
+explicitly does not support WebSocket upgrades — Supabase Realtime's
+transport — and browser-originated HTTPS requests to the Supabase project
+were failing at the proxy layer in a way plain `curl` from the same
+sandbox wasn't (documented, unresolved after following the environment's
+own remediation steps). So: the create-crate-from-Settings flow, a second
+browser actually receiving another collaborator's change live without a
+reload, and the realtime subscription's reconnect behavior have **not**
+been exercised against a real running instance of the app — only reasoned
+through via code review and the direct database-layer verification above.
+These should be smoke-tested against the real deployed site (two browser
+tabs/devices, one crate link) before relying on this for an actual
+session with producer friends.

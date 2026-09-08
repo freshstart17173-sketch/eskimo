@@ -1005,6 +1005,47 @@ Still queued from the same original request:
   `core.js`'s own "arrival style" phrasing) — neither has been run past
   the user as a real decision yet.
 
+### Done this pass (round 17 — shared live crates, producer-friend collaboration)
+
+Asked directly for a shareable link so producer friends can open the real
+editor and contribute songs/audio into the same library. Given the real
+data-loss risk of extending the existing whole-blob-overwrite personal
+sync to multiple simultaneous writers, ran the correctness-check process
+first — full spec at **`docs/live-crate-collab-design.md`** (ten concrete
+concurrent-write scenarios, derived before any schema/sync code was
+written) — which surfaced one genuinely open question rather than
+guessing at it: the request was specifically "contribute songs and
+audio," narrower and safer than "collaboratively wire the live set
+together." Put both options to the user directly; picked **W1 — shared
+song/edge pool, private wiring**: each collaborator's own graph wiring
+and playback session stay local to their own browser, never synced,
+which makes "a remote edit can never touch anyone's live performance
+state" true by construction instead of something needing active
+enforcement.
+
+Implemented: real per-song/per-edge Supabase tables (`crates`/
+`crate_songs`/`crate_edges`, RLS scoped to "anyone with the crate id" —
+same model the already-public R2 audio objects use, not per-user like the
+personal `library` table), Realtime subscriptions for live incremental
+updates, and `src/crateStore.js` + `App.jsx` wiring that's a fully
+separate code path from personal-library sync (a crate can never read
+from or write into a visitor's own solo library). A "Shared crate"
+section in Settings starts one (seeding it from the current library),
+copies the link, or leaves — "Clear all data"/"Restore from a backup"
+are disabled inside a crate since either would wipe the shared pool for
+every collaborator, not just the local browser.
+
+Verified the database layer directly (real anon key, plain REST, insert/
+read/update/delete all round-tripped correctly) and confirmed zero
+regression on the existing personal-library path. **Not** verified
+end-to-end live in this dev sandbox — its outbound proxy doesn't support
+WebSocket upgrades (Realtime's transport) and browser-originated requests
+to Supabase were failing at the proxy layer in ways plain `curl` from the
+same sandbox wasn't. Real cross-browser live sync needs a smoke test
+against the actual deployed site before relying on it for a real session
+— see the design doc's own "Status" section for exactly what is and
+isn't confirmed.
+
 ### Done this pass (round 16 — three real graph bugs, root-caused against reproductions; example set doubled)
 
 Four things reported directly in one message, from a screenshot of

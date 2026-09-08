@@ -161,7 +161,7 @@ export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDe
           <div className="empty-state-sub">Upload your first track to start building your library.</div>
           <div className="empty-state-actions">
             <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
-            <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>
+            {onLoadExample && <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>}
           </div>
         </div>
       </div>

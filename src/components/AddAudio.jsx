@@ -121,7 +121,7 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
           <div className="empty-state-sub">You'll need at least one song in the library before there's anything to connect.</div>
           <div className="empty-state-actions">
             <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
-            <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>
+            {onLoadExample && <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>}
           </div>
         </div>
       </div>

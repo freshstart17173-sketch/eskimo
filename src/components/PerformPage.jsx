@@ -724,7 +724,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <div className="empty-state-sub">Add your first song, then come back here to lay out your set and connect it to others.</div>
           <div className="empty-state-actions">
             <button className="btn btn-primary" onClick={goUpload}>Upload a song</button>
-            <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>
+            {onLoadExample && <button className="btn btn-ghost" onClick={onLoadExample}>Load an example graph</button>}
           </div>
         </div>
       </div>
