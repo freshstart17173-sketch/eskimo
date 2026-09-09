@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
-import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed, autoconnectFullGraph, getProfileName } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed, autoconnectFullGraph, getProfileName, uid, findFreePosition } from './core.js';
 import { engine, performAdvance, prefetchHop, PREFETCH_LOOKAHEAD_SEC, buildHopDecision, syncSessionFromFiredPlan } from './audioEngine.js';
 import { isCrateSyncConfigured, createCrate, fetchCrateLibrary, subscribeCrateLibrary, pushCrateSong, deleteCrateSong, pushCrateEdge, deleteCrateEdge } from './crateStore.js';
 import Sidebar from './components/Sidebar.jsx';
@@ -9,6 +9,15 @@ import Sidebar from './components/Sidebar.jsx';
 // code path from the personal library below, not a variant of it: a
 // crate has no relationship to whatever this browser's own solo library
 // is, and must never read from or write into it (spec requirement 9).
+// Deliberately duplicated from graphLayout.js's own NODE_W/NODE_H rather
+// than imported — that module also imports `dagre` at its top level, so
+// importing ANYTHING from it here (this file is never lazy-loaded) would
+// pull dagre into the always-loaded main bundle instead of Perform's own
+// lazy chunk, undoing the whole point of lazy-loading it. Only used for
+// findFreePosition's own overlap math below, which just needs the node's
+// real footprint in pixels, not graphLayout.js's actual layout logic.
+const APPROX_NODE_W = 208, APPROX_NODE_H = 165;
+
 const CRATE_ID = new URLSearchParams(window.location.search).get('crate') || null;
 const CRATE_SESSION_KEY = CRATE_ID ? 'djflow:crate:' + CRATE_ID : null;
 function loadCrateSession() {
@@ -243,6 +252,21 @@ export default function App() {
   const lastTickAtRef = useRef(Date.now());
   const sessionRef = useRef(session);
   useEffect(() => { sessionRef.current = session; }, [session]);
+  // A closed tab mid-set doesn't lose the LIBRARY (that's in localStorage,
+  // written synchronously) but it does silently kill real audio playback
+  // and, for a shared crate, whatever hasn't round-tripped to the backend
+  // yet — worth one native confirm dialog rather than a silent stop.
+  // Reads sessionRef (not `session` itself) so this effect never has to
+  // re-run on every tick just to keep a fresh closure.
+  useEffect(() => {
+    function onBeforeUnload(e) {
+      if (!sessionRef.current.isPlaying) return;
+      e.preventDefault();
+      e.returnValue = '';
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
   const scheduledHopKeyRef = useRef(null);
   useEffect(() => {
     lastTickAtRef.current = Date.now();
@@ -358,7 +382,13 @@ export default function App() {
     // A saved playlist referencing a now-deleted song would otherwise sit
     // there silently broken until someone tried to load it.
     setPlaylists(prev => prev.map(p => removeSongFromPlaylist(p, songId)));
-    showUndoToast('Deleted "' + (song ? song.title : 'that song') + '"', snapshot);
+    // A song rarely deletes alone — every transition/intro/outro touching
+    // it goes with it, which the message used to leave silent (the undo
+    // still restored everything correctly, but the toast itself gave no
+    // hint that more than just the one song was actually at stake).
+    const edgesLost = edges.length - result.edges.length;
+    const cascadeNote = edgesLost > 0 ? ` (+${edgesLost} audio piece${edgesLost > 1 ? 's' : ''})` : '';
+    showUndoToast('Deleted "' + (song ? song.title : 'that song') + '"' + cascadeNote, snapshot);
   }, [edges, songs, session, showUndoToast]);
 
   const updateSong = useCallback((songId, patch) => {
@@ -471,10 +501,50 @@ export default function App() {
   // an example graph never ends up blended with the user's own songs: the
   // first real upload while the example is showing clears it first.
   const addSong = useCallback((song) => {
-    const stamped = { ...song, contributedBy: song.contributedBy || getProfileName() };
+    // UploadSong.jsx proposes a seed position from a plain formula that has
+    // no idea what's already on the canvas — for a large-enough library the
+    // formula wraps and a new song can land exactly on top of an existing
+    // one. Nudged here (the one place that actually has every current
+    // position in scope) via the same findFreePosition a manual duplicate
+    // uses, rather than duplicating this logic in the upload form itself.
+    const positions = {}; Object.values(songs).forEach(s => { positions[s.id] = { x: s.x, y: s.y }; });
+    const pos = findFreePosition(positions, song.x, song.y, APPROX_NODE_W, APPROX_NODE_H);
+    const stamped = { ...song, x: pos.x, y: pos.y, contributedBy: song.contributedBy || getProfileName() };
     if (isDemo) { clearExample(); setSongs({ [stamped.id]: stamped }); return; }
     setSongs(prev => ({ ...prev, [stamped.id]: stamped }));
-  }, [isDemo, clearExample]);
+  }, [isDemo, clearExample, songs]);
+
+  // Seeds a new song from an existing one's BPM/key/cover — for a remix or
+  // an alternate edit that's mostly "the same song again", not a from-
+  // scratch Upload Song trip. Deliberately drops audioUrl/durationSec (a
+  // duplicate isn't a copy of the same AUDIO, just its metadata) and
+  // mashupOf (copying a mashup marker onto an unrelated new song would be
+  // actively wrong, not just unfilled).
+  const duplicateSong = useCallback((songId) => {
+    const song = songs[songId];
+    if (!song) return;
+    const positions = {}; Object.values(songs).forEach(s => { positions[s.id] = { x: s.x, y: s.y }; });
+    const pos = findFreePosition(positions, song.x + APPROX_NODE_W + 24, song.y, APPROX_NODE_W, APPROX_NODE_H);
+    const copy = {
+      ...song, id: uid('s'), x: pos.x, y: pos.y,
+      title: song.title + ' (copy)', audioUrl: null, mashupOf: null,
+      contributedBy: getProfileName() || undefined, extraFiles: undefined,
+    };
+    setSongs(prev => ({ ...prev, [copy.id]: copy }));
+  }, [songs]);
+
+  // Extra-file removal used to go through the plain updateSong patch below
+  // (no undo) — unlike deleting a whole song or a built transition, which
+  // both already get the same 6-second undo toast. A misclick removing a
+  // stem someone spent time uploading deserves the same safety net.
+  const removeExtraFile = useCallback((songId, fileId) => {
+    const song = songs[songId];
+    if (!song) return;
+    const snapshot = { songs, edges, session };
+    const file = (song.extraFiles || []).find(f => f.id === fileId);
+    setSongs(prev => (prev[songId] ? { ...prev, [songId]: { ...prev[songId], extraFiles: (prev[songId].extraFiles || []).filter(f => f.id !== fileId) } } : prev));
+    showUndoToast((file ? '"' + file.name + '"' : 'File') + ' removed', snapshot);
+  }, [songs, edges, session, showUndoToast]);
 
   const songCount = Object.keys(songs).length;
   const edgeCount = edges.length;
@@ -499,6 +569,7 @@ export default function App() {
           {tab === 'library' && (
             <LibraryPage songs={songs} edges={edges} goUpload={() => setTab('upload')}
               onUpdateSong={updateSong} onDeleteSong={deleteSong} onDeleteEdge={deleteEdge}
+              onDuplicateSong={duplicateSong} onRemoveExtraFile={removeExtraFile}
               onQueueSongs={queueSongsAsPlaylist} onLoadExample={loadExampleProp}
             />
           )}

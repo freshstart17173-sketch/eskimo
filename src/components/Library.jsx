@@ -1,6 +1,27 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { libraryRows, uploadCoverIfPossible, uploadExtraFileIfPossible, occludedTransitions, fmtBytes } from '../core.js';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { libraryRows, uploadCoverIfPossible, uploadExtraFileIfPossible, occludedTransitions, fmtBytes, emptySession } from '../core.js';
+import { isLocalAudioMarker, resolveAudioUrl } from '../localAudioStore.js';
 import { Icon, ICONS, Field, AlbumArt, CoverPicker, SongPicker, useResolvedAudioUrl } from './shared.jsx';
+
+// A `blob:`/`local:`-resolved URL only exists inside THIS browser — a
+// single-song export bundle (see exportSong below) needs to actually be
+// portable to somebody else's browser, so anything backed by local
+// IndexedDB storage gets fetched and re-embedded as a `data:` URI (already
+// self-contained, no server involved) rather than left as a URL that
+// would silently fail to resolve anywhere else. A real http(s) URL (the
+// backend-configured path) is already portable and passes through as-is.
+async function portableUrl(url) {
+  if (!url || !isLocalAudioMarker(url)) return url || null;
+  const resolved = await resolveAudioUrl(url);
+  if (!resolved) return null;
+  const blob = await fetch(resolved).then(r => r.blob());
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+}
 
 // `audioUrl` may be a `local:` marker (IndexedDB, no backend configured —
 // see localAudioStore.js) rather than a real URL, and resolving it is
@@ -37,9 +58,10 @@ function ExtraFileRow({ file, onRemove }) {
   );
 }
 
-function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, selected, onToggleSelect }) {
+function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onDeleteSong, onDeleteEdge, onDuplicateSong, onRemoveExtraFile, selected, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
   const [attaching, setAttaching] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const extraFileInputRef = useRef(null);
   const [draftTitle, setDraftTitle] = useState(song.title);
   const [draftArtist, setDraftArtist] = useState(song.artist);
@@ -77,7 +99,40 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
     onUpdateSong(song.id, { extraFiles: [...(song.extraFiles || []), ...uploaded] });
   }
   function removeExtraFile(fileId) {
-    onUpdateSong(song.id, { extraFiles: (song.extraFiles || []).filter(f => f.id !== fileId) });
+    onRemoveExtraFile(song.id, fileId);
+  }
+  // A portable single-song bundle — the same {songs, edges, session,
+  // venueName, playlists} shape Settings' own full-library backup uses
+  // (filtered to just this song + its own built audio), so Settings'
+  // existing Restore already knows how to bring it back in on the
+  // receiving end without a second, bundle-specific import path. Any
+  // `local:`-marker audio (this browser's own IndexedDB, not a real URL)
+  // gets re-embedded as a `data:` URI first — otherwise the marker would
+  // silently fail to resolve to anything on someone else's machine.
+  async function exportSong() {
+    setExporting(true);
+    try {
+      const ownEdgesNow = edges.filter(e => e.l === song.id || e.r === song.id);
+      const exportedSong = {
+        ...song,
+        audioUrl: await portableUrl(song.audioUrl),
+        coverUrl: await portableUrl(song.coverUrl),
+        extraFiles: await Promise.all((song.extraFiles || []).map(async (f) => ({ ...f, url: await portableUrl(f.url) }))),
+      };
+      const exportedEdges = await Promise.all(ownEdgesNow.map(async (e) => ({ ...e, audioUrl: await portableUrl(e.audioUrl) })));
+      const data = {
+        songs: { [song.id]: exportedSong }, edges: exportedEdges,
+        session: emptySession(), venueName: '', playlists: [],
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'eskimo-song-' + song.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
   }
   function destText(e) {
     if (e.type === 'outro') return 'ends set';
@@ -103,6 +158,9 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
           <span className="tag tag-accent">{row.bpm}</span>
           <span className="tag tag-good">{row.key}</span>
           {row.isDeadEnd && <span className="tag tag-warn">dead end</span>}
+          {song.audioUrl && isLocalAudioMarker(song.audioUrl) && (
+            <span className="tag" data-tooltip="This reference audio lives in this browser's own storage, not a shared backend — it won't be visible on another device or to a crate collaborator">local only</span>
+          )}
         </div>
         <div className="lib-io mono-num" onClick={onToggle}>↓{row.inCount} ↑{row.outCount}</div>
       </div>
@@ -113,6 +171,10 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
             <div className="drawer-actions-row">
               <button className="btn btn-ghost btn-sm" onClick={() => setEditing(true)}>Edit details</button>
               <DownloadReferenceLink song={song} />
+              <button className="btn btn-ghost btn-sm" onClick={() => onDuplicateSong(song.id)} data-tooltip="Seed a new song from this one's BPM/key/cover — for a remix or alternate edit">Duplicate</button>
+              <button className="btn btn-ghost btn-sm" onClick={exportSong} disabled={exporting} data-tooltip="Download this song + its built audio as a shareable file — bring it into another library via Settings → Restore">
+                {exporting ? (<><span className="spinner" /> Exporting…</>) : 'Export'}
+              </button>
               <button className="btn btn-danger btn-sm" onClick={() => onDeleteSong(song.id)}>Delete song</button>
             </div>
           ) : (
@@ -187,13 +249,51 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
   );
 }
 
-export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onQueueSongs, onLoadExample }) {
+const SORT_OPTIONS = [
+  { key: 'title', label: 'Title' },
+  { key: 'artist', label: 'Artist' },
+  { key: 'bpm', label: 'BPM' },
+  { key: 'key', label: 'Key' },
+  { key: 'deadend', label: 'Dead ends first' },
+  { key: 'added', label: 'Recently added' },
+];
+
+export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDeleteSong, onDeleteEdge, onDuplicateSong, onRemoveExtraFile, onQueueSongs, onLoadExample }) {
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]); // ordered — selection order is play order
+  const [sortKey, setSortKey] = useState('title');
+  // 'added' and 'deadend' read more naturally newest/dead-ends-first by
+  // default — flipping the starting direction per key beats making
+  // someone click "descending" the instant they pick either of those.
+  const [sortDir, setSortDir] = useState('asc');
+  const searchRef = useRef(null);
+
+  // Matches the identical-looking search box on the Graph page (PerformPage.jsx)
+  // — same "/" focus shortcut, so the two don't quietly diverge in discoverability.
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key !== '/') return;
+      const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement && document.activeElement.tagName);
+      if (typing) return;
+      e.preventDefault();
+      searchRef.current && searchRef.current.focus();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const totalSongs = Object.keys(songs).length;
-  const rows = useMemo(() => libraryRows(songs, edges, search, 'title', 'asc'), [songs, edges, search]);
+  const rows = useMemo(() => libraryRows(songs, edges, search, sortKey, sortDir), [songs, edges, search, sortKey, sortDir]);
+
+  function changeSortKey(key) {
+    setSortKey(key);
+    // 'added' sorts by id (ascending = oldest first) — 'desc' shows newest
+    // first. 'deadend' sorts on !isDeadEnd (ascending already puts a dead
+    // end's `false` before a wired song's `true`), so 'asc' already reads
+    // as "dead ends first" with no direction flip needed.
+    setSortDir(key === 'added' ? 'desc' : 'asc');
+  }
 
   function toggleSelect(id) {
     setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
@@ -226,7 +326,15 @@ export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDe
         <button className="btn btn-primary" onClick={goUpload}>+ New song</button>
       </div>
       <div className="page-sub">Every song in the crate. Click a row for its built transitions and to edit it — check a run of rows, in the order you want them, to queue them all as a playlist.</div>
-      <input className="input" style={{ maxWidth: 320, marginBottom: 16 }} placeholder="Find a song or artist…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <input ref={searchRef} className="input" style={{ maxWidth: 320 }} placeholder="Find a song or artist… (/)" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="input" style={{ maxWidth: 170 }} value={sortKey} onChange={(e) => changeSortKey(e.target.value)} aria-label="Sort library by">
+          {SORT_OPTIONS.map(o => <option key={o.key} value={o.key}>Sort: {o.label}</option>)}
+        </select>
+        <button className="icon-btn" onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))} aria-label={sortDir === 'asc' ? 'Ascending' : 'Descending'} data-tooltip={sortDir === 'asc' ? 'Ascending — click to reverse' : 'Descending — click to reverse'}>
+          {sortDir === 'asc' ? '↑' : '↓'}
+        </button>
+      </div>
 
       {selectedIds.length > 0 && (
         <div className="lib-select-bar">
@@ -243,7 +351,8 @@ export default function LibraryPage({ songs, edges, goUpload, onUpdateSong, onDe
           <LibraryRow key={r.id} row={r} song={songs[r.id]} edges={edges} songs={songs} open={openId === r.id}
             onToggle={() => setOpenId(id => (id === r.id ? null : r.id))}
             selected={selectedIds.includes(r.id)} onToggleSelect={() => toggleSelect(r.id)}
-            onUpdateSong={onUpdateSong} onDeleteSong={onDeleteSong} onDeleteEdge={onDeleteEdge} />
+            onUpdateSong={onUpdateSong} onDeleteSong={onDeleteSong} onDeleteEdge={onDeleteEdge}
+            onDuplicateSong={onDuplicateSong} onRemoveExtraFile={onRemoveExtraFile} />
         ))}
       </div>
       {rows.length === 0 && <div className="empty-note">no songs match "{search}"</div>}

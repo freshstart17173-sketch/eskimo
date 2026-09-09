@@ -761,6 +761,33 @@ export function freshState() { return { songs: {}, edges: [], session: emptySess
 // ---------------------------------------------------------------------------
 export function uid(prefix) { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 export function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+
+// A new song's canvas position used to be a pure formula
+// (`60 + (existingCount*47) % 1180`) with no awareness of where songs
+// already placed actually sit — for a large-enough library the modulo
+// wraps and a new song can land exactly on top of an existing one.
+// Spirals outward from the seed point in NODE_W/NODE_H-sized steps until
+// it finds a spot that doesn't overlap anything already placed, so a
+// growing library never silently stacks nodes. `positions` is a plain
+// {id: {x,y}} map (whatever's already on the canvas); NODE_W/NODE_H come
+// from graphLayout.js's own constants so this always matches the node's
+// real rendered footprint.
+export function findFreePosition(positions, seedX, seedY, nodeW, nodeH) {
+  const existing = Object.values(positions || {});
+  const overlaps = (x, y) => existing.some(p => Math.abs(p.x - x) < nodeW && Math.abs(p.y - y) < nodeH);
+  if (!overlaps(seedX, seedY)) return { x: seedX, y: seedY };
+  const stepX = nodeW + 24, stepY = nodeH + 24;
+  for (let ring = 1; ring <= 40; ring++) {
+    for (let dx = -ring; dx <= ring; dx++) {
+      for (let dy = -ring; dy <= ring; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue; // only the ring's own perimeter
+        const x = seedX + dx * stepX, y = seedY + dy * stepY;
+        if (!overlaps(x, y)) return { x, y };
+      }
+    }
+  }
+  return { x: seedX, y: seedY }; // exhausted a generous search radius — fall back rather than loop forever
+}
 export function fmtTime(s) { s = Math.max(0, Math.round(s)); const m = Math.floor(s / 60); const sec = s % 60; return m + ':' + (sec < 10 ? '0' : '') + sec; }
 export function fmtSignedBpm(n) { if (n == null) return ''; return (n > 0 ? '+' : '') + n + ' BPM'; }
 export function fmtBytes(n) {
@@ -1019,7 +1046,18 @@ export function libraryRows(songs, edges, search, sortKey, sortDir) {
     return { id, title: s.title, artist: s.artist, bpmNum: s.bpm, bpm: s.bpm + ' BPM', key: s.key, inCount, outCount, isDeadEnd: outCount === 0 };
   });
   if (q) rows = rows.filter(r => r.title.toLowerCase().includes(q) || r.artist.toLowerCase().includes(q));
-  const val = (r) => sortKey === 'bpm' ? r.bpmNum : sortKey === 'artist' ? r.artist.toLowerCase() : sortKey === 'key' ? r.key : r.title.toLowerCase();
+  // 'added' sorts by id — uid() embeds a base36 Date.now() prefix, so a
+  // plain string comparison of ids already reflects creation order with
+  // no separate createdAt field needed. 'deadend' sorts dead ends first
+  // (false < true, so this pair inverts the boolean to put `true` first).
+  const val = (r) => (
+    sortKey === 'bpm' ? r.bpmNum
+    : sortKey === 'artist' ? r.artist.toLowerCase()
+    : sortKey === 'key' ? r.key
+    : sortKey === 'added' ? r.id
+    : sortKey === 'deadend' ? !r.isDeadEnd
+    : r.title.toLowerCase()
+  );
   rows.sort((a, b) => { const av = val(a), bv = val(b); const c = av < bv ? -1 : av > bv ? 1 : 0; return sortDir === 'asc' ? c : -c; });
   return rows;
 }
