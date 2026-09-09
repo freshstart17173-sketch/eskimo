@@ -1041,7 +1041,15 @@ a { color: var(--accent); }
   background: var(--state-playing); color: var(--paper-fixed);
   animation: pulseRing 2.4s ease-in-out infinite; z-index: 5;
 }
-.node-card.node-hovered { box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }
+/* Pure CSS, deliberately. This used to be a `node-hovered` class driven by a
+   `hoveredId` React state in PerformPage, threaded down and broadcast through
+   a context every SongNode consumed — so moving the pointer onto one card
+   re-rendered all of them. Measured on the 50-node example graph: ~300 DOM
+   mutations per hover and 23 of 70 frames over 50ms. A box-shadow needs none
+   of that. (A hover-driven *transform* would still be off-limits here — it
+   would move the card's box and disturb React Flow's live handle
+   measurements mid-drag — but a shadow paints outside layout entirely.) */
+.node-card:hover { box-shadow: 0 6px 20px rgba(0, 0, 0, .16); }
 /* The accent selection ring — shared by the single `selectedId` cursor
    ("what the detail pane is showing") and a real multi-node box-drag
    selection alike, since both mean the same thing visually. Rendered on

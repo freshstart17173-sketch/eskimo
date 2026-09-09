@@ -69,19 +69,21 @@ function LiveWaveform() {
 // exists to avoid.
 export const NowPlayingContext = createContext({ nowPlayingId: null, palette: null, committedType: null });
 
-// Hover and search-dim state reach SongNode the same way — through context,
-// never through React Flow's own node `data`. Both used to live in `data`
-// and be recomputed by GraphPane's node-rebuild effect on every mouse-enter/
-// keystroke; that effect calls React Flow's `setNodes`, which re-syncs its
-// *entire* internal node registry (every node's measured handle bounds get
-// invalidated and recomputed), which is what actually caused the reported
-// "hovering makes nodes jitter" — visible instability confirmed directly: a
-// Playwright hover probe found node bounding boxes genuinely non-stable
-// across frames while this was wired through `data`. Reading these two off
-// context instead means a hover or a keystroke only re-renders the specific
-// SongNode components that care, as an ordinary React re-render of their own
-// DOM — it never touches React Flow's node graph at all.
-export const HoveredNodeContext = createContext({ hoveredId: null });
+// Search-dim state reaches SongNode through context, never through React
+// Flow's own node `data`. It used to live in `data` and be recomputed by
+// GraphPane's node-rebuild effect on every keystroke; that effect calls React
+// Flow's `setNodes`, which re-syncs its *entire* internal node registry
+// (every node's measured handle bounds get invalidated and recomputed), which
+// is what caused the reported "hovering makes nodes jitter" — confirmed
+// directly: a Playwright probe found node bounding boxes genuinely non-stable
+// across frames while this was wired through `data`. Off context instead, a
+// keystroke only re-renders the SongNodes that care, as an ordinary React
+// re-render of their own DOM — it never touches React Flow's node graph.
+//
+// Hover used to sit here too, and that was still too much machinery: a
+// context broadcast re-renders EVERY consumer, so pointing at one card
+// re-rendered all fifty. It drove a single box-shadow, so it's plain CSS
+// `:hover` now (styles.css) and no longer exists in React at all.
 export const SearchDimContext = createContext({ searchActive: false, matchIds: null });
 // How many nodes React Flow's own selection-box drag currently has
 // selected — same context-not-data reasoning as the two above. React Flow
@@ -319,15 +321,13 @@ function SocketList({ side, types, availability, activeTypes = [], onToggle, com
 // representable case instead of one silently winning over the other.
 export function SongNode({ data, selected }) {
   const {
-    song, state, isSelected, inCount, outCount, onEnter, onLeave, playing, onSelect,
+    song, state, isSelected, inCount, outCount, playing, onSelect,
     leftAvailable, rightAvailable, leftActive, rightActiveTypes, leftEdgeId, leftFilledLabel,
     leftOptions, rightOptionsByType, rightEdgeIdByType, rightFilledLabelByType, onToggleSocket, onSelectVariant, locked,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
-  const { hoveredId } = useContext(HoveredNodeContext);
   const { searchActive, matchIds } = useContext(SearchDimContext);
   const { count: multiSelectedCount } = useContext(MultiSelectionContext);
-  const hovered = hoveredId === song.id;
   const dimmed = searchActive && matchIds && !matchIds.has(song.id);
   const isNowPlayingHere = playing && nowPlaying.nowPlayingId === song.id;
   // A real multi-node box-drag selection (React Flow's own `selected`,
@@ -338,7 +338,7 @@ export function SongNode({ data, selected }) {
   // what I clicked".
   const multiSelected = selected && multiSelectedCount > 1;
   const cls = [
-    'node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed',
+    'node-card', state && 'state-' + state, dimmed && 'node-dimmed',
     isSelected && 'node-selected-ring', multiSelected && 'node-multi-selected',
     locked && 'node-locked',
   ].filter(Boolean).join(' ');
@@ -359,7 +359,7 @@ export function SongNode({ data, selected }) {
   // once a song is actually the one playing.
   const committedType = isNowPlayingHere ? (nowPlaying.committedType || null) : null;
   return (
-    <div className={cls} style={dynamicStyle} onMouseEnter={onEnter} onMouseLeave={onLeave} onClick={onSelect}>
+    <div className={cls} style={dynamicStyle} onClick={onSelect}>
       <div className="node-title-row">
         <div>
           <div className="node-title">{song.title}</div>

@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useEffect, useState, createContext, useCon
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode, useViewport } from '@xyflow/react';
 import { END, START, nodeOutputs } from '../core.js';
 import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphConstants.js';
-import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext, MultiSelectionContext } from './GraphNodes.jsx';
+import { SongNode, EndNode, StartNode, NowPlayingContext, SearchDimContext, MultiSelectionContext } from './GraphNodes.jsx';
 import { useTheme } from '../theme.js';
 import { usePalette } from './shared.jsx';
 
@@ -164,7 +164,7 @@ export default function GraphPane({
   songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId, lockedIds,
   onConnect, isValidConnection, onDisconnectOutput, onDisconnectStart,
   stateFor, ioById,
-  hoveredId, setHoveredId, matchIds, searchActive,
+  matchIds, searchActive,
   onDragSongPosition, endQueued, onSelectSong,
   nowPlayingId, committedType,
   onPaneContextMenu, onNodeContextMenu, onSelectionContextMenu, onMultiSelectionChange, onPaneClick,
@@ -221,7 +221,7 @@ export default function GraphPane({
       id, type: 'song', position: pos, draggable: true, connectable: !locked,
       data: {
         song: s, state, isSelected: id === selectedId, inCount: io.inCount, outCount: io.outCount,
-        onEnter: () => setHoveredId(id), onLeave: () => setHoveredId(null), onSelect: () => onSelectSong(id),
+        onSelect: () => onSelectSong(id),
         onToggleSocket, onSelectVariant, ...socketData, playing: state === 'active', locked,
       },
       style: SONG_STYLE,
@@ -259,7 +259,7 @@ export default function GraphPane({
   // effect below (real layout changes) ever set position now.
   //
   // Also deliberately NOT depending on hoveredId/matchIds/searchActive
-  // anymore — those reach SongNode via HoveredNodeContext/SearchDimContext
+  // anymore — those reach SongNode via SearchDimContext
   // instead (see GraphNodes.jsx), specifically so a hover or a search
   // keystroke never triggers this at all. Calling React Flow's `setNodes`
   // re-syncs its *entire* internal node registry — every node's measured
@@ -453,7 +453,6 @@ export default function GraphPane({
     () => ({ nowPlayingId, palette, committedType }),
     [nowPlayingId, palette, committedType]
   );
-  const hoveredNodeValue = useMemo(() => ({ hoveredId }), [hoveredId]);
   const searchDimValue = useMemo(() => ({ searchActive, matchIds }), [searchActive, matchIds]);
 
   const [hoveredEdgeId, setHoveredEdgeId] = useState(null);
@@ -465,7 +464,6 @@ export default function GraphPane({
 
   return (
     <NowPlayingContext.Provider value={nowPlayingValue}>
-      <HoveredNodeContext.Provider value={hoveredNodeValue}>
       <SearchDimContext.Provider value={searchDimValue}>
       <MultiSelectionContext.Provider value={multiSelectionValue}>
       <HoveredEdgeContext.Provider value={hoveredEdgeValue}>
@@ -528,7 +526,6 @@ export default function GraphPane({
       </HoveredEdgeContext.Provider>
       </MultiSelectionContext.Provider>
       </SearchDimContext.Provider>
-      </HoveredNodeContext.Provider>
     </NowPlayingContext.Provider>
   );
 }

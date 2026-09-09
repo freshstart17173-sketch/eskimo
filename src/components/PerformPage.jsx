@@ -32,7 +32,6 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [matchIndex, setMatchIndex] = useState(0);
-  const [hoveredId, setHoveredId] = useState(null);
   const searchInputRef = useRef(null);
   // The engine's own real position, mirrored into a ref every frame purely
   // so seekPlayhead (a plain event handler, not itself a per-frame
@@ -1076,7 +1075,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             lockedIds={lockedIds}
             onConnect={handleConnect} isValidConnection={isValidConnection}
             onDisconnectOutput={onDisconnectOutput} onDisconnectStart={disconnectStart}
-            stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
+            stateFor={stateFor} ioById={ioById}
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
             endQueued={endWired}
