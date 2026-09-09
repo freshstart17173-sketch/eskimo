@@ -147,11 +147,18 @@ function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 
 const DIVERGE_WINDOW_SEC = 0.05; // fine-scan window — matches WINDOW_SEC's own resolution
 // Empirically: two genuinely-matching windows (even across a lossy
-// re-encode) measured well under 0.05 relative RMS difference; a real
-// divergence point jumped straight past 0.4 and commonly well past 1.0
-// (the diverging content isn't just "different by some amount", it's
-// unrelated audio — its own energy has no reason to resemble the
-// original's at that moment at all).
+// re-encode) measured well under 0.05; a real divergence point jumped
+// straight past 0.4 (the diverging content isn't just "different by some
+// amount", it's unrelated audio — its own energy has no reason to resemble
+// the original's at that moment at all).
+//
+// Since relativeDiffEnvelope became level-invariant its output is
+// sqrt(1 - rho^2), which is bounded at 1 rather than running past it, so
+// divergence now reads ~0.9-1.0 instead of "past 1.0". The gap the
+// threshold sits in got WIDER, not narrower — a matching window no longer
+// carries any level-offset error at all — so 0.35 still sits comfortably in
+// the middle and needs no recalibration. In rho terms it means "windows
+// correlating above ~0.94 count as the same audio".
 const DIVERGE_THRESHOLD = 0.35;
 // Requires the divergence to STAY past threshold for a full second before
 // accepting it — a single stray transient (a drum hit landing a few
@@ -183,12 +190,35 @@ function reversedBuffer(buffer) {
   };
 }
 
-// Per-window normalized RMS difference between two buffers at given start
-// offsets — near 0 while genuinely matching (same recording), jumping well
-// past 1 once they diverge into unrelated content. Mono-mixes each buffer's
-// own channels independently (mirrors rmsEnvelope's own convention) so a
-// mono probe against a stereo reference, or vice versa, still compares
-// correctly. Stops at whichever buffer runs out of samples first.
+// Per-window match residual between two buffers at given start offsets —
+// near 0 while genuinely matching (same recording), near 1 once they diverge
+// into unrelated content. Mono-mixes each buffer's own channels independently
+// (mirrors rmsEnvelope's own convention) so a mono probe against a stereo
+// reference, or vice versa, still compares correctly. Stops at whichever
+// buffer runs out of samples first.
+//
+// LEVEL-INVARIANT ON PURPOSE. This used to measure `rms(a - b) / rms(a)`, a
+// raw sample-by-sample subtraction, which made the whole detector fail on a
+// uniform gain difference between the export and the reference master: for a
+// gain factor g that ratio is |1 - 1/g|, so a mere 3 dB mismatch reads 0.29-
+// 0.41 and trips DIVERGE_THRESHOLD at sample zero — reporting a bogus splice
+// at the very start of the file. That is not a hypothetical: peak/LUFS
+// normalization on export, a different limiter ceiling, or a master fader
+// nudge between the two renders all produce exactly that, and a producer has
+// no reason to expect any of them to matter.
+//
+// Instead, each window now solves for the best-fit gain g (least squares,
+// g = sum(ab)/sum(b^2)) and measures the residual that gain CAN'T explain.
+// The closed form of that residual is sum(a^2) * (1 - rho^2), where rho is
+// the correlation coefficient between the two windows, so what comes out is
+// simply sqrt(1 - rho^2):
+//   - the same audio at any level  -> rho ~= 1    -> ~0
+//   - unrelated audio             -> rho ~= 0    -> ~1
+// One fitted parameter against a couple of thousand samples per window, so
+// there is nothing here for a real divergence to hide behind — diverging
+// content is uncorrelated, which no choice of g can rescue. It also absorbs
+// TIME-VARYING gain for free, which is what a compressor or limiter left on
+// the master bus actually does to a re-render.
 function relativeDiffEnvelope(bufferA, bufferB, startA, startB, windowSize, maxWindows) {
   const chA = []; for (let c = 0; c < bufferA.numberOfChannels; c++) chA.push(bufferA.getChannelData(c));
   const chB = []; for (let c = 0; c < bufferB.numberOfChannels; c++) chB.push(bufferB.getChannelData(c));
@@ -196,20 +226,43 @@ function relativeDiffEnvelope(bufferA, bufferB, startA, startB, windowSize, maxW
   const numWindows = Math.max(0, Math.min(maxWindows, availableWindows));
   const out = new Float32Array(numWindows);
   for (let w = 0; w < numWindows; w++) {
-    let sumSqDiff = 0, sumSqA = 0;
+    let sumSqA = 0, sumSqB = 0, sumAB = 0;
     const baseA = startA + w * windowSize, baseB = startB + w * windowSize;
     for (let i = 0; i < windowSize; i++) {
       let av = 0; for (let c = 0; c < chA.length; c++) av += chA[c][baseA + i] || 0; av /= chA.length;
       let bv = 0; for (let c = 0; c < chB.length; c++) bv += chB[c][baseB + i] || 0; bv /= chB.length;
-      const d = av - bv;
-      sumSqDiff += d * d;
       sumSqA += av * av;
+      sumSqB += bv * bv;
+      sumAB += av * bv;
     }
+    // A silent reference window explains nothing, so the residual is all of
+    // A's own energy (ratio 1) — except where A is silent too, which is a
+    // genuine match and falls out of the rmsA guard below.
+    const explained = sumSqB > 1e-12 ? (sumAB * sumAB) / sumSqB : 0;
+    const residual = Math.max(0, sumSqA - explained);
     const rmsA = Math.sqrt(sumSqA / windowSize);
-    const rmsDiff = Math.sqrt(sumSqDiff / windowSize);
-    out[w] = rmsA > 1e-6 ? rmsDiff / rmsA : rmsDiff;
+    const rmsResidual = Math.sqrt(residual / windowSize);
+    out[w] = rmsA > 1e-6 ? rmsResidual / rmsA : rmsResidual;
   }
   return out;
+}
+
+// Best-fit gain of B against A over one window (the same least-squares
+// scalar relativeDiffEnvelope fits per window, see above). Used to carry a
+// known-good gain estimate into the sample-level refinement below, which
+// compares raw amplitudes and would otherwise reintroduce exactly the
+// level-sensitivity relativeDiffEnvelope just removed.
+function bestFitGain(bufferA, bufferB, startA, startB, count) {
+  const chA = []; for (let c = 0; c < bufferA.numberOfChannels; c++) chA.push(bufferA.getChannelData(c));
+  const chB = []; for (let c = 0; c < bufferB.numberOfChannels; c++) chB.push(bufferB.getChannelData(c));
+  let sumSqB = 0, sumAB = 0;
+  for (let i = 0; i < count; i++) {
+    let av = 0; for (let c = 0; c < chA.length; c++) av += chA[c][startA + i] || 0; av /= chA.length;
+    let bv = 0; for (let c = 0; c < chB.length; c++) bv += chB[c][startB + i] || 0; bv /= chB.length;
+    sumSqB += bv * bv;
+    sumAB += av * bv;
+  }
+  return sumSqB > 1e-12 ? sumAB / sumSqB : 1;
 }
 
 // Refines a divergence boundary found at DIVERGE_WINDOW_SEC (~50ms)
@@ -219,7 +272,14 @@ function relativeDiffEnvelope(bufferA, bufferB, startA, startB, windowSize, maxW
 // (not one single sample) before accepting the boundary, the same
 // "don't trust one transient" reasoning as DIVERGE_HOLD_SEC above, just at
 // sample scale instead of window scale.
-function refineSampleBoundary(probeBuffer, refBuffer, probeStart, refStart, scanSamples) {
+//
+// `gain` scales the reference before comparing, since this measures raw
+// amplitude against an absolute floor and so is level-sensitive in a way
+// relativeDiffEnvelope deliberately no longer is. Without it a modest level
+// offset alone clears ABS_FLOOR on any loud passage (at |ref| ~ 0.3, even
+// +0.5 dB gives ~0.018) and the boundary snaps to the start of the scan
+// region — the coarse scan would be forgiving and this would quietly undo it.
+function refineSampleBoundary(probeBuffer, refBuffer, probeStart, refStart, scanSamples, gain = 1) {
   const pch = probeBuffer.getChannelData(0), rch = refBuffer.getChannelData(0);
   const maxLen = Math.max(0, Math.min(scanSamples, probeBuffer.length - probeStart, refBuffer.length - refStart));
   const RUN = 8;
@@ -227,7 +287,7 @@ function refineSampleBoundary(probeBuffer, refBuffer, probeStart, refStart, scan
   const window = [];
   let runSum = 0;
   for (let i = 0; i < maxLen; i++) {
-    const d = Math.abs((pch[probeStart + i] || 0) - (rch[refStart + i] || 0));
+    const d = Math.abs((pch[probeStart + i] || 0) - gain * (rch[refStart + i] || 0));
     window.push(d); runSum += d;
     if (window.length > RUN) runSum -= window.shift();
     if (window.length === RUN && (runSum / RUN) > ABS_FLOOR) return probeStart + i - RUN + 1;
@@ -267,10 +327,14 @@ async function scanForwardDivergence(probeBuffer, refBuffer) {
   }
   let divergeProbeSec = divergeWindow * DIVERGE_WINDOW_SEC;
   if (divergeWindow > 0 && divergeWindow < diffEnv.length) {
+    const lastMatchProbe = (divergeWindow - 1) * fineWinSamples;
+    const lastMatchRef = refStartSample + lastMatchProbe;
+    // Measured on the last window that still MATCHED, so it's a clean read of
+    // the level offset between the two renders rather than one contaminated
+    // by the diverging content just after it.
+    const gain = bestFitGain(probeBuffer, refBuffer, lastMatchProbe, lastMatchRef, fineWinSamples);
     const refinedSample = refineSampleBoundary(
-      probeBuffer, refBuffer,
-      (divergeWindow - 1) * fineWinSamples, refStartSample + (divergeWindow - 1) * fineWinSamples,
-      fineWinSamples * 2,
+      probeBuffer, refBuffer, lastMatchProbe, lastMatchRef, fineWinSamples * 2, gain,
     );
     divergeProbeSec = refinedSample / refBuffer.sampleRate;
   }
