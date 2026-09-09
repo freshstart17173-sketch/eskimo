@@ -26,7 +26,7 @@ import { resolveAudioUrl } from './localAudioStore.js';
 
 const bufferCache = new Map();
 
-class AudioEngine {
+export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.master = null;
@@ -51,6 +51,22 @@ class AudioEngine {
     if (this.master) this.master.gain.value = this._volume;
   }
   getVolume() { return this._volume; }
+
+  // `AudioContext.setSinkId` (routing playback to a specific output
+  // device — e.g. a USB mixer interface, not just the OS default) is real
+  // but not universal yet, so this is feature-detected rather than
+  // assumed. Stored on the instance the same way `_volume` is (survives
+  // ensureContext() not having run yet) so a device picked before any
+  // audio has played still applies once it does.
+  static outputDeviceSupported() {
+    return typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype;
+  }
+  async setOutputDevice(deviceId) {
+    this._outputDeviceId = deviceId;
+    const ctx = this.ensureContext();
+    if (typeof ctx.setSinkId === 'function') await ctx.setSinkId(deviceId || '');
+  }
+  getOutputDeviceId() { return this._outputDeviceId || ''; }
 
   ensureContext() {
     if (!this.ctx) {

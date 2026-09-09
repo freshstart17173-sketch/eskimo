@@ -1,8 +1,55 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { isSyncConfigured, isUploadConfigured, getProfileName, setProfileName } from '../core.js';
 import { estimateSeamlessLength } from '../graphEstimate.js';
 import { useTheme } from '../theme.js';
+import { engine, AudioEngine } from '../audioEngine.js';
 import { Field } from './shared.jsx';
+
+const SHORTCUTS = [
+  { keys: '/', where: 'Graph, Library', does: 'Focus the search box' },
+  { keys: 'Space', where: 'Graph', does: 'Play / pause' },
+  { keys: '← →', where: 'Graph search', does: 'Step through search matches' },
+  { keys: 'Enter', where: 'Graph search', does: 'Jump to the focused match' },
+  { keys: 'Esc', where: 'Anywhere', does: 'Close the open menu, popover, or search' },
+];
+
+// Feature-detected (see AudioEngine.outputDeviceSupported) — not every
+// browser supports routing playback to a specific device yet.
+function OutputDevicePicker() {
+  const [devices, setDevices] = useState([]);
+  const [selected, setSelected] = useState(engine.getOutputDeviceId());
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    navigator.mediaDevices.enumerateDevices()
+      .then((all) => { if (!cancelled) setDevices(all.filter(d => d.kind === 'audiooutput')); })
+      .catch(() => { if (!cancelled) setError('Could not list audio output devices.'); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function change(deviceId) {
+    setSelected(deviceId);
+    try { await engine.setOutputDevice(deviceId); } catch (e) { setError('Could not switch to that device — it may need a page reload, or isn\'t available right now.'); }
+  }
+
+  return (
+    <div className="settings-row">
+      <div>
+        <div className="settings-row-title">Playback device</div>
+        <div className="settings-row-sub">
+          Route the set's audio to a specific output — a USB mixer interface, not just whatever the OS default is.
+          {devices.length > 0 && devices.every(d => !d.label) && ' Device names are hidden until this page has some kind of microphone permission granted (a browser privacy rule, not an Eskimo Studio choice) — the list still works by position.'}
+        </div>
+      </div>
+      <select className="input" style={{ maxWidth: 240 }} value={selected} onChange={(e) => change(e.target.value)}>
+        <option value="">System default</option>
+        {devices.map((d, i) => <option key={d.deviceId || i} value={d.deviceId}>{d.label || `Output ${i + 1}`}</option>)}
+      </select>
+      {error && <div className="error-note">{error}</div>}
+    </div>
+  );
+}
 
 export default function SettingsPage({
   venueName, setVenueName, songs, edges, session, playlists, onClearAll, onRestore, onSetAutoplay, onSetTransitionOnly,
@@ -153,6 +200,20 @@ export default function SettingsPage({
             <button className={'seq-toggle' + (theme === 'dark' ? ' active' : '')} onClick={() => setTheme('dark')}>Dark</button>
           </div>
         </div>
+        {AudioEngine.outputDeviceSupported() && <OutputDevicePicker />}
+      </div>
+
+      <div className="section-label" style={{ marginTop: 24 }}>Keyboard shortcuts</div>
+      <div className="settings-card">
+        {SHORTCUTS.map((s) => (
+          <div className="settings-row" key={s.keys}>
+            <div>
+              <div className="settings-row-title">{s.does}</div>
+              <div className="settings-row-sub">{s.where}</div>
+            </div>
+            <span className="tag mono-num">{s.keys}</span>
+          </div>
+        ))}
       </div>
 
       <div className="section-label" style={{ marginTop: 24 }}>Backup</div>
@@ -222,7 +283,10 @@ export default function SettingsPage({
           <div className="settings-row">
             <div>
               <div className="settings-row-title">Clear all data</div>
-              <div className="settings-row-sub">Wipes every song, transition, and set state saved in this browser. This does not undo — download a backup first if you're not sure.</div>
+              <div className="settings-row-sub">
+                Wipes every song, transition, and set state saved in this browser. This does not undo — download a backup first if you're not sure.
+                {(isSyncConfigured || isUploadConfigured) && ' Cloud sync/audio uploads are configured, so this also clears the copy other devices or browsers pull from — not just this one.'}
+              </div>
             </div>
             {!confirmingReset ? (
               <button className="btn btn-danger" onClick={() => setConfirmingReset(true)}>Clear…</button>
