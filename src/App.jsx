@@ -578,6 +578,7 @@ export default function App() {
               onAddSong={addSong}
               onViewSong={() => setTab('library')}
               existingCount={songCount}
+              songs={songs}
             />
           )}
           {tab === 'addAudio' && (

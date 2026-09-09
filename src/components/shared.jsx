@@ -170,12 +170,19 @@ export function Field({ label, children }) {
   );
 }
 
-export function Dropzone({ file, onFile, hint }) {
+// `multiple`/`onFiles` are opt-in — every existing caller keeps its exact
+// single-file behavior (onFile(file)) with no change; a caller that wants
+// batch drops (Upload Song's own multi-song flow) passes both instead.
+// `onFiles` still fires for a single file when `multiple` is set, so a
+// caller doesn't have to branch on how many files came back.
+export function Dropzone({ file, onFile, onFiles, multiple, hint }) {
   const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
 
   function handleFiles(fileList) {
-    if (fileList && fileList[0]) onFile(fileList[0]);
+    if (!fileList || fileList.length === 0) return;
+    if (multiple && onFiles) { onFiles(Array.from(fileList)); return; }
+    if (fileList[0]) onFile(fileList[0]);
   }
   return (
     <div
@@ -185,7 +192,7 @@ export function Dropzone({ file, onFile, hint }) {
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}
     >
-      <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={(e) => handleFiles(e.target.files)} />
+      <input ref={inputRef} type="file" multiple={multiple || undefined} style={{ display: 'none' }} onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
       <Icon path={ICONS.upload} size={16} />
       {file ? (
         <div className="dropzone-file">
