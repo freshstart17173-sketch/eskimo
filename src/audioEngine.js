@@ -187,10 +187,19 @@ export class AudioEngine {
       source.connect(gain); gain.connect(this.master);
       source.onended = () => resolve();
       const startCtxTime = ctx.currentTime;
-      const playDurationSec = clipEndSec != null ? Math.max(0, clipEndSec - offsetSec) : null;
-      if (playDurationSec != null) source.start(startCtxTime, offsetSec, playDurationSec);
+      const playDurationSec = clipEndSec != null ? Math.max(0, clipEndSec - offsetSec) : buffer.duration - offsetSec;
+      if (clipEndSec != null) source.start(startCtxTime, offsetSec, playDurationSec);
       else source.start(startCtxTime, offsetSec);
-      this._current = { source, gain, buffer, kind: 'clip', startCtxTime, offsetSec, resolve };
+      // durationSec (the clip's own real audible length, offsetSec/clipEndSec
+      // already applied) is what getPlaybackPosition's 'fragment' phase
+      // reports for this — the reactive handoff path (handleHandoff, used
+      // when Now Playing has no real main-deck audio of its own to schedule
+      // a Plan against) has no Plan/fragmentSteps to read a duration from
+      // otherwise, and without this getPlaybackPosition had no case for
+      // `kind: 'clip'` at all — a real fragment playing here reported
+      // 'silence', which is exactly the frozen-display bug this exists to
+      // close for this path too, not just the Plan-scheduled one.
+      this._current = { source, gain, buffer, kind: 'clip', startCtxTime, offsetSec, durationSec: playDurationSec, resolve };
     });
   }
 
@@ -423,6 +432,18 @@ export class AudioEngine {
       return {
         phase: 'main', songId: this._current.songId,
         elapsedSec: this._current.offsetSec + Math.max(0, now - this._current.startCtxTime),
+        durationSec: this._current.durationSec,
+      };
+    }
+    // A fragment played via the reactive handoff path (handleHandoff,
+    // used when Now Playing has no real main-deck audio of its own to
+    // schedule a Plan against) rather than the Plan/scheduleHop path
+    // above — same 'fragment' shape either way, so a consumer never has
+    // to know or care which of the two actually produced it.
+    if (this._current && this._current.kind === 'clip') {
+      return {
+        phase: 'fragment',
+        elapsedSec: Math.max(0, now - this._current.startCtxTime),
         durationSec: this._current.durationSec,
       };
     }

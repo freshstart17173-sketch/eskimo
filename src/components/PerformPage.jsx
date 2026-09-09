@@ -8,7 +8,7 @@ import {
   addTransitionConnection, autoconnectNodeTransitions, autoconnectFullGraph,
 } from '../core.js';
 import { engine, findOutroEdgeFor } from '../audioEngine.js';
-import { useTransportControls } from '../playbackControls.js';
+import { useTransportControls, usePlaybackFrame } from '../playbackControls.js';
 import { NODE_W, NODE_H, END_W, END_H } from '../graphConstants.js';
 import { resolveAudioUrl } from '../localAudioStore.js';
 import { extractDominantColor } from '../dominantColor.js';
@@ -974,7 +974,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
             endQueued={endWired}
-            nowPlayingId={session.nowPlayingId} nowElapsedSec={elapsed} nowDurationSec={nowSong ? nowSong.durationSec : 0}
+            nowPlayingId={session.nowPlayingId}
             onPaneClick={onPaneClick}
             onStartPlay={triggerStartSet} canStartPlay={!hasStarted} selectedId={selectedId}
             onPaneContextMenu={onPaneContextMenu} onNodeContextMenu={onNodeContextMenu}
@@ -1017,9 +1017,9 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             <Icon path={ICONS.skip} filled size={16} />
           </button>
 
-          <span className="mono-num player-bar-time">{fmtTime(elapsed)}</span>
+          <PlayerBarElapsed songId={session.nowPlayingId} />
           <div className="player-bar-scrub"><Playhead cuePct={cuePct} onSeek={seekPlayhead} /></div>
-          <span className="mono-num player-bar-time">{fmtTime(nowSong.durationSec)}</span>
+          <PlayerBarTotal songId={session.nowPlayingId} songDurationSec={nowSong.durationSec} />
 
           <div className="player-bar-next">
             {queueHead ? (
@@ -1267,6 +1267,49 @@ function DetailPane({ song, socketData, io, songs, onPlay, onClose }) {
       </div>
     </div>
   );
+}
+
+// The two "elapsed / total" numbers flanking the scrub bar — real position,
+// read off the engine's own clock every frame (usePlaybackFrame,
+// docs/playback-model.md sec 7), exactly like Playhead's own fill bar
+// (SequencePane.jsx) already does. Deliberately NOT derived from
+// `nowSong.durationSec - session.timeLeft` (the old approach, still used
+// elsewhere in this file for non-display purposes): session.timeLeft is
+// the tick loop's once-a-second guess at "time left in the CURRENT SONG",
+// which stops being a coherent question the instant the song's own master
+// ends and a produced fragment (an outro/transition clip) takes over —
+// there's no later position on the song's own timeline for `duration -
+// timeLeft` to keep counting against, so the old text visibly froze at the
+// song's own full duration for as long as the fragment kept playing,
+// reading as "still playing the original song" — reported directly,
+// twice, against real produced audio, and exactly what Playhead's own fill
+// (already phase-aware) never had this problem with. `songDurationSec` is
+// only the fallback shown before anything's ever started sounding.
+// The one "elapsed" span — the "total" span (PlayerBarTotal, below) is a
+// separate component rather than a second ref out of this same one, since
+// the scrub bar (Playhead) sits between them in the actual player-bar
+// markup at the call site and both need to keep rendering as ordinary
+// flex siblings there, not as a fragment this component owns the layout
+// of.
+function PlayerBarElapsed({ songId }) {
+  const ref = useRef(null);
+  usePlaybackFrame((pos) => {
+    if (!ref.current) return;
+    if (pos.phase === 'fragment' || (pos.phase === 'main' && pos.songId === songId)) {
+      ref.current.textContent = fmtTime(pos.elapsedSec);
+    }
+  });
+  return <span className="mono-num player-bar-time" ref={ref}>{fmtTime(0)}</span>;
+}
+function PlayerBarTotal({ songId, songDurationSec }) {
+  const ref = useRef(null);
+  usePlaybackFrame((pos) => {
+    if (!ref.current) return;
+    if (pos.phase === 'fragment' || (pos.phase === 'main' && pos.songId === songId)) {
+      ref.current.textContent = fmtTime(pos.durationSec);
+    }
+  });
+  return <span className="mono-num player-bar-time" ref={ref}>{fmtTime(songDurationSec)}</span>;
 }
 
 // session.history already tracks every song this set has actually played

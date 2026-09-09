@@ -26,12 +26,14 @@ const SONG_STYLE = { width: NODE_W };
 const END_STYLE = { width: END_W };
 const START_STYLE = { width: START_W };
 // Same story for React Flow's own options props: an inline object literal
-// in JSX is a new reference every render, and GraphPane re-renders once a
-// second (nowElapsedSec ticks while a set plays) even when our own
-// `rfEdges`/`nodes` memoize away to no-ops — React Flow reacts to these
-// specific prop identities changing by resyncing internal state, which was
-// the actual source of edges (and the hover-✕ living in one) blinking out
-// once a second, not anything in this file's own memoization.
+// in JSX is a new reference every render, and GraphPane still re-renders
+// roughly once a second while a set plays (mixingEdgeId, cuePct and
+// friends are all derived from session.timeLeft, which the tick loop
+// updates every second) even when our own `rfEdges`/`nodes` memoize away
+// to no-ops — React Flow reacts to these specific prop identities changing
+// by resyncing internal state, which was the actual source of edges (and
+// the hover-✕ living in one) blinking out once a second, not anything in
+// this file's own memoization.
 const FIT_VIEW_OPTIONS = { padding: 0.25 };
 const DEFAULT_EDGE_OPTIONS = { type: 'default' };
 const PRO_OPTIONS = { hideAttribution: true };
@@ -164,7 +166,7 @@ export default function GraphPane({
   stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
   onDragSongPosition, endQueued, onSelectSong,
-  nowPlayingId, nowElapsedSec, nowDurationSec,
+  nowPlayingId,
   onPaneContextMenu, onNodeContextMenu, onSelectionContextMenu, onMultiSelectionChange, onPaneClick,
   onStartPlay, canStartPlay, selectedId,
 }) {
@@ -260,9 +262,12 @@ export default function GraphPane({
   // frames while hoveredId still lived here, not just a cosmetic flicker:
   // it was also what made socket drag-connections fail to complete, since
   // a connection-in-progress gets read from the same registry being
-  // resynced out from under it. nowElapsedSec was already kept out of this
-  // list for the same reason (see NowPlayingContext); hoveredId/matchIds/
-  // searchActive needed the same treatment.
+  // resynced out from under it. The playing song's own elapsed/duration
+  // readout got the same treatment taken further — it doesn't reach this
+  // component as a prop at all anymore, reading the engine's clock
+  // directly instead (see NowPlayingContext/NodePosition, GraphNodes.jsx);
+  // hoveredId/matchIds/searchActive needed the dependency-list version of
+  // the same fix.
   useEffect(() => {
     setNodes(prev => prev.map(n => {
       // A just-deleted song's node still sits in this array for this one
@@ -439,8 +444,8 @@ export default function GraphPane({
   const nowSongForPalette = nowPlayingId ? songs[nowPlayingId] : null;
   const palette = usePalette(nowSongForPalette ? nowSongForPalette.coverUrl : null);
   const nowPlayingValue = useMemo(
-    () => ({ nowPlayingId, elapsed: nowElapsedSec, duration: nowDurationSec, palette }),
-    [nowPlayingId, nowElapsedSec, nowDurationSec, palette]
+    () => ({ nowPlayingId, palette }),
+    [nowPlayingId, palette]
   );
   const hoveredNodeValue = useMemo(() => ({ hoveredId }), [hoveredId]);
   const searchDimValue = useMemo(() => ({ searchActive, matchIds }), [searchActive, matchIds]);

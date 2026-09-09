@@ -53,12 +53,21 @@ function LiveWaveform() {
   );
 }
 
-// The once-a-second elapsed clock reaches the playing node through context
-// instead of through React Flow's own node `data` — seeGraphPane.jsx's
-// comment above its node-rebuild effect for why: routing a per-second tick
-// through `setNodes` was flickering the disconnect button on every active
-// edge in the whole graph, not just ones touching the playing node.
-export const NowPlayingContext = createContext({ nowPlayingId: null, elapsed: 0, duration: 0, palette: null });
+// nowPlayingId/palette reach the playing node through context instead of
+// through React Flow's own node `data` — see GraphPane.jsx's comment above
+// its node-rebuild effect for why: routing a per-render value through
+// `setNodes` was flickering the disconnect button on every active edge in
+// the whole graph, not just ones touching the playing node. The actual
+// elapsed/duration readout (NodePosition, below) deliberately does NOT live
+// here — it used to, updated once a second, and went stale/frozen for the
+// entire span of a real fragment (outro/transition clip) actually playing,
+// since nothing about "elapsed into this song" is even a coherent question
+// during that window (see NodePosition's own comment). It reads the
+// engine's real clock every frame instead, the same usePlaybackFrame
+// pattern CountdownRing already uses, straight to a DOM ref — no context,
+// no re-render, so it can't reintroduce the exact flicker this context
+// exists to avoid.
+export const NowPlayingContext = createContext({ nowPlayingId: null, palette: null });
 
 // Hover and search-dim state reach SongNode the same way — through context,
 // never through React Flow's own node `data`. Both used to live in `data`
@@ -141,6 +150,38 @@ function CountdownRing({ cueOffsetSec, songId }) {
       />
     </svg>
   );
+}
+
+// This song's own "elapsed / duration" readout — real position, read off
+// the engine's own clock every frame (see usePlaybackFrame,
+// docs/playback-model.md sec 7), not from a once-a-second `elapsed` React
+// prop. That prior version froze for the entire span of a real fragment
+// (an outro/transition clip) actually playing: "elapsed into this song"
+// stops being a coherent question the instant the song's own master ends
+// and a produced clip takes over — there IS no later position on the
+// song's own timeline for a once-a-second `duration - timeLeft` derivation
+// to (wrongly) keep counting up against, so it visibly stuck at the song's
+// own full duration for as long as the fragment kept playing, reading as
+// "frozen" (and easy to mistake for "still playing the original song") —
+// reported directly, twice, against real produced audio. `getPlaybackPosition`'s
+// phase model already has the right shape for this: while `songId`'s own
+// main deck is sounding, show its real elapsed/duration; the moment a
+// fragment takes over, switch to *its* real elapsed/duration instead — the
+// same "coming up next" progress the fixed Add Audio/Library preview
+// players already show, now live during an actual set too. Gated by the
+// caller on "this is the currently-playing card" (mount/unmount, not a
+// per-frame condition here), so a fragment phase always means *this* card's
+// own fragment — nowPlayingId doesn't change to anything else until the
+// fragment's done (see syncSessionFromFiredPlan).
+function NodePosition({ songId }) {
+  const spanRef = useRef(null);
+  usePlaybackFrame((pos) => {
+    if (!spanRef.current) return;
+    if (pos.phase === 'fragment' || (pos.phase === 'main' && pos.songId === songId)) {
+      spanRef.current.textContent = fmtTime(pos.elapsedSec) + ' / ' + fmtTime(pos.durationSec);
+    }
+  });
+  return <span className="node-position mono-num" ref={spanRef} />;
 }
 
 // One row: a colored socket dot (a real React Flow `Handle`) plus a label
@@ -305,7 +346,7 @@ export function SongNode({ data, selected }) {
   const { count: multiSelectedCount } = useContext(MultiSelectionContext);
   const hovered = hoveredId === song.id;
   const dimmed = searchActive && matchIds && !matchIds.has(song.id);
-  const position = (playing && nowPlaying.nowPlayingId === song.id) ? nowPlaying : null;
+  const isNowPlayingHere = playing && nowPlaying.nowPlayingId === song.id;
   // A real multi-node box-drag selection (React Flow's own `selected`,
   // gated on more than one node actually being selected — see
   // MultiSelectionContext above) gets the same accent ring the single
@@ -327,11 +368,10 @@ export function SongNode({ data, selected }) {
   // Only the song actually playing has a live elapsed clock to count down
   // against — a wired-but-not-yet-playing outro/transition just shows its
   // dropdown with no ring, since "time left" means nothing until it starts.
-  // `position` (nowPlayingId === this song) gates that; CountdownRing
-  // itself reads the actual live remaining time off the engine's own
-  // clock every frame (see its own comment) rather than a value computed
-  // here from `position.elapsed`, which only updates once a second.
-  const ringSongId = position ? song.id : null;
+  // `isNowPlayingHere` gates that; CountdownRing itself reads the actual
+  // live remaining time off the engine's own clock every frame (see its
+  // own comment), same as NodePosition below.
+  const ringSongId = isNowPlayingHere ? song.id : null;
   return (
     <div className={cls} style={dynamicStyle} onMouseEnter={onEnter} onMouseLeave={onLeave} onClick={onSelect}>
       <div className="node-title-row">
@@ -352,7 +392,7 @@ export function SongNode({ data, selected }) {
       {playing && (
         <div className="node-playing-row">
           <LiveWaveform />
-          {position && <div className="node-position mono-num">{fmtTime(position.elapsed)} / {fmtTime(position.duration)}</div>}
+          {isNowPlayingHere && <NodePosition songId={song.id} />}
         </div>
       )}
       <div className="node-socket-section">
