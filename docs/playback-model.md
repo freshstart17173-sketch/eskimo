@@ -1117,3 +1117,86 @@ seeking somewhere unrelated.
   have a `clipStartSec` stored? — depends on whether detection found a
   confident divergence point against that particular pair of files,
   same as any other detection result), not this scheduling code.
+
+## 11. Round 7 — an outro DOES have a real out point after all; §8 reversed (implemented)
+
+Direct correction, reversing part of §8: reported directly, against real
+audio and a live screenshot (Round 6's own combined-total display working
+exactly as designed) — a plain ~3-minute song with a produced outro
+attached was showing a combined total of **4:52**. §8 had deliberately
+made an Outro's main deck always play to its own full natural duration,
+reasoning (also from a direct DJ correction, at the time) that truncating
+the song being left "would just be losing the last few seconds... for no
+reason." Confronted with the actual number that produces once a real
+outro is involved, the direct instruction reversed: **the main deck
+should cut at the outro's own real splice point and the outro's own new
+material should pick up immediately after — "cut off part of the
+original (at the in point) and then append the outro to it."**
+
+**Why this doesn't reopen the bug §8 itself fixed:** §8's own "old
+behavior, and the real bug in it" section is worth re-reading carefully —
+the pre-§8 code *also* cut the main deck early at `outSeconds`, but at the
+time `edge.clipStartSec` didn't exist yet, so the outro clip played from
+its own raw `t=0` — replaying the reference song's own overlapping tail a
+*second* time (once on the truncated main deck, once again at the head of
+the untrimmed clip). §8's fix addressed that specific double-count by
+restoring the full-duration main deck and inventing `clipStartSec` to trim
+the clip's own duplicated lead-in instead. This round doesn't touch
+`clipStartSec` at all — it *adds* an early main-deck cutoff back on top of
+the now-existing `clipStartSec` trim, and the two are not independently
+measured: `detectSpliceForKnownSongs`' one `scanForwardDivergence` scan
+(`audioDetect.js`) produces `leftOutSeconds` (the split point on the
+*reference song's* own timeline) and `leftClipStartSec` (the same real
+instant, on the *dropped clip's* own timeline) together, from the same
+correlation. Cutting the main deck at `outSeconds` and starting the clip
+at `clipStartSec` therefore splices at the exact same real-world moment
+from both sides — no gap, and (unlike the pre-§8 bug) no double-counted
+material, since the clip's own duplicate lead-in is still trimmed off
+before it ever plays. This is the same mechanic a Transition edge already
+used the whole time (cut the main deck at `outSeconds`, the clip's own
+`inSeconds`/offset picks up the other side) — Round 7 makes Outro
+consistent with it instead of a special case.
+
+**Changed:**
+- `audioEngine.js`'s `buildHopDecision` — both outro branches (an End-Set
+  outro, and a cut hop ending in outro before a destination) now use
+  `edge.outSeconds` (when a confident value was detected) as `cueOffsetSec`
+  instead of unconditionally `currentBufferDurationSec`. Falls back to the
+  full duration exactly when there's no detected `outSeconds` to cut at
+  (no reference master, or detection found nothing) — same graceful
+  degradation used everywhere else a detected value might be missing, not
+  a hard requirement.
+- `core.js`'s `transitionTriggerElapsed` (the reactive fallback path, for
+  when Now Playing has no real audio to schedule a Plan against) — now
+  also returns an outro-ending hop's own `outSeconds` as the trigger point,
+  mirroring the Transition branch already there. Safe to look the edge up
+  by a plain `edgeId` match (no `nowPlayingId`-based fallback scan needed):
+  `playlistNextHop` is the only place that ever constructs
+  `ending: 'outro'`, and it always sets `edgeId` to that same outro's own
+  id right alongside it.
+- `PerformPage.jsx`'s `mixingEdgeId` computation (when to start pulsing
+  the graph's own edge / showing the "mixing into" preview) now reads
+  `fragmentEdge.outSeconds` for either an Outro or a Transition uniformly,
+  rather than being conditioned on `committedEdge` (Transition-only).
+
+**What this means for the displayed total** (§10's own continuous-span
+design is unaffected in shape, only in what number it now computes): for
+an outro edge with `outSeconds`/`clipStartSec` both detected, the combined
+total is now `outSeconds + (the outro clip's own real, clipStartSec-
+trimmed duration)` — typically much shorter than the song's own full
+length, not longer than it. Verified against real audio: an 8s main song
+with an outro edge set to `outSeconds: 5` (`clipStartSec: 2` on a real 8s
+outro file, so 6s of real new content) shows a combined total of **0:11**
+throughout — never 0:14 (the old full-song-plus-outro number) — with
+elapsed already past the old 8s mark by t=6s (confirming the main deck
+really did stop at 5s, not 8s) and continuing to advance with no reset.
+
+### Open question, not resolved here
+
+An outro/edge with **no** detected `outSeconds` (no reference master
+uploaded, or detection genuinely found nothing) still falls back to
+playing the main deck to its own full natural duration — the pre-Round-7
+behavior. Whether that fallback is still the right default, now that a
+*confident* detection cuts early, or whether a produced-but-undetected
+outro should behave some other way, wasn't part of this round's direct
+instruction and is left as-is rather than guessed at.

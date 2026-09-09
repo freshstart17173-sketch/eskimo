@@ -651,12 +651,18 @@ export function buildHopDecision(hop, nowPlayingId, songs, edges, currentBufferD
   if (hop.id === END) {
     if (hop.ending !== 'outro') return { cueOffsetSec: currentBufferDurationSec, fragments: [], destSongId: null, destUrl: null, destOffsetSec: 0 };
     const edge = findOutroEdgeFor(edges, nowPlayingId, hop.edgeId);
-    // An outro has no out point on the main deck — it always plays to its
-    // own full natural duration; the clip's own trim (clipStartSec, below)
-    // is what avoids replaying material the main deck already played, not
-    // an early cutoff here.
+    // The main deck cuts at the outro's own real splice point (outSeconds)
+    // — the same instant, on the main song's own timeline, that
+    // edge.clipStartSec marks on the CLIP's own timeline (both come out of
+    // the one detectSpliceForKnownSongs scan, see audioDetect.js — not two
+    // independently-measured points that could disagree). Cutting here and
+    // starting the clip at clipStartSec splices with no gap and no
+    // duplicated material, same mechanic Transition already uses. Falls
+    // back to the full natural duration only when there's no confident
+    // detected outSeconds to cut at.
+    const cueOffsetSec = edge && edge.outSeconds != null ? edge.outSeconds : currentBufferDurationSec;
     const fragments = edge && edge.audioUrl ? [{ url: edge.audioUrl, offsetSec: edge.clipStartSec || 0 }] : [];
-    return { cueOffsetSec: currentBufferDurationSec, fragments, destSongId: null, destUrl: null, destOffsetSec: 0 };
+    return { cueOffsetSec, fragments, destSongId: null, destUrl: null, destOffsetSec: 0 };
   }
   const destSong = songs[hop.id];
   if (!destSong) return null;
@@ -670,17 +676,18 @@ export function buildHopDecision(hop, nowPlayingId, songs, edges, currentBufferD
   }
   // cut, possibly with an outro leaving the old song and/or an intro
   // starting the new one — same up-to-three-piece chain handleHandoff's
-  // sequential version plays, just scheduled all at once instead. Neither
-  // an outro nor an intro moves the cue point: the outro's main deck always
-  // plays to its own full duration (no out point), and the destination
-  // always starts at 0 (no in point) — each clip's own trim handles the
-  // rest (clipStartSec/clipEndSec).
+  // sequential version plays, just scheduled all at once instead. An
+  // outro moves the cue point to its own real splice point (outSeconds —
+  // see the End-Set branch's own comment above for why that's safe to cut
+  // at); the destination always starts at 0 (no in point) — the intro
+  // clip's own trim (clipEndSec) handles its trailing overlap.
   const outroEdge = hop.ending === 'outro' ? findOutroEdgeFor(edges, nowPlayingId, hop.edgeId) : null;
   const introEdge = hop.starting === 'intro' ? edges.find((e) => e.type === 'intro' && e.r === hop.id) : null;
+  const cueOffsetSec = outroEdge && outroEdge.outSeconds != null ? outroEdge.outSeconds : currentBufferDurationSec;
   const fragments = [];
   if (outroEdge && outroEdge.audioUrl) fragments.push({ url: outroEdge.audioUrl, offsetSec: outroEdge.clipStartSec || 0 });
   if (introEdge && introEdge.audioUrl) fragments.push({ url: introEdge.audioUrl, clipEndSec: introEdge.clipEndSec != null ? introEdge.clipEndSec : null });
-  return { cueOffsetSec: currentBufferDurationSec, fragments, destSongId: hop.id, destUrl: destSong.audioUrl || null, destOffsetSec: 0 };
+  return { cueOffsetSec, fragments, destSongId: hop.id, destUrl: destSong.audioUrl || null, destOffsetSec: 0 };
 }
 
 // The tick's job once it notices a scheduled Plan already fired in real

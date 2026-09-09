@@ -933,23 +933,33 @@ export const CROSSFADE_LOOKAHEAD_SEC = 8;
 // Now Playing should hand off exactly at the committed transition's real
 // cue point (edge.outSeconds) when one was built and chosen — not after
 // the whole song plays out. Falls back to the full duration for a Cut, an
-// outro ending, or a transition edge that doesn't carry a cue point yet.
+// outro ending, or a transition/outro edge that doesn't carry a cue point
+// yet.
 //
-// An outro is NOT the same case as a transition here: a transition has a
-// real early splice point on the main deck (edge.outSeconds is where the
-// original song is deliberately cut short so the clip can carry the
-// crossfade) — an outro has no such point. It always plays the main song
-// to its own full natural duration ("an outro has no out point"); ending
-// the set early would just be losing the last few seconds of the song for
-// no reason. The old behavior here (also cutting early at `outSeconds` for
-// an outro) was itself a patch for a different, real bug — an outro clip
-// commonly still carries the original song's own tail before its new
-// material starts, so playing the clip from its own t=0 right after
-// cutting the main deck short replayed that overlapping tail a second
-// time. The actual fix for that lives on the clip's own playback instead
-// (see edge.clipStartSec / audioEngine.js's handleHandoff), not here.
+// An outro's own real splice point (edge.outSeconds) is exactly where the
+// clip's own new material begins — the same instant edge.clipStartSec
+// marks on the CLIP's own timeline (both come out of one
+// detectSpliceForKnownSongs scan against the same audio, see
+// audioDetect.js — not two independently-measured points that could
+// disagree). Cutting the main deck there and starting the clip at
+// clipStartSec splices with no gap and no duplicated material — the same
+// mechanic a Transition already uses, just against an outro's own cue
+// instead of a transition edge's. Falls back to the full song duration
+// only when there's no confident detected outSeconds to cut at (no
+// reference master to detect against, or detection genuinely found
+// nothing) — same graceful "play the whole clip" degradation used
+// wherever else a detected value might be missing.
 export function transitionTriggerElapsed(queueHead, edges, nowSongDurationSec) {
   if (queueHead && queueHead.mode === 'transition' && queueHead.edgeId) {
+    const edge = edges.find(e => e.id === queueHead.edgeId);
+    if (edge && edge.outSeconds != null) return edge.outSeconds;
+  }
+  // playlistNextHop (the only place that ever constructs `ending: 'outro'`)
+  // always sets `edgeId` to that same outro's own id right alongside it —
+  // never null — so a plain id lookup is enough here, same as the
+  // Transition branch above; no separate "or scan for any outro off this
+  // song" fallback needed.
+  if (queueHead && queueHead.mode === 'cut' && queueHead.ending === 'outro' && queueHead.edgeId) {
     const edge = edges.find(e => e.id === queueHead.edgeId);
     if (edge && edge.outSeconds != null) return edge.outSeconds;
   }

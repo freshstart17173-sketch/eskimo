@@ -848,13 +848,13 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // playback gets there (Playhead now computes its own zone/crossing
   // straight from getPlaybackPosition()'s fragmentBoundariesSec — see its
   // own comment, SequencePane.jsx — instead of from a cuePct prop
-  // computed here). An Outro's trigger is always the song's own natural
-  // end — never its edge's own outSeconds, which is a different,
-  // informational-only timecode (see occludedTransitions) not a real
-  // playback cue for an Outro.
+  // computed here). An Outro now has a real early trigger too — its own
+  // outSeconds, the same real splice point edge.clipStartSec marks on the
+  // clip's own timeline (see transitionTriggerElapsed, core.js, and
+  // buildHopDecision, audioEngine.js) — not the song's natural end.
   let mixingEdgeId = null;
   if (nowSong && fragmentEdge) {
-    const triggerAt = committedEdge && committedEdge.outSeconds != null ? committedEdge.outSeconds : nowSong.durationSec;
+    const triggerAt = fragmentEdge.outSeconds != null ? fragmentEdge.outSeconds : nowSong.durationSec;
     if (triggerAt - elapsed <= 8) mixingEdgeId = fragmentEdge.id;
   }
   // The player bar's "Next" preview — whatever queueHead already resolved
