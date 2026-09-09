@@ -63,11 +63,11 @@ function LiveWaveform() {
 // entire span of a real fragment (outro/transition clip) actually playing,
 // since nothing about "elapsed into this song" is even a coherent question
 // during that window (see NodePosition's own comment). It reads the
-// engine's real clock every frame instead, the same usePlaybackFrame
-// pattern CountdownRing already uses, straight to a DOM ref — no context,
+// engine's real clock every frame instead, via usePlaybackFrame,
+// straight to a DOM ref — no context,
 // no re-render, so it can't reintroduce the exact flicker this context
 // exists to avoid.
-export const NowPlayingContext = createContext({ nowPlayingId: null, palette: null });
+export const NowPlayingContext = createContext({ nowPlayingId: null, palette: null, committedType: null });
 
 // Hover and search-dim state reach SongNode the same way — through context,
 // never through React Flow's own node `data`. Both used to live in `data`
@@ -112,44 +112,20 @@ const SOCKET_TITLE = { none: 'None', intro: 'Intro', outro: 'Outro', transition:
 // as "still plenty of time" until it actually needs attention. Sits right
 // next to the label (not off past the dropdown) so scanning the row tells
 // you the urgency before you even look at which edge is selected.
-const RING_WARN_WINDOW_SEC = 20;
-function clamp01(n) { return Math.max(0, Math.min(1, n)); }
-const RING_RADIUS = 2.5, RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-
-// `cueOffsetSec` is the fixed cue point on `songId`'s own timeline (an
-// edge's outSeconds) — the only thing that varies is how much of it is
-// left, and that has to come from the engine's own clock every frame, the
-// same way the bottom scrub bar does (see usePlaybackFrame,
-// docs/playback-model.md sec 7), not from a once-a-second `elapsed` React
-// prop the way this used to work — that was the same 1Hz-stepping cause
-// as the old progress bar, just on a ring instead of a fill width. Written
-// straight to the SVG's own attributes through refs, never setState, so a
-// caller mounting/unmounting this (socket wiring changes, a hop happens)
-// is the only thing that ever triggers a real re-render.
-function CountdownRing({ cueOffsetSec, songId }) {
-  const svgRef = useRef(null);
-  const circleRef = useRef(null);
-  usePlaybackFrame((pos) => {
-    const remainingSec = (pos.phase === 'main' && pos.songId === songId) ? cueOffsetSec - pos.elapsedSec : null;
-    if (remainingSec == null) return;
-    const pct = clamp01(remainingSec / RING_WARN_WINDOW_SEC);
-    const hue = 120 * pct;
-    const dash = RING_CIRCUMFERENCE * pct;
-    if (circleRef.current) {
-      circleRef.current.setAttribute('stroke', `hsl(${hue}, 75%, 45%)`);
-      circleRef.current.setAttribute('stroke-dasharray', `${dash} ${RING_CIRCUMFERENCE}`);
-    }
-    if (svgRef.current) svgRef.current.setAttribute('aria-label', 'cue in ' + fmtTime(Math.max(0, Math.round(remainingSec))));
-  });
-  return (
-    <svg ref={svgRef} className="socket-countdown-ring" width={6} height={6} viewBox="0 0 7 7" role="img" aria-label="cue">
-      <circle cx="3.5" cy="3.5" r={RING_RADIUS} className="socket-countdown-track" fill="none" />
-      <circle
-        ref={circleRef} cx="3.5" cy="3.5" r={RING_RADIUS} fill="none" strokeLinecap="round" strokeWidth="1"
-        transform="rotate(-90 3.5 3.5)"
-      />
-    </svg>
-  );
+// Replaced the old live countdown ring on direct instruction: "get rid of
+// the countdown circle and instead replace with a little indicator showing
+// if a certain output is selected/active or not... so I can see at a
+// glance if playback is gonna go with none or outro."
+//
+// A ring counting down to a cue answered a different question ("how long
+// left") than the one actually being asked at a glance ("which of these
+// is the one that's going to fire"). It also couldn't answer that second
+// question honestly until the hop stopped being re-rolled every tick —
+// with the decision now frozen when the song starts (commitHopFor,
+// core.js) there IS a single true answer to point at, so this is a plain
+// static dot rather than anything animated.
+function SelectedOutputDot() {
+  return <span className="socket-selected-dot" role="img" aria-label="selected — playback will take this output" />;
 }
 
 // This song's own "elapsed / duration" readout — real position, read off
@@ -215,7 +191,7 @@ function NodePosition({ songId }) {
 // clicking the row (not the dot — the dot keeps its own toggle-click)
 // opens a listbox of the other candidates. A Transition row's dot has no
 // click handler at all, so the row's own click can't conflict with it.
-function SocketRow({ side, type, available, active, cueOffsetSec, songId, onToggle, options = [], selectedEdgeId, filledLabel, onSelectVariant }) {
+function SocketRow({ side, type, available, active, committed, onToggle, options = [], selectedEdgeId, filledLabel, onSelectVariant }) {
   const isInput = side === 'left';
   const hasPicker = !!(active && options.length > 1);
   const [open, setOpen] = useState(false);
@@ -269,7 +245,7 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
           nothing once a slot had something real playing through it
           (reported directly). */}
       <span className="node-socket-label">{hasPicker ? selected.label : (filledLabel || SOCKET_TITLE[type])}</span>
-      {active && cueOffsetSec != null && songId != null && <CountdownRing cueOffsetSec={cueOffsetSec} songId={songId} />}
+      {committed && <SelectedOutputDot />}
       {open && (
         <div className="node-socket-listbox" onMouseDown={(e) => e.stopPropagation()}>
           {options.map((opt) => (
@@ -285,7 +261,6 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
                   data-tooltip={'Would hide already-built transition' + (opt.occludedTitles.length > 1 ? 's' : '') + ': ' + opt.occludedTitles.join(', ')}
                 >!</span>
               )}
-              {songId != null && opt.outSeconds != null && <CountdownRing cueOffsetSec={opt.outSeconds} songId={songId} />}
             </button>
           ))}
         </div>
@@ -301,11 +276,13 @@ function SocketRow({ side, type, available, active, cueOffsetSec, songId, onTogg
 // arrival side still only ever has zero or one active type (out of scope
 // to change, by direct instruction), so it's just always passed as a
 // one-or-zero-element array here for one shared interface instead of two.
-// `optionsByType`/`selectedEdgeIdByType`/`cueOffsetSecByType` are keyed by
-// type for the same reason — each active type gets its own independent
-// dropdown/cue-ring data now, not one shared value gated on a single
-// "which type is active" check.
-function SocketList({ side, types, availability, activeTypes = [], onToggle, cueOffsetSecByType = {}, songId, optionsByType = {}, selectedEdgeIdByType = {}, filledLabelByType = {}, onSelectVariant }) {
+// `optionsByType`/`selectedEdgeIdByType` are keyed by type for the same
+// reason — each active type gets its own independent dropdown data now,
+// not one shared value gated on a single "which type is active" check.
+// `committedType` is the one output this song has actually committed to
+// firing (session.committedHop, see commitHopFor in core.js) — null for
+// every node that isn't currently playing.
+function SocketList({ side, types, availability, activeTypes = [], onToggle, committedType = null, optionsByType = {}, selectedEdgeIdByType = {}, filledLabelByType = {}, onSelectVariant }) {
   return (
     <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
       {types.map((type) => {
@@ -313,7 +290,7 @@ function SocketList({ side, types, availability, activeTypes = [], onToggle, cue
         return (
           <SocketRow
             key={type} side={side} type={type} available={!!availability[type]} active={isActive}
-            cueOffsetSec={isActive ? (cueOffsetSecByType[type] ?? null) : null} songId={isActive ? songId : null} onToggle={onToggle}
+            committed={isActive && committedType === type} onToggle={onToggle}
             options={isActive ? optionsByType[type] : undefined} selectedEdgeId={isActive ? selectedEdgeIdByType[type] : undefined}
             filledLabel={isActive ? filledLabelByType[type] : null}
             onSelectVariant={(edgeId) => onSelectVariant(type, selectedEdgeIdByType[type], edgeId)}
@@ -338,7 +315,7 @@ export function SongNode({ data, selected }) {
   const {
     song, state, isSelected, inCount, outCount, onEnter, onLeave, playing, onSelect,
     leftAvailable, rightAvailable, leftActive, rightActiveTypes, leftEdgeId, leftFilledLabel,
-    leftOptions, rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType, rightFilledLabelByType, onToggleSocket, onSelectVariant,
+    leftOptions, rightOptionsByType, rightEdgeIdByType, rightFilledLabelByType, onToggleSocket, onSelectVariant,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
   const { hoveredId } = useContext(HoveredNodeContext);
@@ -365,13 +342,12 @@ export function SongNode({ data, selected }) {
   const palette = nowPlaying.palette;
   const dynamicStyle = (state === 'active' && palette) ? { background: palette.playing } : undefined;
   const onToggle = (side, type) => onToggleSocket(song.id, side, type);
-  // Only the song actually playing has a live elapsed clock to count down
-  // against — a wired-but-not-yet-playing outro/transition just shows its
-  // dropdown with no ring, since "time left" means nothing until it starts.
-  // `isNowPlayingHere` gates that; CountdownRing itself reads the actual
-  // live remaining time off the engine's own clock every frame (see its
-  // own comment), same as NodePosition below.
-  const ringSongId = isNowPlayingHere ? song.id : null;
+  // Only the song actually playing has committed to one of its outputs
+  // (session.committedHop — see commitHopFor, core.js). Every other card
+  // shows its rows with no selected dot, because nothing is decided for
+  // them yet: "which one fires" is a question that only has an answer
+  // once a song is actually the one playing.
+  const committedType = isNowPlayingHere ? (nowPlaying.committedType || null) : null;
   return (
     <div className={cls} style={dynamicStyle} onMouseEnter={onEnter} onMouseLeave={onLeave} onClick={onSelect}>
       <div className="node-title-row">
@@ -399,13 +375,13 @@ export function SongNode({ data, selected }) {
         <div className="node-socket-columns">
           <SocketList
             side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} activeTypes={leftActive === 'none' ? [] : [leftActive]} onToggle={onToggle}
-            songId={ringSongId} optionsByType={{ [leftActive]: leftOptions }} selectedEdgeIdByType={{ [leftActive]: leftEdgeId }}
+            optionsByType={{ [leftActive]: leftOptions }} selectedEdgeIdByType={{ [leftActive]: leftEdgeId }}
             filledLabelByType={{ [leftActive]: leftFilledLabel }}
             onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'left', type, oldEdgeId, edgeId)}
           />
           <SocketList
             side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} activeTypes={rightActiveTypes} onToggle={onToggle}
-            cueOffsetSecByType={rightCueSecondsByType} songId={ringSongId} optionsByType={rightOptionsByType} selectedEdgeIdByType={rightEdgeIdByType}
+            committedType={committedType} optionsByType={rightOptionsByType} selectedEdgeIdByType={rightEdgeIdByType}
             filledLabelByType={rightFilledLabelByType}
             onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'right', type, oldEdgeId, edgeId)}
           />
@@ -449,13 +425,15 @@ export function EndNode({ data }) {
 // has.
 export function StartNode({ data }) {
   const { wiredSongTitle, canPlay, onPlay } = data;
-  // `canPlay` only ever means "no set is running yet" now — it used to
-  // also require a wired song, which made the button disappear entirely
-  // on an unwired Start node instead of just being inert, and "the button
-  // isn't there" read as a real bug rather than "nothing to play yet"
-  // (reported directly). Every other not-yet-usable control on this
-  // canvas (an unavailable socket row, SocketRow) stays visible and just
-  // greys out instead of vanishing — this matches that same convention.
+  // The play button is ALWAYS rendered now — `canPlay` no longer gates it
+  // on "no set is running yet", which made it vanish the moment you used
+  // it once ("the play node loses its play button after clicking it the
+  // first time when it should always be there", reported directly).
+  // Restarting the set from the top is a real thing to want mid-set, and
+  // it's also the way to re-roll a shuffled output (starting a song is
+  // what draws its hop — see commitHopFor, core.js). It still greys out
+  // when there's no wired entry point, matching every other
+  // not-yet-usable control on this canvas rather than disappearing.
   return (
     <div className="end-node start-node">
       <div className="node-socket-row node-socket-row-right">

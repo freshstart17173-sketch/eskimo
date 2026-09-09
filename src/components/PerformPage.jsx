@@ -3,11 +3,11 @@ import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import Fuse from 'fuse.js';
 import {
   END, START, getVisibleEdges, inOutCounts, clamp, leftSocketAvailability, rightSocketAvailability,
-  wireConnection, wireStart, unwireStart, disconnectAllWires, playlistNextHop, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
+  wireConnection, wireStart, unwireStart, disconnectAllWires, transitionEdgesBetween, introEdgeFor, outroEdgeFor,
   introEdgesFor, outroEdgesFor, setStartVariant, setEndVariant, fmtTime, hopSummary, occludedTransitions, nodeOutputs, removeOutput,
   addTransitionConnection, autoconnectNodeTransitions, autoconnectFullGraph,
 } from '../core.js';
-import { engine, findOutroEdgeFor } from '../audioEngine.js';
+import { engine, findOutroEdgeFor, buildHopDecision } from '../audioEngine.js';
 import { useTransportControls, usePlaybackFrame } from '../playbackControls.js';
 import { NODE_W, NODE_H, END_W, END_H } from '../graphConstants.js';
 import { resolveAudioUrl } from '../localAudioStore.js';
@@ -244,8 +244,38 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     const boundarySec = (live && pos.fragmentBoundariesSec && pos.fragmentBoundariesSec.length)
       ? pos.fragmentBoundariesSec[0] : nowSong.durationSec;
     const desiredSec = clamp(fraction, 0, 1) * combinedDurationSec;
+    const deckDurationSec = (engine._current && engine._current.buffer)
+      ? engine._current.buffer.duration : nowSong.durationSec;
+    const decision = queueHead ? buildHopDecision(queueHead, session.nowPlayingId, songs, edges, deckDurationSec) : null;
+
+    // Landed inside the highlighted fragment zone — actually play the
+    // clip from there rather than parking the playhead at the boundary
+    // while the main deck quietly keeps sounding (see seekIntoFragments).
+    if (decision && desiredSec > boundarySec) {
+      engine.seekIntoFragments(decision, desiredSec - boundarySec, boundarySec, session.nowPlayingId);
+      return;
+    }
+
     const offsetSec = Math.min(desiredSec, boundarySec);
-    const seeked = engine.seekMain(session.nowPlayingId, offsetSec);
+    let seeked = engine.seekMain(session.nowPlayingId, offsetSec);
+    // seekMain only moves a real main deck. Having already seeked INTO the
+    // fragment zone there isn't one any more (the deck is a clip), so
+    // scrubbing back into the song has to restart it — otherwise the drag
+    // silently does nothing, which is the same display-vs-sound disagreement
+    // seeking forward into the zone used to cause.
+    if (!seeked && nowSong.audioUrl && engine._current && engine._current.kind === 'clip') {
+      engine.startMain(nowSong, null, offsetSec).then(() => {
+        if (decision) engine.scheduleHop(decision);
+      });
+      return;
+    }
+    // seekMain cancels the pending plan (its scheduled times were all
+    // computed against the deck position that just moved). Re-arm it
+    // right here instead of waiting for the tick's next beat — otherwise
+    // there's up to a second where nothing is scheduled, which both
+    // blanked the fragment highlight and left a real gap in the arming
+    // of the handoff itself.
+    if (seeked && decision) engine.scheduleHop(decision);
     if (!seeked && nowSong.audioUrl) return;
     setSession(prev => ({ ...prev, timeLeft: Math.max(0, nowSong.durationSec - offsetSec) }));
   }
@@ -829,7 +859,13 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // A wired-but-not-manually-queued hop needs to show "mixing into" too —
   // same effective-head reasoning as the tick loop's trigger check, so the
   // UI and the real handoff always agree on what's about to happen.
-  const queueHead = session.queue[0] || (session.nowPlayingId ? playlistNextHop(activePlaylist, session.nowPlayingId) : null);
+  // The hop Now Playing committed to when it started (commitHopFor,
+  // core.js) — never a fresh playlistNextHop draw. Drawing here meant a
+  // random re-roll on EVERY render: the Next preview, the highlighted
+  // edge and the scrub bar's own fragment zone all changed identity
+  // whenever anything else re-rendered the page (a seek, a hover, a
+  // once-a-second tick), which is what made the highlight flicker.
+  const queueHead = session.queue[0] || session.committedHop || null;
   const committedEdge = (queueHead && queueHead.mode === 'transition' && queueHead.edgeId)
     ? edges.find(e => e.id === queueHead.edgeId) : null;
   // An Outro-ending cut hop has a real produced fragment too — the same
@@ -842,6 +878,17 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   const outroEdgeForHop = (queueHead && queueHead.mode === 'cut' && queueHead.ending === 'outro')
     ? findOutroEdgeFor(edges, session.nowPlayingId, queueHead.edgeId) : null;
   const fragmentEdge = committedEdge || outroEdgeForHop;
+  // Which of Now Playing's own output rows is the one that will actually
+  // fire — drawn once when the song started (session.committedHop) and
+  // shown on the card as a plain static dot (SelectedOutputDot,
+  // GraphNodes.jsx). This is the "so I can see at a glance if playback is
+  // gonna go with none or outro" indicator that replaced the countdown
+  // ring; it can only be honest now that the draw is frozen rather than
+  // re-rolled every tick.
+  const committedOutputType = !queueHead ? null
+    : queueHead.mode === 'transition' ? 'transition'
+    : queueHead.ending === 'outro' ? 'outro'
+    : 'none';
   // Only actually "mixing" (and so pulsing the graph's own edge — see
   // GraphPane's mixingEdgeId) within the real ~8s handoff window, same
   // window the scrub bar's own light-up crosses into naturally once
@@ -988,9 +1035,9 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
             matchIds={matchIds} searchActive={searchActive}
             onDragSongPosition={onDragSongPosition} onSelectSong={selectSong}
             endQueued={endWired}
-            nowPlayingId={session.nowPlayingId}
+            nowPlayingId={session.nowPlayingId} committedType={committedOutputType}
             onPaneClick={onPaneClick}
-            onStartPlay={triggerStartSet} canStartPlay={!hasStarted} selectedId={selectedId}
+            onStartPlay={triggerStartSet} canStartPlay selectedId={selectedId}
             onPaneContextMenu={onPaneContextMenu} onNodeContextMenu={onNodeContextMenu}
             onSelectionContextMenu={onSelectionContextMenu}
             onMultiSelectionChange={setMultiSelectedIds}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { introEdgeFor } from './core.js';
+import { introEdgeFor, commitHopFor } from './core.js';
 import { engine, performAdvance } from './audioEngine.js';
 
 // Drives a continuous playback-position display off the real clock every
@@ -49,10 +49,14 @@ export function useTransportControls({ songs, visibleEdges, setSession }) {
     const song = songs[songId];
     const introEdge = starting === 'intro' ? introEdgeFor(visibleEdges, songId) : null;
     engine.startMain(song, introEdge);
-    setSession(prev => ({
+    // Starting a song is the one and only moment its next hop is drawn
+    // (commitHopFor, core.js) — which is also what makes restarting a
+    // node re-roll a shuffled/multi-candidate output, as asked for,
+    // rather than replaying whatever the last draw happened to be.
+    setSession(prev => commitHopFor({
       ...prev, nowPlayingId: songId, startMethod: starting,
       queue: [], isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition',
-    }));
+    }, songId));
   }, [songs, visibleEdges, setSession]);
 
   // A deliberate jump to an arbitrary song (the detail pane's Play button,
@@ -89,6 +93,17 @@ export function useTransportControls({ songs, visibleEdges, setSession }) {
         const hasCorrectAnchor = engine._current && engine._current.kind === expectedKind && engine._current.songId === prev.nowPlayingId;
         if (song && !hasCorrectAnchor) engine.startMain(song, null, song.durationSec - prev.timeLeft);
         else engine.resume();
+        // A song is playing, so it MUST have a committed hop — that's the
+        // invariant everything downstream (the tick's scheduler, the Next
+        // preview, the graph highlight) now depends on. Resuming is the
+        // one start path that can arrive without one: a reload forces
+        // isPlaying back to false and hands Play a restored session, and
+        // any session saved before committedHop existed has none at all.
+        // Backfilled here rather than left null, because a null committed
+        // hop doesn't degrade to "re-roll", it degrades to "the set never
+        // advances". Never re-drawn once set — resuming a pause keeps
+        // whatever this song already committed to.
+        if (prev.nowPlayingId && !prev.committedHop) return commitHopFor({ ...prev, isPlaying }, prev.nowPlayingId);
       } else {
         engine.pause();
       }
@@ -122,11 +137,11 @@ export function useTransportControls({ songs, visibleEdges, setSession }) {
       const destId = goToPrevious ? prev.history[prev.history.length - 1] : prev.nowPlayingId;
       const destSong = songs[destId];
       engine.startMain(destSong, null);
-      return {
+      return commitHopFor({
         ...prev, nowPlayingId: destId, startMethod: 'cut', queue: [],
         isPlaying: true, timeLeft: destSong ? destSong.durationSec : 210, setEnded: false, nextMode: 'transition',
         history: goToPrevious ? prev.history.slice(0, -1) : prev.history,
-      };
+      }, destId);
     });
   }, [songs, setSession]);
 
@@ -134,6 +149,7 @@ export function useTransportControls({ songs, visibleEdges, setSession }) {
     engine.stopAll();
     setSession(prev => ({
       ...prev, setEnded: false, isPlaying: false, nowPlayingId: null, startMethod: null,
+      committedHop: null,
       queue: [], timeLeft: 0, nextMode: 'transition', autoHistory: [], history: [],
     }));
   }, [setSession]);

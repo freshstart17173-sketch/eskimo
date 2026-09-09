@@ -160,6 +160,9 @@ export function sampleEdgesForTests() {
 export function emptySession() {
   return {
     nowPlayingId: null, startMethod: null,
+    // The frozen "what happens after Now Playing" decision — see
+    // commitHopFor. Null whenever nothing's playing.
+    committedHop: null,
     queue: [], timeLeft: 0, isPlaying: false, setEnded: false,
     // The one control for what the manual Next list offers and how Now
     // Playing would end if nothing more gets queued: 'transition' shows
@@ -486,6 +489,35 @@ export function removeSongFromPlaylist(playlist, songId) {
 // is a real generalization of the old single-type "pick a Transition
 // destination at random" — with only one type ever active, picking a
 // type first and then its one destination is exactly the old behavior.
+// Resolves `songId`'s next hop ONCE and freezes it onto the session as
+// `committedHop` — the single source of truth for "what happens after the
+// song that's playing right now", read by the tick's scheduler, the
+// player bar's Next preview, and the graph's own active-output indicator
+// alike.
+//
+// This exists because `playlistNextHop` below is genuinely random, and it
+// used to be called live in three separate places — App.jsx's tick (every
+// second), PerformPage.jsx (every render), and performAdvance (again, at
+// the moment of the hop). For any song with more than one active output
+// (a None wire AND an Outro, say) that meant the outcome was re-drawn
+// continuously: the scheduled cue point moved between ticks, the
+// displayed total changed with it, the highlighted edge flickered on
+// every re-render, and — worst — each re-draw cancelled and re-armed the
+// real audio schedule, sometimes straddling the handoff itself. Which is
+// exactly what "the outro switch is glitchy sometimes" was.
+//
+// Direct instruction, and the rule this enforces: "by the time playback
+// reaches a node, its output should already be set in stone" — the draw
+// happens when a song STARTS (see every caller), never again while it
+// plays. Restarting a song deliberately re-draws (that's the only way to
+// re-roll a shuffle), which is also what was asked for.
+export function commitHopFor(session, songId) {
+  return {
+    ...session,
+    committedHop: songId ? playlistNextHop(session.activePlaylist, songId) : null,
+  };
+}
+
 export function playlistNextHop(playlist, songId) {
   const node = playlist.nodes[songId];
   if (!node) return null;
@@ -975,21 +1007,26 @@ export function advanceSession(prev, songs, visibleEdges) {
   const history = [...prev.history, prev.nowPlayingId].slice(-50);
   const head = prev.queue[0];
   if (head) {
-    if (head.id === END) return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0 };
+    if (head.id === END) return { ...prev, isPlaying: false, setEnded: true, queue: [], timeLeft: 0, committedHop: null };
     const nextSong = songs[head.id];
-    return { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210, history };
+    // The song that's about to start gets its own hop drawn right here,
+    // once — see commitHopFor. Nothing re-draws it again while it plays.
+    return commitHopFor(
+      { ...prev, nowPlayingId: head.id, queue: prev.queue.slice(1), timeLeft: nextSong ? nextSong.durationSec : 210, history },
+      head.id,
+    );
   }
   if (prev.autoplay) {
     const pick = pickAutoplayNext(songs, visibleEdges, prev.nowPlayingId, prev.transitionOnly);
     if (pick) {
       const nextSong = songs[pick.id];
-      return {
+      return commitHopFor({
         ...prev, nowPlayingId: pick.id, timeLeft: nextSong ? nextSong.durationSec : 210, history,
         autoHistory: [...prev.autoHistory, { id: pick.id, mode: pick.mode }].slice(-40),
-      };
+      }, pick.id);
     }
   }
-  return { ...prev, isPlaying: false, setEnded: true, timeLeft: 0 };
+  return { ...prev, isPlaying: false, setEnded: true, timeLeft: 0, committedHop: null };
 }
 
 // Removing one specific hop from the middle of the queue, keeping whatever

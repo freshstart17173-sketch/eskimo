@@ -469,27 +469,12 @@ a { color: var(--accent); }
    order) so the ink fill visibly sweeps over it exactly like the rest of
    the track as playback proceeds through it. */
 .playhead-cue-zone { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--state-later); opacity: .45; pointer-events: none; }
-/* Flashes the moment playback actually reaches (or leaves) the zone —
-   "the switch...lights up and we can see that playback has reached it",
-   direct instruction, distinct from the zone's own always-on color above.
-   Retriggered by the JS removing/re-adding this class across a frame. */
-.playhead-cue-zone.lit { animation: playheadZoneFlash .5s ease-out; }
-@keyframes playheadZoneFlash {
-  0% { opacity: 1; box-shadow: 0 0 8px 2px rgba(255, 255, 255, .9); }
-  100% { opacity: .45; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
-}
-/* Same flash, on the fill itself rather than the zone marker — an Outro
-   has no early zone to flash (it has no early cue point at all, see
-   PerformPage.jsx's cuePct), but the crossing itself — the fill actually
-   switching to the "later" color — still needs to visibly light up the
-   instant it happens, not just silently change color. Also fires for a
-   Transition, alongside the zone's own flash, for a stronger signal right
-   where the eye already is (on the fill, not the static zone behind it). */
-.playhead-fill.lit { animation: playheadFillFlash .5s ease-out; }
-@keyframes playheadFillFlash {
-  0% { box-shadow: 0 0 8px 2px rgba(255, 255, 255, .9); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
-}
+/* No crossing flash — removed on direct instruction ("I don't want it to
+   do the pulse effect when it switches over... the highlighting is kinda
+   cool, just make sure it's persistent"). The zone's own always-on color
+   above, plus `.in-crossfade` recoloring the fill once playback is inside
+   it, carry the same information persistently instead of as a one-off
+   animation firing mid-set. */
 .seq-now-card .tag { border-color: rgba(252, 252, 252, .5); color: var(--paper-fixed); }
 /* a regular playhead — elapsed/total, not a countdown — plus the missing
    manual "skip to next" action right where you'd look for it */
@@ -879,14 +864,17 @@ a { color: var(--accent); }
   background: var(--danger-bg); color: var(--danger);
 }
 
-/* A ring, not a bar — cheaper on card width, just as readable, and its
-   color sweep (green -> red, computed in GraphNodes.jsx) does the same
-   job a discrete "warning" color step would, without a hard jump. Sits
-   right after the label so a glance at the row shows urgency without
-   needing to read the dropdown first. */
-.socket-countdown-ring { flex: none; }
-.socket-countdown-track { stroke: var(--line); stroke-width: 2.4; }
-.state-active .socket-countdown-track { stroke: rgba(252, 252, 252, .25); }
+/* Replaced the old live countdown ring (direct instruction — see
+   SelectedOutputDot, GraphNodes.jsx): a small solid dot marking the one
+   output this song has actually committed to firing, so a glance at the
+   card answers "none or outro?" rather than "how long left?". Static on
+   purpose — nothing about it animates, and it stays put for the whole
+   song now that the decision is frozen when playback starts. */
+.socket-selected-dot {
+  flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ink);
+  box-shadow: 0 0 0 2px var(--paper);
+}
+.state-active .socket-selected-dot { background: var(--paper-fixed); box-shadow: 0 0 0 2px rgba(19, 19, 19, .35); }
 
 /* One dot style, everywhere, full stop — no socket looks like an
    exception, and no longer color-coded by type (Intro/Outro/Transition)

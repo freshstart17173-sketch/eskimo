@@ -166,7 +166,7 @@ export default function GraphPane({
   stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
   onDragSongPosition, endQueued, onSelectSong,
-  nowPlayingId,
+  nowPlayingId, committedType,
   onPaneContextMenu, onNodeContextMenu, onSelectionContextMenu, onMultiSelectionChange, onPaneClick,
   onStartPlay, canStartPlay, selectedId,
 }) {
@@ -444,8 +444,8 @@ export default function GraphPane({
   const nowSongForPalette = nowPlayingId ? songs[nowPlayingId] : null;
   const palette = usePalette(nowSongForPalette ? nowSongForPalette.coverUrl : null);
   const nowPlayingValue = useMemo(
-    () => ({ nowPlayingId, palette }),
-    [nowPlayingId, palette]
+    () => ({ nowPlayingId, palette, committedType }),
+    [nowPlayingId, palette, committedType]
   );
   const hoveredNodeValue = useMemo(() => ({ hoveredId }), [hoveredId]);
   const searchDimValue = useMemo(() => ({ searchActive, matchIds }), [searchActive, matchIds]);

@@ -1200,3 +1200,94 @@ behavior. Whether that fallback is still the right default, now that a
 *confident* detection cuts early, or whether a produced-but-undetected
 outro should behave some other way, wasn't part of this round's direct
 instruction and is left as-is rather than guessed at.
+
+## 12. Round 8 — "the outro switch is glitchy sometimes" traced to a random draw, plus seeking into the zone (implemented)
+
+Direct report: *"the outro switch is quite glitchy sometimes too. It needs
+to work literally all the time and seamlessly at that."* Alongside it, a
+list of playhead/UX items — no pulse on switchover, persistent (not
+flickering) highlighting, clicking the highlighted area to actually seek
+into the outro, a persistent selected-output indicator in place of the
+countdown ring, a Start play button that survives being used, and a
+restart that re-picks the output. (*"The dotted animation doesn't work
+just leave it alone."* — out of scope, untouched.)
+
+### Spec, written first (from the user's own statements)
+
+- **S1** By the time playback reaches a node, its output is **set in
+  stone** — the same output every read, until the node is restarted.
+- **S2** Restarting a node re-picks its output (the one place a re-roll is
+  correct).
+- **S3** The displayed total never changes mid-playback for any reason —
+  a tick, a re-render, a seek, or the fragment actually starting.
+- **S4** The fragment highlight is persistent; moving the playhead never
+  blanks or flickers it.
+- **S5** Clicking inside the highlight plays the clip **from that point**,
+  not from the clip's start and not "playhead there, audio elsewhere."
+- **S6** No flash/pulse on switchover.
+- **S7** The Start node's play button is always present.
+
+### Findings
+
+- **F1 — confirmed bug, and the root cause of "glitchy sometimes."**
+  `playlistNextHop` (core.js) draws with `Math.random()`. Nothing froze
+  its result, so it was re-rolled **on every tick, on every render that
+  read `queueHead`, and again at hop time**. For a node with both a None
+  and an Outro output wired, the outro therefore fired on a coin flip —
+  and the *same* mechanism independently explains the shifting total (S3)
+  and the flickering highlight (S4). One cause, three reported symptoms.
+  Fixed by `commitHopFor(session, songId)` + `session.committedHop`: the
+  decision is frozen once, at song start (`startSet`, `goBack`,
+  `advanceSession`, `syncSessionFromFiredPlan`, and backfilled on resume
+  in `togglePlaying`), and every reader consumes that stored value instead
+  of drawing again. Restart re-rolls by construction, since `startSet`
+  calls `commitHopFor` — S2 falls out of the same change rather than
+  needing its own mechanism.
+- **F2 — confirmed bug.** `cancelPlan` called `stop()` on every pending
+  node including ones already sounding, so cancelling a plan mid-fragment
+  cut real audio dead. Now skips steps whose `startCtxTime` has already
+  passed unless called with `hard`.
+- **F3 — confirmed bug.** `cancelPlan` never rescinded the **deck's own**
+  scheduled stop, so a cancelled plan could silently kill the set: the
+  main deck stopped at the splice with nothing arriving to replace it. The
+  plan now carries `deckSource`/`deckNaturalEndCtxTime` and cancelling
+  re-schedules the stop back out to the deck's natural end.
+- **F4 — missing feature (S5).** Seeking into the highlighted zone had no
+  implementation at all: `seekMain` only ever moves the main deck, so a
+  drag into the zone parked the playhead at the boundary while the song
+  quietly kept sounding — the same display-vs-sound disagreement §7
+  already recorded once. Added `seekIntoFragments`, which arms the
+  remaining chain from `now`, skipping into whichever fragment contains
+  the point. `fragmentWindow` was extracted so the seek and the scheduled
+  path can't disagree about where a clip's real content begins.
+- **F5 — confirmed bug, found by testing F4's own fix.** The first
+  `seekIntoFragments` reported position off the clip's own short span, so
+  clicking into the zone visibly collapsed the total (11s → 6s) — a fresh
+  violation of S3 introduced by the fix for S5. The seeked clip now
+  carries the combined timeline with it (`spanStartCtxTime`,
+  `spanDurationSec`, `fragmentBoundariesSec`) and `getPlaybackPosition`
+  reports it as phase `'main'` on that one continuous span. The isolated
+  `'fragment'` phase remains only for the reactive `handleHandoff` path,
+  which genuinely has no surrounding timeline.
+- **F6 — confirmed bug, same origin as F5.** After seeking into the zone
+  there is no main deck, so scrubbing back *into the song* hit
+  `seekMain`'s `kind !== 'main'` guard and silently did nothing.
+  `seekPlayhead` now restarts the deck at that offset and re-arms the hop.
+
+S4/S6 were UI-side: the `.lit` flash and its keyframes were deleted
+outright, and `Playhead` now only ever replaces a known zone with another
+real one (`if (zone) lastZoneRef.current = zone`), so a drag can't blank
+it. S7 was a stale `canPlay={!hasStarted}` gate. `CountdownRing` was
+replaced by `SelectedOutputDot`, driven by `committedHop` — which is why
+it can be persistent at all: before F1 there was no stable answer to
+"which output is selected" to show.
+
+### Verified against real audio
+
+An 8s song with an outro edge (`outSeconds: 5`, `clipStartSec: 2`):
+`committedHop` stable across 8 samples and many forced re-renders, total
+stable at 0:11, hop label stable; 12 restarts produced both possible hops;
+no `.lit` ever applied; zone geometry byte-identical across a 5-step drag;
+clicking at 8.8s of the 11s span landed at 9s (not the 5s boundary) and
+kept advancing with the total unchanged; scrubbing back to 2s restarted
+the song and re-armed the same 0:11 total.

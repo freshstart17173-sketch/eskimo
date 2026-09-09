@@ -21,10 +21,26 @@
 // every currently scheduled node, whichever deck or fragment is
 // sounding) rather than tracking play/pause per node.
 
-import { END, advanceSession, playlistNextHop, clamp } from './core.js';
+import { END, advanceSession, commitHopFor, clamp } from './core.js';
 import { resolveAudioUrl } from './localAudioStore.js';
 
 const bufferCache = new Map();
+
+// What part of a fragment's own buffer actually plays: `offsetSec` in
+// (an outro clip's duplicated lead-in, edge.clipStartSec) and
+// `clipEndSec` out (an intro clip's trailing overlap into the
+// destination). Shared by every path that arms a fragment — the
+// scheduled handoff and a manual seek landing inside one — because this
+// is the piece that must never drift between them: it's the whole
+// definition of "the clip's own real content".
+function fragmentWindow(spec, buffer) {
+  const offsetSec = spec.offsetSec || 0;
+  const bounded = spec.clipEndSec != null;
+  const durationSec = bounded
+    ? Math.max(0, spec.clipEndSec - offsetSec)
+    : Math.max(0, buffer.duration - offsetSec);
+  return { offsetSec, bounded, durationSec };
+}
 
 export class AudioEngine {
   constructor() {
@@ -134,7 +150,11 @@ export class AudioEngine {
   // deck is being stopped right now, so they're meaningless (and would
   // collide with whatever plays next) the moment that deck goes away.
   _stopCurrentSound() {
-    this.cancelPlan();
+    // Hard cancel: this is a real "stop what's audible right now" (Stop,
+    // a fresh startMain, a handoff taking over), so a fragment that's
+    // already sounding does have to be silenced too — unlike a plan
+    // merely being re-armed. See cancelPlan's own comment.
+    this.cancelPlan(true);
     const c = this._current;
     if (c && c.source) {
       try { c.source.onended = null; } catch (e) { /* already stopped */ }
@@ -272,19 +292,42 @@ export class AudioEngine {
     return source;
   }
 
-  // Cancels whatever's pending in the current plan — any node scheduled
-  // to start in the future that hasn't started yet. Calling stop() on a
-  // node before its scheduled start time cancels it outright (it never
-  // plays at all), per the AudioBufferSourceNode spec — this does NOT
-  // touch whatever's already actually sounding right now (the current
-  // main deck, or a fragment already mid-playback), only steps of the
-  // plan still waiting in the future.
-  cancelPlan() {
+  // Cancels the current plan. `hard` decides what happens to any step
+  // that's ALREADY audibly playing:
+  //
+  //   hard = false (default, "this plan is being replaced") — leave a
+  //     sounding step alone and only cancel steps still in the future.
+  //     Calling stop() before a node's scheduled start cancels it
+  //     outright (it never plays), but calling stop() on a node that has
+  //     already started stops it THAT INSTANT — which, when a plan was
+  //     merely being re-armed, cut off an outro fragment mid-sentence.
+  //     The old code did exactly that while its own comment claimed the
+  //     opposite; the comment was wrong, not the intent, so the fix is to
+  //     make the code match by tracking each node's own start time.
+  //   hard = true ("stop everything now") — the Stop button, a fresh
+  //     startMain, a handoff taking over. A sounding fragment genuinely
+  //     does have to be silenced there.
+  //
+  // Either way the main deck's own scheduled stop is rescinded (pushed
+  // back to its natural end). scheduleHop arms that stop as part of the
+  // plan, and nothing used to un-arm it: if a later re-schedule bailed
+  // after cancelling — a buffer that failed to load, a superseded call,
+  // a deck swapped underneath — the deck was still under orders to stop
+  // at the old cue point with nothing left scheduled to follow it, so
+  // the set just went silent mid-song. Per the AudioScheduledSourceNode
+  // spec the last stop() call wins as long as the node hasn't stopped
+  // yet, so re-arming it to its natural end is enough to undo.
+  cancelPlan(hard = false) {
     if (!this._plan) return;
     const plan = this._plan;
     this._plan = null;
-    for (const node of plan.pendingNodes) {
-      try { node.stop(); } catch (e) { /* already started, or already stopped */ }
+    const now = this.ctx ? this.ctx.currentTime : 0;
+    for (const step of plan.pendingNodes) {
+      if (!hard && step.startCtxTime <= now) continue; // already sounding — let it finish
+      try { step.node.stop(); } catch (e) { /* already stopped/ended */ }
+    }
+    if (plan.deckSource && plan.deckNaturalEndCtxTime != null) {
+      try { plan.deckSource.stop(plan.deckNaturalEndCtxTime); } catch (e) { /* already stopped/ended */ }
     }
   }
 
@@ -339,16 +382,13 @@ export class AudioEngine {
     let stepTime = triggerCtxTime;
     const fragmentSteps = []; // { buffer, startCtxTime, offsetSec, durationSec } per fragment — see getPlaybackPosition
     for (let i = 0; i < fragmentBuffers.length; i++) {
-      const buffer = fragmentBuffers[i];
-      const spec = fragments[i];
-      const offsetSec = spec.offsetSec || 0;
-      const playDurationSec = spec.clipEndSec != null ? Math.max(0, spec.clipEndSec - offsetSec) : (buffer.duration - offsetSec);
-      const node = this._createSource(buffer);
-      if (spec.clipEndSec != null) node.start(stepTime, offsetSec, playDurationSec);
-      else node.start(stepTime, offsetSec);
-      pendingNodes.push(node);
-      fragmentSteps.push({ buffer, startCtxTime: stepTime, offsetSec, durationSec: playDurationSec });
-      stepTime += playDurationSec;
+      const step = fragmentWindow(fragments[i], fragmentBuffers[i]);
+      const node = this._createSource(fragmentBuffers[i]);
+      if (step.bounded) node.start(stepTime, step.offsetSec, step.durationSec);
+      else node.start(stepTime, step.offsetSec);
+      pendingNodes.push({ node, startCtxTime: stepTime });
+      fragmentSteps.push({ buffer: fragmentBuffers[i], startCtxTime: stepTime, offsetSec: step.offsetSec, durationSec: step.durationSec });
+      stepTime += step.durationSec;
     }
 
     // The ctx-time everything scheduled by this call has finished by —
@@ -366,15 +406,141 @@ export class AudioEngine {
     if (destBuffer) {
       destNode = this._createSource(destBuffer);
       destNode.start(stepTime, hopDecision.destOffsetSec || 0);
-      pendingNodes.push(destNode);
+      pendingNodes.push({ node: destNode, startCtxTime: stepTime });
       destStartCtxTime = stepTime;
     }
 
     const plan = {
       triggerCtxTime, destStartCtxTime, planEndCtxTime, destSongId: hopDecision.destSongId || null,
       destNode, destBuffer, destOffsetSec: hopDecision.destOffsetSec || 0, pendingNodes, fragmentSteps,
+      // What cancelPlan needs to put the main deck back the way it found
+      // it — this plan is the only thing that ever moved its stop earlier
+      // than its own natural end.
+      deckSource: current.source,
+      deckNaturalEndCtxTime: current.startCtxTime + Math.max(0, current.buffer.duration - current.offsetSec),
     };
     this._plan = plan;
+    return plan;
+  }
+
+  // Seeking to a point that lands INSIDE the fragment chain rather than
+  // in the main song — dragging the scrub bar into the highlighted
+  // outro/transition zone. `offsetIntoChainSec` is measured from the
+  // first fragment's own start (0 = the splice instant itself).
+  //
+  // The scrub bar's own 100% has spanned the fragment since the combined
+  // total landed, but there was no way to actually PLAY from in there:
+  // seekMain only ever touches the main deck, so a drag into the zone
+  // moved the playhead to the boundary while the audio quietly carried
+  // on replaying the main song's last seconds — the display and the
+  // sound disagreeing, which is the exact failure this repo has already
+  // recorded once before (docs/playback-model.md §7's scrub finding).
+  //
+  // Arms the same chain scheduleHop would, just starting at `now` and
+  // skipping into whichever fragment contains that point. Everything
+  // after it (a second fragment, the destination song) follows exactly
+  // as it otherwise would, so seeking into the outro doesn't cost you
+  // the rest of the hop.
+  //
+  // `chainStartSec` is where the chain begins on the COMBINED song+fragment
+  // timeline the player bar shows, and `songId` the song that timeline
+  // belongs to. Both exist so the display keeps reading as one continuous
+  // span after the seek — without them this reported the clip's own short
+  // duration instead, and the total visibly collapsed (11s to 6s) the
+  // instant you clicked into the zone, which is exactly the "nothing weird
+  // happens in the player" rule this is supposed to uphold.
+  async seekIntoFragments(hopDecision, offsetIntoChainSec, chainStartSec = 0, songId = null) {
+    if (!hopDecision) return null;
+    const token = ++this._playToken;
+    const planToken = ++this._planToken;
+    this._stopCurrentSound();
+
+    const fragments = (hopDecision.fragments || []).filter((f) => f && f.url);
+    if (fragments.length === 0) return null;
+    const urlsToLoad = [...fragments.map((f) => f.url), ...(hopDecision.destUrl ? [hopDecision.destUrl] : [])];
+    const buffers = await Promise.all(urlsToLoad.map((url) => this.loadBuffer(url).catch(() => null)));
+    if (token !== this._playToken || planToken !== this._planToken) return null;
+    const fragmentBuffers = buffers.slice(0, fragments.length);
+    const destBuffer = hopDecision.destUrl ? buffers[buffers.length - 1] : null;
+    if (fragmentBuffers.some((b) => !b)) return null;
+    if (hopDecision.destUrl && !destBuffer) return null;
+
+    const ctx = this.ensureContext();
+    if (ctx.state !== 'running') ctx.resume();
+    const now = ctx.currentTime;
+
+    // Walk the chain to find which fragment that offset lands in, and
+    // how far into it — the windows come from the same fragmentWindow
+    // the scheduled path uses, so a seek can never disagree with the
+    // handoff about where a clip's real content starts and ends.
+    const windows = fragments.map((f, i) => fragmentWindow(f, fragmentBuffers[i]));
+    // Every fragment's start expressed on the combined timeline, so the
+    // highlighted zone keeps the same geometry after the seek as before it.
+    const chainBoundariesSec = [];
+    let chainAcc = 0;
+    for (const w of windows) { chainBoundariesSec.push(chainStartSec + chainAcc); chainAcc += w.durationSec; }
+    const spanDurationSec = chainStartSec + chainAcc;
+
+    let remaining = Math.max(0, offsetIntoChainSec);
+    let startIndex = 0, skipWithinSec = 0, consumedSec = 0;
+    for (let i = 0; i < windows.length; i++) {
+      const w = windows[i];
+      if (remaining < w.durationSec || i === windows.length - 1) {
+        startIndex = i;
+        skipWithinSec = Math.min(remaining, Math.max(0, w.durationSec - 0.01));
+        break;
+      }
+      remaining -= w.durationSec;
+      consumedSec += w.durationSec;
+    }
+    consumedSec += skipWithinSec;
+
+    const pendingNodes = [];
+    const fragmentSteps = [];
+    let stepTime = now;
+    for (let i = startIndex; i < fragments.length; i++) {
+      const w = windows[i];
+      const skip = i === startIndex ? skipWithinSec : 0;
+      const playDurationSec = Math.max(0, w.durationSec - skip);
+      const node = this._createSource(fragmentBuffers[i]);
+      if (w.bounded) node.start(stepTime, w.offsetSec + skip, playDurationSec);
+      else node.start(stepTime, w.offsetSec + skip);
+      pendingNodes.push({ node, startCtxTime: stepTime });
+      // startCtxTime is pushed BACK by `skip` so getPlaybackPosition's
+      // elapsed math still reports this fragment's true position within
+      // its own window rather than restarting it at zero.
+      fragmentSteps.push({ buffer: fragmentBuffers[i], startCtxTime: stepTime - skip, offsetSec: w.offsetSec, durationSec: w.durationSec });
+      stepTime += playDurationSec;
+    }
+    const planEndCtxTime = stepTime;
+
+    let destStartCtxTime = null, destNode = null;
+    if (destBuffer) {
+      destNode = this._createSource(destBuffer);
+      destNode.start(stepTime, hopDecision.destOffsetSec || 0);
+      pendingNodes.push({ node: destNode, startCtxTime: stepTime });
+      destStartCtxTime = stepTime;
+    }
+
+    // No deckSource here on purpose: the main deck is already stopped
+    // (_stopCurrentSound above), so there's no scheduled stop to rescind.
+    const plan = {
+      triggerCtxTime: fragmentSteps.length ? fragmentSteps[0].startCtxTime : now,
+      destStartCtxTime, planEndCtxTime, destSongId: hopDecision.destSongId || null,
+      destNode, destBuffer, destOffsetSec: hopDecision.destOffsetSec || 0, pendingNodes, fragmentSteps,
+      deckSource: null, deckNaturalEndCtxTime: null,
+    };
+    this._plan = plan;
+    // The main deck is gone, so report position off the fragment itself
+    // (kind 'clip') until the plan's own destination takes over — but on
+    // the combined timeline (span* below), not the clip's own short one.
+    const first = fragmentSteps[0];
+    this._current = {
+      source: pendingNodes[0].node, gain: null, buffer: first.buffer, kind: 'clip',
+      startCtxTime: first.startCtxTime, offsetSec: first.offsetSec, durationSec: first.durationSec,
+      songId, spanStartCtxTime: now - (chainStartSec + consumedSec),
+      spanDurationSec, fragmentBoundariesSec: chainBoundariesSec,
+    };
     return plan;
   }
 
@@ -468,10 +634,23 @@ export class AudioEngine {
     // above — same 'fragment' shape either way, so a consumer never has
     // to know or care which of the two actually produced it.
     if (this._current && this._current.kind === 'clip') {
+      const c = this._current;
+      // A clip reached by seeking INTO the zone (seekIntoFragments) carries
+      // the surrounding song's combined timeline with it, so it keeps
+      // reporting on that one continuous span rather than collapsing the
+      // display to the clip's own length mid-playback.
+      if (c.spanStartCtxTime != null) {
+        return {
+          phase: 'main', songId: c.songId,
+          elapsedSec: Math.max(0, now - c.spanStartCtxTime),
+          durationSec: c.spanDurationSec,
+          fragmentBoundariesSec: c.fragmentBoundariesSec,
+        };
+      }
       return {
         phase: 'fragment',
-        elapsedSec: Math.max(0, now - this._current.startCtxTime),
-        durationSec: this._current.durationSec,
+        elapsedSec: Math.max(0, now - c.startCtxTime),
+        durationSec: c.durationSec,
       };
     }
     return { phase: 'silence' };
@@ -703,15 +882,18 @@ export function syncSessionFromFiredPlan(prevSession, plan, songs, ctxCurrentTim
   const wasQueued = prevSession.queue[0] && prevSession.queue[0].id === plan.destSongId;
   const history = [...prevSession.history, prevSession.nowPlayingId].slice(-50);
   if (plan.destSongId == null) {
-    return { ...prevSession, isPlaying: false, setEnded: true, queue: [], timeLeft: 0, history };
+    return { ...prevSession, isPlaying: false, setEnded: true, queue: [], timeLeft: 0, history, committedHop: null };
   }
   const destSong = songs[plan.destSongId];
   const destDuration = destSong ? destSong.durationSec : 210;
-  return {
+  // The song that just took over draws its own next hop here, once — the
+  // same "decided the moment it starts, never again while it plays" rule
+  // every other start path follows (commitHopFor, core.js).
+  return commitHopFor({
     ...prevSession, nowPlayingId: plan.destSongId, history,
     queue: wasQueued ? prevSession.queue.slice(1) : prevSession.queue,
     timeLeft: Math.max(0, destDuration - (ctxCurrentTime - plan.destStartCtxTime)),
-  };
+  }, plan.destSongId);
 }
 
 // Shared by both the set-clock's automatic tick and the manual skip button
@@ -734,11 +916,17 @@ export function performAdvance(prevSession, songs, edges, opts = {}) {
   const { forceCut = false } = opts;
   const nowPlayingId = prevSession.nowPlayingId;
   const explicitHop = prevSession.queue[0] || null;
-  // No manual queue entry — fall back to the graph's own wiring (the
-  // playlist editor, see TODO.md) before resorting to autoplay's random
-  // pick, so a fully wired loop keeps itself going forever without ever
-  // needing randomness. A manual commit always wins when both exist.
-  const wiredHop = !explicitHop ? playlistNextHop(prevSession.activePlaylist, nowPlayingId) : null;
+  // No manual queue entry — use the hop this song already committed to
+  // when it started (session.committedHop, see commitHopFor in core.js)
+  // before resorting to autoplay's random pick, so a fully wired loop
+  // keeps itself going forever without ever needing randomness. A manual
+  // commit always wins when both exist.
+  //
+  // Deliberately NOT a fresh playlistNextHop draw: that's random, and
+  // drawing again here meant the hop that actually executed could differ
+  // from the one already scheduled, displayed, and highlighted — the two
+  // paths silently disagreeing about the same hop.
+  const wiredHop = !explicitHop ? (prevSession.committedHop || null) : null;
   const hop = explicitHop || wiredHop;
   const next = wiredHop
     ? advanceSession({ ...prevSession, queue: [wiredHop] }, songs, edges)

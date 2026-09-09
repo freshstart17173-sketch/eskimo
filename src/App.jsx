@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
-import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed, autoconnectFullGraph, getProfileName, uid, findFreePosition } from './core.js';
+import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, commitHopFor, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed, autoconnectFullGraph, getProfileName, uid, findFreePosition } from './core.js';
 // graphConstants.js, never graphLayout.js — the latter also imports
 // `dagre` at its top level, so importing anything from it here (this file
 // is never lazy-loaded) would pull dagre into the always-loaded main
@@ -277,7 +277,14 @@ export default function App() {
       const nowSong = songs[prev.nowPlayingId];
       const duration = nowSong ? nowSong.durationSec : 210;
       const visibleEdges = getVisibleEdges(edges);
-      const effectiveHead = prev.queue[0] || playlistNextHop(prev.activePlaylist, prev.nowPlayingId);
+      // The hop this song committed to when it started — NOT a fresh
+      // playlistNextHop draw. That draw is random, and re-running it here
+      // every second meant a song with more than one active output
+      // re-rolled continuously: the scheduled cue point moved between
+      // ticks, which re-armed the real audio schedule over and over,
+      // sometimes straddling the handoff itself. See commitHopFor
+      // (core.js).
+      const effectiveHead = prev.queue[0] || prev.committedHop || null;
 
       // A previously scheduled hop already fired in real audio — sync
       // session state to match what's already true, then let the next
@@ -480,7 +487,7 @@ export default function App() {
         const first = orderedIds[0];
         const song = songs[first];
         engine.startMain(song, null);
-        base = { ...prev, nowPlayingId: first, startMethod: 'cut', isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition', queue: [] };
+        base = commitHopFor({ ...prev, nowPlayingId: first, startMethod: 'cut', isPlaying: true, timeLeft: song ? song.durationSec : 210, setEnded: false, nextMode: 'transition', queue: [] }, first);
         startIdx = 1;
       }
       const newItems = [];

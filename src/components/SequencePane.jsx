@@ -122,7 +122,6 @@ export function Playhead({ onSeek }) {
   const moveRef = useRef(null);
   const upRef = useRef(null);
   const wasFragmentRef = useRef(false);
-  const litTimerRef = useRef(null);
 
   function setDisplayPct(p, inFragment, zone) {
     if (fillRef.current) fillRef.current.style.width = p + '%';
@@ -192,31 +191,26 @@ export function Playhead({ onSeek }) {
     else if (pos.phase === 'fragment') pct = 100;
     else pct = 0;
     const inFragment = pos.phase === 'fragment' || (pos.phase === 'main' && zone != null && pos.elapsedSec >= pos.fragmentBoundariesSec[0]);
-    lastZoneRef.current = zone;
+    // Only ever REPLACE a known zone with another real one — never blank
+    // it out because a momentary read had none. A seek cancels the
+    // engine's plan, and the tick only re-arms it on its next beat, so
+    // for a fraction of a second getPlaybackPosition legitimately reports
+    // no fragment boundaries even though the wiring hasn't changed at
+    // all. Clearing on that read is what made the highlight flicker every
+    // time the playhead was moved. A genuinely-gone fragment clears it
+    // via the `phase === 'silence'` / song-changed paths instead.
+    if (zone) lastZoneRef.current = zone;
     if (draggingRef.current) return;
-    setDisplayPct(pct, inFragment, zone);
-    if (inFragment !== wasFragmentRef.current) {
-      wasFragmentRef.current = inFragment;
-      // Flash the fill itself — the thing actually switching color — not
-      // just the zone marker: an Outro has no early zone at all (no real
-      // early cue point to mark), so gating the flash on the zone existing
-      // would silently drop the "lights up at the crossing" signal for
-      // exactly that case. Also flash the zone when one exists (a
-      // Transition), for a stronger signal spanning the whole colored span.
-      [fillRef.current, zoneRef.current].forEach((el) => {
-        if (!el) return;
-        el.classList.remove('lit');
-        void el.offsetWidth; // force reflow so re-adding the class replays the flash
-        el.classList.add('lit');
-      });
-      if (litTimerRef.current) clearTimeout(litTimerRef.current);
-      litTimerRef.current = setTimeout(() => {
-        if (fillRef.current) fillRef.current.classList.remove('lit');
-        if (zoneRef.current) zoneRef.current.classList.remove('lit');
-      }, 500);
-    }
+    setDisplayPct(pct, inFragment, zone || lastZoneRef.current);
+    // No flash on crossing, deliberately — direct instruction: "I don't
+    // want it to do the pulse effect when it switches over... the
+    // highlighting is kinda cool, just make sure it's persistent". The
+    // persistent signals (the colored zone marking where the fragment
+    // is, and `.in-crossfade` recoloring the fill once playback is
+    // inside it) carry the same information without a one-off animation
+    // firing in the middle of a set.
+    wasFragmentRef.current = inFragment;
   });
-  useEffect(() => () => { if (litTimerRef.current) clearTimeout(litTimerRef.current); }, []);
 
   return (
     <div className="playhead-track" ref={trackRef} onPointerDown={onPointerDown}>
