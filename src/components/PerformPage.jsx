@@ -10,6 +10,8 @@ import {
 import { engine, findOutroEdgeFor } from '../audioEngine.js';
 import { useTransportControls } from '../playbackControls.js';
 import { NODE_W, NODE_H, END_W, END_H } from '../graphConstants.js';
+import { resolveAudioUrl } from '../localAudioStore.js';
+import { extractDominantColor } from '../dominantColor.js';
 import GraphPane from './GraphPane.jsx';
 import { Icon, ICONS, AlbumArt } from './shared.jsx';
 import { Playhead } from './SequencePane.jsx';
@@ -844,6 +846,32 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // The player bar's "Next" preview — whatever queueHead already resolved
   // to (a manual commit or the graph's own wiring).
   const nextSong = queueHead && queueHead.id !== END ? songs[queueHead.id] : null;
+
+  // Pre-warms the color-match cache (dominantColor.js) for whatever's
+  // wired up next, during idle time — GraphPane's own NowPlayingContext
+  // only ever decodes the CURRENTLY playing song's cover (every other
+  // node just reads that same palette through context, not its own), so
+  // without this the handoff itself is the first time the next song's
+  // color gets decoded, however briefly showing the outgoing song's
+  // palette (or the default accent blue) until it resolves. Fire-and-
+  // forget — this only populates extractDominantColor's own cache;
+  // GraphPane's usePalette call picks it up for free once nowPlayingId
+  // actually changes. requestIdleCallback with a setTimeout fallback
+  // (Safari doesn't have it) so this never competes with anything the
+  // main thread is doing for a real reason.
+  useEffect(() => {
+    if (!nextSong || !nextSong.coverUrl) return undefined;
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
+      resolveAudioUrl(nextSong.coverUrl).then((url) => { if (!cancelled && url) extractDominantColor(url); }).catch(() => {});
+    };
+    const ric = typeof requestIdleCallback === 'function' ? requestIdleCallback : (fn) => setTimeout(fn, 300);
+    const cic = typeof cancelIdleCallback === 'function' ? cancelIdleCallback : clearTimeout;
+    const handle = ric(run);
+    return () => { cancelled = true; cic(handle); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextSong && nextSong.coverUrl]);
 
   // EndNode's "part of your plan"/"not queued" hint — now reads the graph's
   // actual wiring (is any song's output connected to End) rather than the
