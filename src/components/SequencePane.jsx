@@ -97,17 +97,23 @@ function Card({ row, onClick, onMouseEnter, onMouseLeave, onFocusRow, readOnly }
 // real audio deck, via `onSeek` — on release, the same "preview while
 // dragging, commit on drop" pattern most scrubbers use, rather than
 // restarting the audio buffer on every pixel of movement.
-// `cuePct` (0-100, optional) marks where along the CURRENT song's own
-// timeline its wired fragment (a transition or an outro) actually takes
-// over — the colored zone from there to the end of the track, visible the
-// whole time a real fragment is wired, not just in the last few seconds.
-// The zone itself "lights up" (a brief flash, `.lit`) at the exact frame
-// playback actually crosses into or back out of it — direct instruction:
-// a colored segment alone only shows *where* it is, not *that playback
-// has reached it*, and this used to live as two separate, easy-to-miss
-// pieces (this bar plus a tiny standalone "% mixed" dot elsewhere in the
-// player bar) that never actually lit up together with the real audio.
-export function Playhead({ cuePct, onSeek }) {
+// The colored zone marking where a wired fragment (a transition, an
+// outro, an intro) takes over is now read straight off
+// getPlaybackPosition()'s own `fragmentBoundariesSec` every frame (see its
+// comment, audioEngine.js) instead of a static `cuePct` prop computed once
+// from `session` — the bar's own total now spans the fragment too (see the
+// same comment), so the zone showing *where within that combined total*
+// the fragment begins has to move with it live, not just be planted at a
+// percentage of the song's own duration; this also finally covers Outro
+// (never had a zone before at all — "no early cue point on the main
+// deck" was true, but "no boundary the bar should mark" wasn't). The zone
+// itself "lights up" (a brief flash, `.lit`) at the exact frame playback
+// actually crosses into or back out of it — direct instruction: a colored
+// segment alone only shows *where* it is, not *that playback has reached
+// it*, and this used to live as two separate, easy-to-miss pieces (this
+// bar plus a tiny standalone "% mixed" dot elsewhere in the player bar)
+// that never actually lit up together with the real audio.
+export function Playhead({ onSeek }) {
   const trackRef = useRef(null);
   const fillRef = useRef(null);
   const scrubberRef = useRef(null);
@@ -118,21 +124,31 @@ export function Playhead({ cuePct, onSeek }) {
   const wasFragmentRef = useRef(false);
   const litTimerRef = useRef(null);
 
-  function setDisplayPct(p, inFragment) {
+  function setDisplayPct(p, inFragment, zone) {
     if (fillRef.current) fillRef.current.style.width = p + '%';
     if (scrubberRef.current) scrubberRef.current.style.left = p + '%';
     if (trackRef.current) trackRef.current.classList.toggle('in-crossfade', !!inFragment);
+    if (zoneRef.current) {
+      if (zone) { zoneRef.current.style.left = zone.left + '%'; zoneRef.current.style.width = zone.width + '%'; zoneRef.current.hidden = false; }
+      else zoneRef.current.hidden = true;
+    }
   }
   function pctFromEvent(e) {
     const rect = trackRef.current.getBoundingClientRect();
     if (!rect.width) return 0;
     return clamp(((e.clientX - rect.left) / rect.width) * 100, 0, 100);
   }
+  // Remembers the last real zone computed by usePlaybackFrame below, so a
+  // drag gesture (which skips that callback entirely, see its own comment)
+  // doesn't blank the zone out for the duration of the drag — it's still
+  // real information about where the wired fragment sits, unrelated to
+  // where the pointer is scrubbing to right now.
+  const lastZoneRef = useRef(null);
   function onPointerDown(e) {
     e.preventDefault();
     draggingRef.current = true;
-    setDisplayPct(pctFromEvent(e));
-    moveRef.current = (ev) => { if (draggingRef.current) setDisplayPct(pctFromEvent(ev)); };
+    setDisplayPct(pctFromEvent(e), wasFragmentRef.current, lastZoneRef.current);
+    moveRef.current = (ev) => { if (draggingRef.current) setDisplayPct(pctFromEvent(ev), wasFragmentRef.current, lastZoneRef.current); };
     upRef.current = (ev) => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
@@ -156,17 +172,29 @@ export function Playhead({ cuePct, onSeek }) {
   // is already continuous. Skipped entirely while actively dragging so a
   // scrub tracks the pointer with zero lag/fighting.
   usePlaybackFrame((pos) => {
-    if (draggingRef.current) return;
-    let pct;
-    if (pos.phase === 'main') pct = pos.durationSec ? clamp((pos.elapsedSec / pos.durationSec) * 100, 0, 100) : 0;
-    // A fragment (transition/outro/intro clip) belongs to no single song —
-    // Now Playing's own master has already finished at this point, about
-    // to hand off, so the bar reads as complete rather than showing a
-    // stale or fabricated in-between value.
+    let pct, zone = null;
+    if (pos.phase === 'main') {
+      pct = pos.durationSec ? clamp((pos.elapsedSec / pos.durationSec) * 100, 0, 100) : 0;
+      // The zone spans from the first fragment's own boundary (where the
+      // song's own master hands off) to the end of this now-combined
+      // total — one zone covering the whole produced tail, not one per
+      // chained fragment (an outro followed by an intro, say): the point
+      // is "this whole span from here on is produced/fragment audio, not
+      // the plain song", which one span already says correctly.
+      if (pos.fragmentBoundariesSec && pos.fragmentBoundariesSec.length && pos.durationSec) {
+        const left = clamp((pos.fragmentBoundariesSec[0] / pos.durationSec) * 100, 0, 100);
+        zone = { left, width: 100 - left };
+      }
+    }
+    // A fragment played via the reactive (no real main deck) path belongs
+    // to no single song's timeline at all — the bar reads as complete
+    // rather than showing a stale or fabricated in-between value.
     else if (pos.phase === 'fragment') pct = 100;
     else pct = 0;
-    const inFragment = pos.phase === 'fragment';
-    setDisplayPct(pct, inFragment);
+    const inFragment = pos.phase === 'fragment' || (pos.phase === 'main' && zone != null && pos.elapsedSec >= pos.fragmentBoundariesSec[0]);
+    lastZoneRef.current = zone;
+    if (draggingRef.current) return;
+    setDisplayPct(pct, inFragment, zone);
     if (inFragment !== wasFragmentRef.current) {
       wasFragmentRef.current = inFragment;
       // Flash the fill itself — the thing actually switching color — not
@@ -192,9 +220,7 @@ export function Playhead({ cuePct, onSeek }) {
 
   return (
     <div className="playhead-track" ref={trackRef} onPointerDown={onPointerDown}>
-      {cuePct != null && (
-        <div className="playhead-cue-zone" ref={zoneRef} style={{ left: cuePct + '%', width: (100 - cuePct) + '%' }} />
-      )}
+      <div className="playhead-cue-zone" ref={zoneRef} hidden />
       <div className="playhead-fill" ref={fillRef} />
       <div className="playhead-scrubber" ref={scrubberRef} />
     </div>

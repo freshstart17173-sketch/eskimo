@@ -561,6 +561,13 @@ def getPlaybackPosition():
     return { phase: 'silence' }   # e.g. still awaiting a buffer load — shown as such, not guessed at
 ```
 
+**Superseded by §10**, once real fragments actually reached a live
+display: switching to a separate `'fragment'` phase with its own
+from-zero clock is exactly what a caller must NOT do across that
+boundary if it wants one continuous, non-jumping number — the shape above
+is kept here only as the original reasoning trail, not the current
+contract. Read §10 for what `getPlaybackPosition` actually returns now.
+
 No `Date.now()`/`dtSec` accumulation anywhere in this path. For a song
 with **no uploaded audio** (nothing to schedule against), the fallback
 still shouldn't accumulate off wall-clock `Date.now()` deltas — record the
@@ -667,7 +674,12 @@ screen's own progress bars are moot (screen dropped, see the inventory
 note above). `node-position`'s elapsed/duration text was deliberately
 left on the once-a-second context value — a text counter ticking at 1Hz
 reads as a normal player, unlike a bar or ring visibly stepping, so
-there was nothing to fix there. Verified via Playwright against the real
+there was nothing to fix there **— this held for ordinary once-a-second
+stepping, but not for the case §10 found: that same value doesn't just
+step coarsely once a fragment starts, it freezes outright, for the
+fragment's entire real duration. See §10 for the fix (which also
+generalized the position model itself well beyond just this text).**
+Verified via Playwright against the real
 engine: a 20-frame sample of a scrub bar's fill width, and separately of
 a countdown ring's stroke-dasharray, both show smooth per-frame movement
 with no 1Hz stepping.
@@ -950,3 +962,158 @@ not synthetic audio — the gap §8 explicitly left open), the manual
 type/song picker, the IN/OUT terminology fix, and the graph pulse bug.
 Node graph performance remains an open item pending a concrete repro from
 the DJ's own environment.
+
+## 10. Round 6 — live position display froze during a real fragment, then redesigned around a continuous span (implemented)
+
+Reported directly, twice, against real produced audio (a real song into a
+real outro): the bottom player bar and the graph node's own progress text
+both showed the main song's own duration twice over (e.g. "3:12 / 3:12")
+for the *entire* time the outro was actually sounding — reads as "still
+playing the original," "the playhead stays frozen." §7 had already wired
+`getPlaybackPosition`/`usePlaybackFrame` into `Playhead` and
+`CountdownRing`; `node-position`'s own text was the one place §7
+explicitly left on the once-a-second value (see its own note, now
+corrected above) — and, it turned out, so was the bottom player bar's
+`player-bar-time` text, which never went through this doc's Layer B at
+all despite reading the same way. Both instead derived from
+`nowSong.durationSec - session.timeLeft`.
+
+**Root cause, confirmed by reading the tick loop (`App.jsx`), not
+assumed:** once a Plan's fragment is scheduled, `engine._current` stays
+`kind: 'main'` — correctly, by design (see §7's premature-`consumePlan`
+fix) — until the fragment itself finishes. But the tick's own
+`hasRealMainDeck` branch treats `_current.kind === 'main'` as "the main
+deck is genuinely still sounding" and keeps computing
+`elapsedNow = engine.getMainElapsed(...)` against it — which, once
+`ctx.currentTime` moves past the deck's own real duration while the
+fragment plays, exceeds `duration`, so `timeLeft = Math.max(0, duration -
+elapsedNow)` clamps to exactly `0` and stays there for the fragment's
+entire real length. `elapsed = duration - timeLeft` in the two display
+sites above then reads as the song's own full duration, frozen, matching
+the report exactly.
+
+**First fix (superseded below, kept as a stepping stone):** read
+`getPlaybackPosition()` directly (Layer B, already correct) instead of
+`session.timeLeft` for both display sites. This closed the freeze — the
+display now correctly showed the fragment's own separate elapsed/duration
+once it started (e.g. "0:01 / 0:06" for a 6s outro) — but introduced a
+new, real complaint: the total visibly *reset* the instant the fragment
+took over (8s song → suddenly "0:06"), which reads as its own kind of
+"something weird just happened," and doesn't match how a DJ actually
+thinks about a wired ending — **by the time playback reaches a node, its
+own destination and duration are already decided**, so the displayed
+total should already reflect that, not jump to a shorter number once the
+fragment audibly starts.
+
+**Real fix — `getPlaybackPosition` redesigned around one continuous span:**
+rather than two phases where entering `'fragment'` restarts the clock,
+`'main'` now keeps reporting the *same* `songId` straight through any
+fragment(s) scheduled off it, with `durationSec` extended to cover them
+and a new `fragmentBoundariesSec` array (one entry per chained fragment —
+an outro immediately followed by an intro is two) marking where each
+begins on that same combined timeline:
+
+```
+def getPlaybackPosition():
+    if current.kind == 'main':
+        elapsedSec = current.offsetSec + max(0, now - current.startCtxTime)
+        if a Plan with fragmentSteps is scheduled off this deck:
+            durationSec = current.offsetSec + (plan.planEndCtxTime - current.startCtxTime)
+            fragmentBoundariesSec = [current.offsetSec + (step.startCtxTime - current.startCtxTime) for step in plan.fragmentSteps]
+            return { phase: 'main', songId, elapsedSec, durationSec, fragmentBoundariesSec }
+        return { phase: 'main', songId, elapsedSec, durationSec: current.buffer.duration, fragmentBoundariesSec: [] }
+    if current.kind == 'silent': ...  # same shape, no Plan possible against a silent deck
+    if current.kind == 'clip':        # the reactive handleHandoff path only — see below
+        return { phase: 'fragment', elapsedSec: now - current.startCtxTime, durationSec: current.durationSec }
+    return { phase: 'silence' }
+```
+
+This works with **no extra bookkeeping for `elapsedSec` at all**: a
+fragment's own node is scheduled to start at the exact `ctx` time the
+main deck's own node stops (`triggerCtxTime`, already computed in
+`scheduleHop`), so `now - current.startCtxTime` already counts up
+seamlessly straight through that boundary — only `durationSec` needed to
+grow to match. Because `scheduleHop` runs from very early in a song's own
+playback (the tick calls it the first time `hasRealMainDeck` is true, not
+gated by any lookahead window), the extended total is typically already
+correct well before the fragment starts, not just once it does — verified
+directly (real audio: an 8s song, a real outro file with `clipStartSec`
+trimming it to 6s real content): the bar read **"0:14" starting a few
+seconds into the song**, stayed "0:14" through the crossing with no jump,
+and elapsed counted "0:08 → 0:10" continuously rather than resetting.
+
+`'fragment'` survives as its own phase *only* for `handleHandoff`'s
+reactive path (`_current.kind === 'clip'`) — used when Now Playing has no
+real main-deck audio of its own to schedule a Plan against, so there's no
+surrounding song's own timeline for a fragment to extend. This path had
+no case in `getPlaybackPosition` at all before this round (reported
+'silence' for a real fragment genuinely playing) — closed alongside the
+main fix by having `_playClipToEnd` record the clip's own real playable
+`durationSec` (offset/`clipEndSec` already applied) on `_current`.
+
+**Consumers updated:**
+- `Playhead` (`SequencePane.jsx`): the fill's `elapsedSec/durationSec`
+  formula didn't need to change at all — it was already computing a
+  percentage of *some* duration, and that duration now correctly spans
+  the fragment. What did change: the colored "cue zone" — previously a
+  static `cuePct` prop, computed once in `PerformPage.jsx` from
+  `committedEdge.outSeconds`, and Transition-only (an Outro was said to
+  have "no early cue point," which was true but conflated with "no
+  boundary worth marking") — now reads `fragmentBoundariesSec` itself,
+  every frame, and draws a zone from the first boundary to the end
+  regardless of hop type. The "lights up on crossing" flash now triggers
+  off `elapsedSec` crossing that boundary instead of a phase change.
+  Dragging the scrubber no longer blanks the zone for the drag's duration
+  (a `lastZoneRef` remembers it across drag-only `setDisplayPct` calls
+  that don't recompute one).
+- `PlayerBarElapsed`/`PlayerBarTotal` (new, `PerformPage.jsx`,
+  replacing inline `<span>{fmtTime(elapsed)}</span>` markup) and
+  `NodePosition` (new, `GraphNodes.jsx`, replacing `node-position`'s old
+  context-value text): both already matched `pos.phase === 'main' &&
+  pos.songId === songId` (or the rare reactive `'fragment'` case) — no
+  change needed once `getPlaybackPosition` itself carried the combined
+  duration, since both were already reading it directly by this point.
+- `seekPlayhead` (`PerformPage.jsx`): the bar's 100% is no longer just
+  `nowSong.durationSec`, so `fraction * nowSong.durationSec` alone would
+  land a drag past the boundary somewhere in the *already-played* tail of
+  the main song — silently wrong, not a crash. Now reads the combined
+  duration/boundary off a ref mirrored every frame
+  (`latestPosRef`, fed by its own `usePlaybackFrame` subscription) and
+  clamps the resulting offset to the boundary — there's no real seek
+  target inside a scheduled fragment (a one-shot node, not a seekable
+  deck), so landing past it just parks at the edge of the handoff.
+- `CountdownRing`: unaffected — its own `cueOffsetSec` prop (a
+  Transition's `outSeconds`) is independent of `durationSec`; once
+  `elapsedSec` passes it during a fragment the remaining-time computation
+  goes negative, but `clamp01` already floors that to the same "fully
+  drained" ring state it showed right before the boundary, not a new
+  broken state.
+
+`NowPlayingContext` (`GraphNodes.jsx`) no longer carries `elapsed`/
+`duration` fields at all — `NodePosition` reads the engine's clock
+directly, the same `usePlaybackFrame` pattern `CountdownRing` already
+used, rather than receiving a value threaded through
+`GraphPane`/`PerformPage` props. Closes the stale-value class of bug at
+its root for that display rather than patching the value it was fed.
+
+Verified end to end against real audio both times (the freeze fix, then
+the continuous-span redesign): a real ~8s main song into a real produced
+outro file with a genuine `clipStartSec` trim, confirming — via the
+*displayed* numbers, not just reading the scheduling code — that the
+audio itself was always being correctly trimmed underneath (the freeze
+bug was a display-only bug; `clipStartSec` handling in `scheduleHop`/
+`handleHandoff` predates this round and was not touched by it), and,
+separately, that a drag into the marked fragment zone clamps rather than
+seeking somewhere unrelated.
+
+### Confirmed fine, not touched
+
+- **`clipStartSec`/`clipEndSec` scheduling itself** (`scheduleHop`,
+  `handleHandoff`, both already reading `edge.clipStartSec`/`clipEndSec`
+  per §8) — this round only changed how the *result* of that scheduling
+  is displayed, never the scheduling itself. If a specific already-saved
+  edge's own audio still doesn't sound trimmed once the display is
+  accurate, that specific edge is the thing to check (does it actually
+  have a `clipStartSec` stored? — depends on whether detection found a
+  confident divergence point against that particular pair of files,
+  same as any other detection result), not this scheduling code.

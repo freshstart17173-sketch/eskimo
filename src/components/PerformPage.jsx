@@ -34,6 +34,16 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   const [matchIndex, setMatchIndex] = useState(0);
   const [hoveredId, setHoveredId] = useState(null);
   const searchInputRef = useRef(null);
+  // The engine's own real position, mirrored into a ref every frame purely
+  // so seekPlayhead (a plain event handler, not itself a per-frame
+  // consumer) can read the CURRENT combined main+fragment duration/
+  // boundary synchronously when a drag actually lands — needed now that
+  // the scrub bar's own 100% represents that combined span (see
+  // getPlaybackPosition's own comment, audioEngine.js) rather than just
+  // nowSong.durationSec, so a fraction along the bar no longer converts to
+  // seconds via nowSong.durationSec alone.
+  const latestPosRef = useRef({ phase: 'silence' });
+  usePlaybackFrame((pos) => { latestPosRef.current = pos; });
   // Selected vs Active: Active (session.nowPlayingId) is whatever's really
   // playing; Selected is purely "what was last clicked in the graph" — a
   // click never starts playback on its own anymore, it only decides what
@@ -203,7 +213,17 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     if (!startSongId || !songs[startSongId]) return;
     jumpToSong(startSongId, activePlaylist.startMode === 'intro' ? 'intro' : 'cut');
   }
-  // Dragging or clicking the playhead — `fraction` is 0-1 along the bar.
+  // Dragging or clicking the playhead — `fraction` is 0-1 along the bar,
+  // whose 100% is the combined main+fragment span once one's scheduled
+  // (see getPlaybackPosition's own comment, audioEngine.js), not just
+  // nowSong.durationSec — so `fraction * nowSong.durationSec` alone would
+  // land somewhere in the ALREADY-PLAYED tail of the main song for any
+  // fraction past the fragment boundary, silently rewinding the song
+  // instead of doing anything with "the outro/transition region" the bar
+  // visually shows there. There's no real seek target inside a scheduled
+  // fragment at all (it's a one-shot node, not a seekable deck), so a
+  // fraction landing past the boundary just clamps to right at it — reads
+  // as "jump to the edge of the handoff", not a silent wrong-place rewind.
   // Restarts the real audio deck at the new offset when Now Playing has
   // one (engine.seekMain) and updates the wall-clock `timeLeft` to match.
   // When a produced clip (transition/outro/intro) is what's actually
@@ -218,7 +238,13 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // thing scrubbing ever moves.
   function seekPlayhead(fraction) {
     if (!nowSong) return;
-    const offsetSec = clamp(fraction, 0, 1) * nowSong.durationSec;
+    const pos = latestPosRef.current;
+    const live = pos.phase === 'main' && pos.songId === session.nowPlayingId;
+    const combinedDurationSec = live ? pos.durationSec : nowSong.durationSec;
+    const boundarySec = (live && pos.fragmentBoundariesSec && pos.fragmentBoundariesSec.length)
+      ? pos.fragmentBoundariesSec[0] : nowSong.durationSec;
+    const desiredSec = clamp(fraction, 0, 1) * combinedDurationSec;
+    const offsetSec = Math.min(desiredSec, boundarySec);
     const seeked = engine.seekMain(session.nowPlayingId, offsetSec);
     if (!seeked && nowSong.audioUrl) return;
     setSession(prev => ({ ...prev, timeLeft: Math.max(0, nowSong.durationSec - offsetSec) }));
@@ -816,28 +842,16 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   const outroEdgeForHop = (queueHead && queueHead.mode === 'cut' && queueHead.ending === 'outro')
     ? findOutroEdgeFor(edges, session.nowPlayingId, queueHead.edgeId) : null;
   const fragmentEdge = committedEdge || outroEdgeForHop;
-  // The cue fraction along the CURRENT song's own timeline where its
-  // active fragment actually takes over — this drives the scrub bar's own
-  // colored trailing zone (see Playhead, SequencePane.jsx). Only a
-  // Transition has a real *early* cue point here (its main deck is
-  // deliberately cut short at outSeconds so the clip can carry the
-  // crossfade) — an Outro has no such point on the main deck at all: it
-  // always plays to its own full natural duration, so there's no earlier
-  // position to mark a zone from. `null` here means "no zone" (see
-  // Playhead's `cuePct != null` guard) rather than drawing one starting
-  // from the wrong (too-early) position; the light-up-on-crossing effect
-  // still fires for an Outro the instant the song naturally ends and its
-  // fragment begins (Playhead's `.in-crossfade` toggle doesn't depend on
-  // a zone existing).
-  const cuePct = (nowSong && committedEdge && committedEdge.outSeconds != null && nowSong.durationSec)
-    ? clamp((committedEdge.outSeconds / nowSong.durationSec) * 100, 0, 100) : null;
   // Only actually "mixing" (and so pulsing the graph's own edge — see
   // GraphPane's mixingEdgeId) within the real ~8s handoff window, same
   // window the scrub bar's own light-up crosses into naturally once
-  // playback gets there. An Outro's trigger is always the song's own
-  // natural end (see cuePct's comment above) — never its edge's own
-  // outSeconds, which is a different, informational-only timecode (see
-  // occludedTransitions) not a real playback cue for an Outro.
+  // playback gets there (Playhead now computes its own zone/crossing
+  // straight from getPlaybackPosition()'s fragmentBoundariesSec — see its
+  // own comment, SequencePane.jsx — instead of from a cuePct prop
+  // computed here). An Outro's trigger is always the song's own natural
+  // end — never its edge's own outSeconds, which is a different,
+  // informational-only timecode (see occludedTransitions) not a real
+  // playback cue for an Outro.
   let mixingEdgeId = null;
   if (nowSong && fragmentEdge) {
     const triggerAt = committedEdge && committedEdge.outSeconds != null ? committedEdge.outSeconds : nowSong.durationSec;
@@ -1018,7 +1032,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           </button>
 
           <PlayerBarElapsed songId={session.nowPlayingId} />
-          <div className="player-bar-scrub"><Playhead cuePct={cuePct} onSeek={seekPlayhead} /></div>
+          <div className="player-bar-scrub"><Playhead onSeek={seekPlayhead} /></div>
           <PlayerBarTotal songId={session.nowPlayingId} songDurationSec={nowSong.durationSec} />
 
           <div className="player-bar-next">

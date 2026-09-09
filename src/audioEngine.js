@@ -402,37 +402,64 @@ export class AudioEngine {
   // only changes once a second and — before this — was the actual cause
   // of the reported jumpiness.
   //
+  // `durationSec` for 'main' spans past the song's own master the instant
+  // a real fragment is scheduled off it (an outro/transition/intro clip
+  // chain — see fragmentBoundariesSec) — direct instruction: the displayed
+  // total should read as ONE span covering the whole handoff, known as
+  // soon as it's committed (scheduleHop runs from early in the song's own
+  // playback, not just near the end), not something that resets to a
+  // separate, shorter number the instant the fragment actually starts
+  // sounding. That's also why this stays phase 'main' with the SAME
+  // songId all the way through a fragment actually playing, never
+  // switching to a distinct 'fragment' phase for this path — `elapsedSec`
+  // (offsetSec + real ctx-time elapsed since the deck's own startCtxTime)
+  // already counts up continuously straight through the boundary with no
+  // extra bookkeeping, since the fragment's own node is scheduled to start
+  // at the exact ctx-time the main deck's own node stops; only
+  // `durationSec` needs to grow to match, and `fragmentBoundariesSec`
+  // (also on this same coordinate — one entry per chained fragment, e.g.
+  // an outro followed by an intro) is what a consumer draws a small
+  // marker from and detects "actually crossed into it" against, in place
+  // of the old, coarser "which phase am I in" check.
+  //
+  // 'fragment' only remains a *separate* phase for the reactive
+  // handleHandoff path (Now Playing has no real main-deck audio of its own
+  // to schedule a Plan against, so a produced clip is the only real audio
+  // playing at all) — there's no surrounding song's own timeline for it to
+  // extend, so it's reported as its own short, isolated span instead.
+  //
   // Returns one of:
-  //   { phase: 'silence' }                                    — nothing real to report yet
-  //   { phase: 'fragment', elapsedSec, durationSec }           — mid transition/outro/intro clip
-  //   { phase: 'main', songId, elapsedSec, durationSec }       — a real master is sounding
+  //   { phase: 'silence' }
+  //     — nothing real to report yet
+  //   { phase: 'fragment', elapsedSec, durationSec }
+  //     — the reactive (no real main deck) path, mid clip
+  //   { phase: 'main', songId, elapsedSec, durationSec, fragmentBoundariesSec }
+  //     — a real master is sounding, possibly already spanning into a
+  //       scheduled fragment or two ahead of it (fragmentBoundariesSec: [])
   getPlaybackPosition() {
     if (!this.ctx) return { phase: 'silence' };
     const now = this.ctx.currentTime;
-    const plan = this._plan;
-    if (plan && now >= plan.triggerCtxTime && (plan.destStartCtxTime == null || now < plan.destStartCtxTime)) {
-      for (let i = plan.fragmentSteps.length - 1; i >= 0; i--) {
-        const step = plan.fragmentSteps[i];
-        if (now >= step.startCtxTime) {
-          return { phase: 'fragment', elapsedSec: now - step.startCtxTime, durationSec: step.durationSec };
-        }
-      }
-    }
     if (this._current && this._current.kind === 'main') {
-      return {
-        phase: 'main', songId: this._current.songId,
-        elapsedSec: this._current.offsetSec + Math.max(0, now - this._current.startCtxTime),
-        durationSec: this._current.buffer.duration,
-      };
+      const c = this._current;
+      const elapsedSec = c.offsetSec + Math.max(0, now - c.startCtxTime);
+      const plan = this._plan;
+      if (plan && plan.fragmentSteps.length) {
+        const durationSec = c.offsetSec + (plan.planEndCtxTime - c.startCtxTime);
+        const fragmentBoundariesSec = plan.fragmentSteps.map((step) => c.offsetSec + (step.startCtxTime - c.startCtxTime));
+        return { phase: 'main', songId: c.songId, elapsedSec, durationSec, fragmentBoundariesSec };
+      }
+      return { phase: 'main', songId: c.songId, elapsedSec, durationSec: c.buffer.duration, fragmentBoundariesSec: [] };
     }
     if (this._current && this._current.kind === 'silent') {
       // Same shape as 'main' — a consumer shouldn't need to know there's
       // no real audio behind it — just sourced from the ctx clock instead
-      // of a buffer's own duration.
+      // of a buffer's own duration. No Plan is ever scheduled against a
+      // silent deck (scheduleHop requires kind 'main'), so there's never a
+      // fragment to extend into here.
       return {
         phase: 'main', songId: this._current.songId,
         elapsedSec: this._current.offsetSec + Math.max(0, now - this._current.startCtxTime),
-        durationSec: this._current.durationSec,
+        durationSec: this._current.durationSec, fragmentBoundariesSec: [],
       };
     }
     // A fragment played via the reactive handoff path (handleHandoff,
