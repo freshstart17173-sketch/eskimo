@@ -155,12 +155,38 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     });
     setAddSongAt(null);
   }
+  // Once playback reaches a node, its audio is already decided: the hop is
+  // frozen (session.committedHop) and the whole chain — main deck, outro
+  // clip, destination — is scheduled sample-accurately well before the
+  // splice arrives. Rewiring under it would either do nothing (the plan is
+  // already armed) or desync what you see from what you hear, so the
+  // playing node and everything directly wired to it are frozen for the
+  // duration of the set. Direct instruction: "once playback reaches them
+  // their audio has already been decided so there's no live splicing or
+  // anything." Frozen from the moment a song is on the deck, not only
+  // while the transport is running — a pause doesn't un-schedule anything.
+  const lockedIds = useMemo(() => {
+    const locked = new Set();
+    const id = session.nowPlayingId;
+    if (!id || session.setEnded) return locked;
+    locked.add(id);
+    const nodes = session.activePlaylist.nodes || {};
+    for (const o of nodeOutputs(nodes[id])) if (o.targetId) locked.add(o.targetId);
+    for (const otherId of Object.keys(nodes)) {
+      if (nodeOutputs(nodes[otherId]).some(o => o.targetId === id)) locked.add(otherId);
+    }
+    if (session.activePlaylist.startSongId === id) locked.add(START);
+    return locked;
+  }, [session.nowPlayingId, session.setEnded, session.activePlaylist]);
+  const isLocked = useCallback((...ids) => ids.some(id => id && lockedIds.has(id)), [lockedIds]);
+
   // Node context menu's "Remove from graph" — takes the node off the
   // canvas without touching the song itself (still in the Library), same
   // relationship a spreadsheet has to filtering a view vs. deleting a row.
   // Disconnects every wire touching it first so nothing is left silently
   // wired to a song with no node to show it.
   const removeFromCanvas = useCallback((songId) => {
+    if (isLocked(songId)) return;
     setSession(prev => ({
       ...prev,
       canvasIds: (prev.canvasIds || Object.keys(songs)).filter(id => id !== songId),
@@ -168,7 +194,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     }));
     setSelectedId(prev => (prev === songId ? null : prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs]);
+  }, [songs, isLocked]);
 
   const nowSong = hasStarted ? songs[session.nowPlayingId] : null;
   const elapsed = nowSong ? nowSong.durationSec - session.timeLeft : 0;
@@ -514,6 +540,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     return map;
   }, [placedSongs, visibleEdges, activePlaylist, songs]);
 
+
   // A socket click toggles None/Intro/Outro directly (clicking a type
   // that's already active turns just that one back off, leaving any other
   // active type on this same node — of either side — untouched); a
@@ -525,6 +552,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // either, without disturbing whichever other output type(s) are
   // already active.
   const toggleSocket = useCallback((songId, side, type) => {
+    if (isLocked(songId)) return;
     setSession(prev => {
       const node = prev.activePlaylist.nodes[songId];
       if (side === 'left') {
@@ -549,26 +577,29 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       };
       return { ...prev, activePlaylist: { ...prev.activePlaylist, nodes } };
     });
-  }, [setSession, findEdge]);
+  }, [setSession, findEdge, isLocked]);
 
   const commitWire = useCallback((source, target, endMode, endEdgeId, startMode, startEdgeId) => {
+    if (isLocked(source, target)) return;
     setSession(prev => ({ ...prev, activePlaylist: wireConnection(prev.activePlaylist, source, target, endMode, endEdgeId, startMode, startEdgeId) }));
-  }, [setSession]);
+  }, [setSession, isLocked]);
 
   // A song can carry more than one simultaneous Transition now — adding
   // one leaves whatever else it already carries alone (see
   // addTransitionConnection, core.js); removing one specific edge (a
   // hover-✕ on its own line) leaves any others untouched too.
   const commitAddTransition = useCallback((source, target, edgeId) => {
+    if (isLocked(source, target)) return;
     setSession(prev => ({ ...prev, activePlaylist: addTransitionConnection(prev.activePlaylist, source, target, edgeId) }));
-  }, [setSession]);
+  }, [setSession, isLocked]);
   // The general "remove exactly one active output entry" handler — a
   // hover-✕ on any rendered wire (a Transition, or a plain None/Outro
   // link) calls this with its own {type, edgeId}, leaving any other
   // active output on that same song, of any type, untouched.
   const onDisconnectOutput = useCallback((songId, type, edgeId) => {
+    if (isLocked(songId)) return;
     setSession(prev => ({ ...prev, activePlaylist: removeOutput(prev.activePlaylist, songId, type, edgeId) }));
-  }, [setSession]);
+  }, [setSession, isLocked]);
 
   // Node context menu's "Autoconnect transitions" — wires every real
   // produced Transition already leading out of this song at once. The
@@ -576,51 +607,60 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // every placed song. Neither one touches None/Intro/Outro — see
   // autoconnectNodeTransitions's own comment (core.js) for why that's
   // deliberate, not an oversight.
+  // Every bulk wiring action skips locked ids the same way the individual
+  // handlers refuse them — a graph-wide Autoconnect must not be a side door
+  // into rewiring the node that's currently sounding.
   const onAutoconnectNode = useCallback((songId) => {
+    if (isLocked(songId)) return;
     setSession(prev => ({ ...prev, activePlaylist: autoconnectNodeTransitions(visibleEdges, prev.activePlaylist, songId) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleEdges]);
+  }, [visibleEdges, isLocked]);
   const onAutoconnectAll = useCallback(() => {
-    const ids = Object.keys(placedSongs);
+    const ids = Object.keys(placedSongs).filter(id => !isLocked(id));
     setSession(prev => ({ ...prev, activePlaylist: autoconnectFullGraph(visibleEdges, prev.activePlaylist, ids) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleEdges, placedSongs]);
+  }, [visibleEdges, placedSongs, isLocked]);
   // The multi-selection context menu's own versions of the per-node
   // actions above — folds the same core.js function over every selected
   // id in one setSession, not one call per node, so this is one undo-
   // worthy state change instead of `songIds.length` of them.
   const onAutoconnectSelection = useCallback((songIds) => {
+    const ids = songIds.filter(id => !isLocked(id));
     setSession(prev => ({
       ...prev,
-      activePlaylist: songIds.reduce((pl, id) => autoconnectNodeTransitions(visibleEdges, pl, id), prev.activePlaylist),
+      activePlaylist: ids.reduce((pl, id) => autoconnectNodeTransitions(visibleEdges, pl, id), prev.activePlaylist),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleEdges]);
+  }, [visibleEdges, isLocked]);
   const onDisconnectAllSelection = useCallback((songIds) => {
+    const ids = songIds.filter(id => !isLocked(id));
     setSession(prev => ({
       ...prev,
-      activePlaylist: songIds.reduce((pl, id) => disconnectAllWires(pl, id), prev.activePlaylist),
+      activePlaylist: ids.reduce((pl, id) => disconnectAllWires(pl, id), prev.activePlaylist),
     }));
-  }, []);
+  }, [isLocked]);
   const onRemoveFromGraphSelection = useCallback((songIds) => {
+    const ids = songIds.filter(id => !isLocked(id));
     setSession(prev => ({
       ...prev,
-      canvasIds: (prev.canvasIds || Object.keys(songs)).filter(id => !songIds.includes(id)),
-      activePlaylist: songIds.reduce((pl, id) => disconnectAllWires(pl, id), prev.activePlaylist),
+      canvasIds: (prev.canvasIds || Object.keys(songs)).filter(id => !ids.includes(id)),
+      activePlaylist: ids.reduce((pl, id) => disconnectAllWires(pl, id), prev.activePlaylist),
     }));
-    setSelectedId(prev => (songIds.includes(prev) ? null : prev));
+    setSelectedId(prev => (ids.includes(prev) ? null : prev));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs]);
+  }, [songs, isLocked]);
 
   // Start Set's own wire — see wireStart (core.js) for why this needs a
   // dedicated pointer instead of reusing endMode/nextSongId the way every
   // other connection does (Start isn't a song; nothing plays "from" it).
   const commitStartWire = useCallback((songId, startMode, startEdgeId) => {
+    if (isLocked(songId, START)) return;
     setSession(prev => ({ ...prev, activePlaylist: wireStart(prev.activePlaylist, songId, startMode, startEdgeId) }));
-  }, [setSession]);
+  }, [setSession, isLocked]);
   const disconnectStart = useCallback(() => {
+    if (isLocked(START)) return;
     setSession(prev => ({ ...prev, activePlaylist: unwireStart(prev.activePlaylist) }));
-  }, [setSession]);
+  }, [setSession, isLocked]);
 
   // Node context menu's "Set as Start" — the same auto-pick rule click-to-
   // play already uses (Intro when one's produced, a cold cut otherwise),
@@ -637,8 +677,9 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // it, and Start Set if that's what's wired here), rather than hunting
   // down each hover-✕ individually.
   const disconnectAll = useCallback((songId) => {
+    if (isLocked(songId)) return;
     setSession(prev => ({ ...prev, activePlaylist: disconnectAllWires(prev.activePlaylist, songId) }));
-  }, [setSession]);
+  }, [setSession, isLocked]);
 
   // Only a Transition output may ever meet a Transition input — everything
   // else (None/Outro on the left of the drag, None/Intro on the right)
@@ -681,6 +722,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // Transition branch already does via `transitionEdgesBetween`.
   const isValidConnection = useCallback((conn) => {
     if (conn.source === conn.target) return false;
+    if (isLocked(conn.source, conn.target)) return false;
     if (conn.source === START) {
       if (conn.targetHandle === 'left-none') return true;
       if (conn.targetHandle === 'left-intro') return !!introEdgeFor(visibleEdges, conn.target);
@@ -698,7 +740,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     if (targetType === 'intro' && !introEdgeFor(visibleEdges, conn.target)) return false;
     return true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleEdges]);
+  }, [visibleEdges, isLocked]);
 
   // A dropped connection always wires immediately, picking the first
   // produced candidate when several exist between that pair (or several
@@ -747,6 +789,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // node entry, or the switch would silently do nothing to what Start
   // actually plays (see wireStart's comment in core.js).
   const selectVariant = useCallback((songId, side, type, oldEdgeId, edgeId) => {
+    if (isLocked(songId)) return;
     setSession(prev => {
       if (side === 'left' && prev.activePlaylist.startSongId === songId
         && (!prev.activePlaylist.nodes[songId] || prev.activePlaylist.nodes[songId].startMode === 'none')) {
@@ -759,7 +802,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           : setEndVariant(prev.activePlaylist, songId, type, oldEdgeId, edgeId),
       };
     });
-  }, [setSession]);
+  }, [setSession, isLocked]);
 
   // The End node's own context-menu "Disconnect" — removes just whichever
   // output entry is the one pointing at End, leaving any other active
@@ -769,13 +812,14 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // same way clicking to end a set used to risk before that got a confirm
   // modal of its own.
   const disconnectEnd = useCallback((songId) => {
+    if (isLocked(songId)) return;
     setSession(prev => {
       const node = prev.activePlaylist.nodes[songId];
       const entry = node && nodeOutputs(node).find(o => o.targetId === END);
       if (!entry) return prev;
       return { ...prev, activePlaylist: removeOutput(prev.activePlaylist, songId, entry.type, entry.edgeId) };
     });
-  }, [setSession]);
+  }, [setSession, isLocked]);
 
   // ---------------- search (Fuse.js) ----------------
   // Scoped to what's actually on the canvas — this page's search is for
@@ -1029,6 +1073,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <GraphPane
             songs={placedSongs} positions={positions} transitionEdgesRaw={transitionEdgesRaw} activePlaylist={activePlaylist}
             socketDataById={socketDataById} onToggleSocket={toggleSocket} onSelectVariant={selectVariant} mixingEdgeId={mixingEdgeId}
+            lockedIds={lockedIds}
             onConnect={handleConnect} isValidConnection={isValidConnection}
             onDisconnectOutput={onDisconnectOutput} onDisconnectStart={disconnectStart}
             stateFor={stateFor} ioById={ioById} hoveredId={hoveredId} setHoveredId={setHoveredId}
@@ -1109,7 +1154,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 
       {contextMenu && (
         <ContextMenu
-          menu={contextMenu} songs={songs} activePlaylist={activePlaylist}
+          menu={contextMenu} songs={songs} activePlaylist={activePlaylist} lockedIds={lockedIds}
           onClose={closeContextMenu}
           onAddNodeHere={() => { setAddSongAt({ x: contextMenu.flowX, y: contextMenu.flowY }); closeContextMenu(); }}
           onArrangeForMe={() => { arrangeForMe(); closeContextMenu(); }}
@@ -1141,7 +1186,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
 // and positioning logic. Closes itself the same way GraphPane's socket
 // dropdowns do: a mousedown outside the menu, or Escape.
 function ContextMenu({
-  menu, activePlaylist, onClose,
+  menu, activePlaylist, lockedIds, onClose,
   onAddNodeHere, onArrangeForMe, onAutoconnectAll, onFocus, onSetAsStart, onAutoconnectNode, onDisconnectAll, onEditInLibrary, onRemoveFromGraph,
   onDisconnectStart, onDisconnectEnd, onAutoconnectSelection, onDisconnectAllSelection, onRemoveFromGraphSelection,
 }) {
@@ -1182,27 +1227,32 @@ function ContextMenu({
       </>
     );
   } else if (menu.nodeType === 'song') {
+    // Everything that would rewire a node whose audio is already scheduled
+    // is disabled rather than silently refused by the handler behind it
+    // (see lockedIds above). Focus and Edit in Library stay live — neither
+    // touches the wiring.
+    const nodeLocked = lockedIds.has(menu.nodeId);
     items = (
       <>
         <button className="context-menu-item" onClick={() => onFocus(menu.nodeId)}>Focus here</button>
-        <button className="context-menu-item" onClick={() => onSetAsStart(menu.nodeId)}>Set as Start</button>
-        <button className="context-menu-item" onClick={() => onAutoconnectNode(menu.nodeId)}>Autoconnect transitions</button>
-        <button className="context-menu-item" onClick={() => onDisconnectAll(menu.nodeId)}>Disconnect all wires</button>
+        <button className="context-menu-item" disabled={nodeLocked} onClick={() => onSetAsStart(menu.nodeId)}>Set as Start</button>
+        <button className="context-menu-item" disabled={nodeLocked} onClick={() => onAutoconnectNode(menu.nodeId)}>Autoconnect transitions</button>
+        <button className="context-menu-item" disabled={nodeLocked} onClick={() => onDisconnectAll(menu.nodeId)}>Disconnect all wires</button>
         <button className="context-menu-item" onClick={onEditInLibrary}>Edit in Library</button>
         <div className="context-menu-sep" />
         {/* Deleting a song outright is a Library-only action now — this menu
             only ever offers removing the node from the graph (it stays in
             the Library, can be re-added later), never the destructive
             delete, which doesn't belong on a menu you can reach mid-set. */}
-        <button className="context-menu-item" onClick={() => onRemoveFromGraph(menu.nodeId)}>Remove from graph</button>
+        <button className="context-menu-item" disabled={nodeLocked} onClick={() => onRemoveFromGraph(menu.nodeId)}>Remove from graph</button>
       </>
     );
   } else if (menu.nodeType === 'start') {
     const wired = !!activePlaylist.startSongId;
-    items = <button className="context-menu-item" disabled={!wired} onClick={onDisconnectStart}>{wired ? 'Disconnect' : 'Not wired'}</button>;
+    items = <button className="context-menu-item" disabled={!wired || lockedIds.has(START)} onClick={onDisconnectStart}>{wired ? 'Disconnect' : 'Not wired'}</button>;
   } else {
     const wiredFrom = Object.keys(activePlaylist.nodes).find(id => nodeOutputs(activePlaylist.nodes[id]).some(o => o.targetId === END));
-    items = <button className="context-menu-item" disabled={!wiredFrom} onClick={() => onDisconnectEnd(wiredFrom)}>{wiredFrom ? 'Disconnect' : 'Not wired'}</button>;
+    items = <button className="context-menu-item" disabled={!wiredFrom || lockedIds.has(wiredFrom)} onClick={() => onDisconnectEnd(wiredFrom)}>{wiredFrom ? 'Disconnect' : 'Not wired'}</button>;
   }
   return <div className="context-menu" style={style} ref={ref}>{items}</div>;
 }

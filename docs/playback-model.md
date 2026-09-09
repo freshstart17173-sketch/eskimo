@@ -1291,3 +1291,37 @@ no `.lit` ever applied; zone geometry byte-identical across a 5-step drag;
 clicking at 8.8s of the 11s span landed at 9s (not the 5s boundary) and
 kept advancing with the total unchanged; scrubbing back to 2s restarted
 the song and re-armed the same 0:11 total.
+
+### Round 8 addendum — the editing lock (S1's UI half)
+
+S1 ("by the time playback reaches a node its output is set in stone") was
+satisfied for *audio* by the frozen hop, but the graph still let you rewire
+under a running set. `lockedIds` (PerformPage.jsx) now derives the frozen
+set — the playing song, everything it wires to, everything wiring into it,
+and Start when it feeds the playing song — from the moment a song is on the
+deck until the set ends. Pausing does not release it: a pause
+un-schedules nothing.
+
+Every mutating handler consults it (`toggleSocket`, `selectVariant`,
+`commitWire`, `commitAddTransition`, `commitStartWire`, `disconnectStart`,
+`disconnectEnd`, `onDisconnectOutput`, `disconnectAll`, `removeFromCanvas`,
+and the bulk autoconnect/disconnect/remove actions, which filter locked ids
+rather than refusing wholesale), and `isValidConnection` returns false so a
+drag-connect can't even snap. The UI matches rather than silently refusing:
+locked nodes get `connectable: false`, their socket rows stop offering a
+pointer, the variant picker is suppressed (while still showing which
+variant is selected), and the context menu's rewiring actions are
+`disabled` — Focus here and Edit in Library stay live, since neither
+touches wiring.
+
+Verified: playing node, its downstream and its upstream all locked while an
+unconnected node stays fully editable mid-set; socket clicks on locked
+nodes change nothing; the three rewiring context-menu items disabled and
+Focus here still enabled; playback unaffected throughout; all locks
+released once the set ends.
+
+**Not a finding, but worth recording**: clicking a node socket within about
+a second of a set starting is unreliable — the click lands on the right
+element and simply doesn't toggle. Reproduced identically on a build
+without any of this round's changes, so it is pre-existing and unrelated to
+the lock. Left alone here rather than folded into an unrelated fix.

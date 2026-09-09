@@ -161,7 +161,7 @@ function ActiveEdge({ id, sourceX, sourceY, sourcePosition, targetX, targetY, ta
 const edgeTypes = { fanned: FannedEdge, active: ActiveEdge };
 
 export default function GraphPane({
-  songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId,
+  songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId, lockedIds,
   onConnect, isValidConnection, onDisconnectOutput, onDisconnectStart,
   stateFor, ioById,
   hoveredId, setHoveredId, matchIds, searchActive,
@@ -211,12 +211,18 @@ export default function GraphPane({
       leftEdgeId: null, leftOptions: [], leftFilledLabel: null,
       rightOptionsByType: {}, rightEdgeIdByType: {}, rightCueSecondsByType: {}, rightTargetIdByType: {}, rightFilledLabelByType: {},
     };
+    // Nodes whose audio is already committed are frozen (see lockedIds,
+    // PerformPage.jsx). `connectable: false` is what stops React Flow from
+    // even starting a drag off their handles — the handler-side guards
+    // would refuse the result anyway, but a drag that visually snaps and
+    // then silently does nothing is worse than one that can't start.
+    const locked = !!(lockedIds && lockedIds.has(id));
     return {
-      id, type: 'song', position: pos, draggable: true,
+      id, type: 'song', position: pos, draggable: true, connectable: !locked,
       data: {
         song: s, state, isSelected: id === selectedId, inCount: io.inCount, outCount: io.outCount,
         onEnter: () => setHoveredId(id), onLeave: () => setHoveredId(null), onSelect: () => onSelectSong(id),
-        onToggleSocket, onSelectVariant, ...socketData, playing: state === 'active',
+        onToggleSocket, onSelectVariant, ...socketData, playing: state === 'active', locked,
       },
       style: SONG_STYLE,
     };
@@ -290,7 +296,7 @@ export default function GraphPane({
       return { ...updated, position: n.position, selected: n.selected };
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [songs, stateFor, ioById, socketDataById, endQueued, activePlaylist.startSongId, nowPlayingId, onSelectSong, canStartPlay, onStartPlay, selectedId]);
+  }, [songs, stateFor, ioById, socketDataById, endQueued, activePlaylist.startSongId, nowPlayingId, onSelectSong, canStartPlay, onStartPlay, selectedId, lockedIds]);
 
   // The one place `position` actually gets written from outside RF's own
   // drag handling: a real layout change (auto-arrange, or a song's stored

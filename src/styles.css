@@ -1065,6 +1065,16 @@ a { color: var(--accent); }
   box-shadow: 0 0 0 3px var(--accent); pointer-events: none;
 }
 .node-card.node-dimmed { opacity: .28; }
+/* A node whose audio is already scheduled (the playing song and anything
+   wired to it — see lockedIds, PerformPage.jsx). Deliberately quiet: this
+   is a normal, expected state for most of a set, so it reads as "settled",
+   not as an error. The sockets stop offering a pointer since none of them
+   respond any more; the card itself stays fully legible and still
+   selectable, and the Active card's own treatment is left alone. */
+.node-card.node-locked .node-socket-clickable,
+.node-card.node-locked .node-socket-draggable { cursor: default; }
+.node-card.node-locked .node-socket-row-picker { cursor: default; }
+.node-card.node-locked:not(.state-active) .node-socket-row-active .node-socket-label { color: var(--muted); }
 .node-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .node-title { font-weight: 600; font-size: 13.5px; line-height: 1.3; }
 .node-artist { font-size: 11px; margin-bottom: 6px; color: var(--muted); line-height: 1.3; }

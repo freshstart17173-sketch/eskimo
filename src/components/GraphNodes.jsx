@@ -191,9 +191,11 @@ function NodePosition({ songId }) {
 // clicking the row (not the dot — the dot keeps its own toggle-click)
 // opens a listbox of the other candidates. A Transition row's dot has no
 // click handler at all, so the row's own click can't conflict with it.
-function SocketRow({ side, type, available, active, committed, onToggle, options = [], selectedEdgeId, filledLabel, onSelectVariant }) {
+function SocketRow({ side, type, available, active, committed, onToggle, options = [], selectedEdgeId, filledLabel, onSelectVariant, locked }) {
   const isInput = side === 'left';
-  const hasPicker = !!(active && options.length > 1);
+  // A locked row still shows which variant is selected, it just can't be
+  // changed — the choice is already scheduled (see lockedIds, PerformPage.jsx).
+  const hasPicker = !!(active && options.length > 1 && !locked);
   const [open, setOpen] = useState(false);
   const rowRef = useRef(null);
   useEffect(() => {
@@ -208,6 +210,10 @@ function SocketRow({ side, type, available, active, committed, onToggle, options
     return () => document.removeEventListener('mousedown', onDocMouseDown, true);
   }, [open]);
   const selected = hasPicker ? (options.find(o => o.id === selectedEdgeId) || options[0]) : null;
+  // With the picker suppressed the row would otherwise fall back to the
+  // generic type name and appear to lose the variant the DJ actually chose.
+  const lockedLabel = (locked && active && options.length > 1)
+    ? ((options.find(o => o.id === selectedEdgeId) || options[0]).label) : null;
   const cls = [
     'node-socket-row', !isInput && 'node-socket-row-right',
     active && 'node-socket-row-active', !available && 'node-socket-row-unavailable',
@@ -232,7 +238,7 @@ function SocketRow({ side, type, available, active, committed, onToggle, options
           available && 'node-socket-available', active && 'node-socket-active',
           available ? (type === 'transition' ? 'node-socket-draggable' : 'node-socket-clickable') : null,
         ].filter(Boolean).join(' ')}
-        onClick={(!available || type === 'transition') ? undefined : (e) => { e.stopPropagation(); onToggle(side, type); }}
+        onClick={(!available || type === 'transition' || !onToggle) ? undefined : (e) => { e.stopPropagation(); onToggle(side, type); }}
       />
       {/* Only ever show the bare type name ("None"/"Intro"/"Outro"/
           "Transition") for an empty slot. Once something's actually
@@ -244,7 +250,7 @@ function SocketRow({ side, type, available, active, committed, onToggle, options
           socketDataById/PerformPage.jsx) — a plain type name told you
           nothing once a slot had something real playing through it
           (reported directly). */}
-      <span className="node-socket-label">{hasPicker ? selected.label : (filledLabel || SOCKET_TITLE[type])}</span>
+      <span className="node-socket-label">{hasPicker ? selected.label : (lockedLabel || filledLabel || SOCKET_TITLE[type])}</span>
       {committed && <SelectedOutputDot />}
       {open && (
         <div className="node-socket-listbox" onMouseDown={(e) => e.stopPropagation()}>
@@ -282,7 +288,7 @@ function SocketRow({ side, type, available, active, committed, onToggle, options
 // `committedType` is the one output this song has actually committed to
 // firing (session.committedHop, see commitHopFor in core.js) — null for
 // every node that isn't currently playing.
-function SocketList({ side, types, availability, activeTypes = [], onToggle, committedType = null, optionsByType = {}, selectedEdgeIdByType = {}, filledLabelByType = {}, onSelectVariant }) {
+function SocketList({ side, types, availability, activeTypes = [], onToggle, committedType = null, optionsByType = {}, selectedEdgeIdByType = {}, filledLabelByType = {}, onSelectVariant, locked }) {
   return (
     <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
       {types.map((type) => {
@@ -290,7 +296,7 @@ function SocketList({ side, types, availability, activeTypes = [], onToggle, com
         return (
           <SocketRow
             key={type} side={side} type={type} available={!!availability[type]} active={isActive}
-            committed={isActive && committedType === type} onToggle={onToggle}
+            committed={isActive && committedType === type} onToggle={onToggle} locked={locked}
             options={isActive ? optionsByType[type] : undefined} selectedEdgeId={isActive ? selectedEdgeIdByType[type] : undefined}
             filledLabel={isActive ? filledLabelByType[type] : null}
             onSelectVariant={(edgeId) => onSelectVariant(type, selectedEdgeIdByType[type], edgeId)}
@@ -315,7 +321,7 @@ export function SongNode({ data, selected }) {
   const {
     song, state, isSelected, inCount, outCount, onEnter, onLeave, playing, onSelect,
     leftAvailable, rightAvailable, leftActive, rightActiveTypes, leftEdgeId, leftFilledLabel,
-    leftOptions, rightOptionsByType, rightEdgeIdByType, rightFilledLabelByType, onToggleSocket, onSelectVariant,
+    leftOptions, rightOptionsByType, rightEdgeIdByType, rightFilledLabelByType, onToggleSocket, onSelectVariant, locked,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
   const { hoveredId } = useContext(HoveredNodeContext);
@@ -334,6 +340,7 @@ export function SongNode({ data, selected }) {
   const cls = [
     'node-card', state && 'state-' + state, hovered && 'node-hovered', dimmed && 'node-dimmed',
     isSelected && 'node-selected-ring', multiSelected && 'node-multi-selected',
+    locked && 'node-locked',
   ].filter(Boolean).join(' ');
   // Color match (dominantColor.js) only ever applies to the Active card —
   // Selected is a plain UI cursor, not a performance state, so it only
@@ -341,7 +348,10 @@ export function SongNode({ data, selected }) {
   // whatever fill this card already has for other reasons.
   const palette = nowPlaying.palette;
   const dynamicStyle = (state === 'active' && palette) ? { background: palette.playing } : undefined;
-  const onToggle = (side, type) => onToggleSocket(song.id, side, type);
+  // A locked card's rows are display-only — the handlers in PerformPage
+  // refuse them anyway, but a row that still looks clickable and then does
+  // nothing reads as a bug rather than as "this is decided already".
+  const onToggle = locked ? null : ((side, type) => onToggleSocket(song.id, side, type));
   // Only the song actually playing has committed to one of its outputs
   // (session.committedHop — see commitHopFor, core.js). Every other card
   // shows its rows with no selected dot, because nothing is decided for
@@ -374,13 +384,13 @@ export function SongNode({ data, selected }) {
       <div className="node-socket-section">
         <div className="node-socket-columns">
           <SocketList
-            side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} activeTypes={leftActive === 'none' ? [] : [leftActive]} onToggle={onToggle}
+            side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} activeTypes={leftActive === 'none' ? [] : [leftActive]} onToggle={onToggle} locked={locked}
             optionsByType={{ [leftActive]: leftOptions }} selectedEdgeIdByType={{ [leftActive]: leftEdgeId }}
             filledLabelByType={{ [leftActive]: leftFilledLabel }}
             onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'left', type, oldEdgeId, edgeId)}
           />
           <SocketList
-            side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} activeTypes={rightActiveTypes} onToggle={onToggle}
+            side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} activeTypes={rightActiveTypes} onToggle={onToggle} locked={locked}
             committedType={committedType} optionsByType={rightOptionsByType} selectedEdgeIdByType={rightEdgeIdByType}
             filledLabelByType={rightFilledLabelByType}
             onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'right', type, oldEdgeId, edgeId)}
