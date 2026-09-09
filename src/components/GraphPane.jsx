@@ -1,7 +1,7 @@
 import React, { useMemo, useCallback, useEffect, useState, createContext, useContext } from 'react';
 import { ReactFlow, Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, getBezierPath, useNodesState, ConnectionMode, useViewport } from '@xyflow/react';
 import { END, START, nodeOutputs } from '../core.js';
-import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphLayout.js';
+import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from '../graphConstants.js';
 import { SongNode, EndNode, StartNode, NowPlayingContext, HoveredNodeContext, SearchDimContext, MultiSelectionContext } from './GraphNodes.jsx';
 import { useTheme } from '../theme.js';
 import { usePalette } from './shared.jsx';

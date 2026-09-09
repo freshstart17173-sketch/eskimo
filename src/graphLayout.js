@@ -1,12 +1,12 @@
 import dagre from 'dagre';
 import { END, START, allDestinationIds } from './core.js';
-
-export const NODE_W = 208;
-export const NODE_H = 165;
-export const END_W = 132;
-export const END_H = 64;
-export const START_W = 132;
-export const START_H = 64;
+// Re-exported for backward compatibility — everything that only needs the
+// plain dimensions (not the actual dagre layout function) should import
+// them from graphConstants.js directly instead, so it doesn't pull dagre
+// in along with them. See that file's own comment for why this split
+// exists at all.
+import { NODE_W, NODE_H, END_W, END_H, START_W, START_H } from './graphConstants.js';
+export { NODE_W, NODE_H, END_W, END_H, START_W, START_H };
 
 // Auto-arrange via dagre: left-to-right rank layout, built from the graph's
 // ACTUAL live wiring (activePlaylist) rather than every produced transition

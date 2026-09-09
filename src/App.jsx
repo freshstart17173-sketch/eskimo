@@ -1,5 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Store, freshState, emptySession, removeSongCascade, removeSongFromPlaylist, playlistNextHop, sampleSongsForTests, sampleEdgesForTests, END, getVisibleEdges, transitionTriggerElapsed, autoconnectFullGraph, getProfileName, uid, findFreePosition } from './core.js';
+// graphConstants.js, never graphLayout.js — the latter also imports
+// `dagre` at its top level, so importing anything from it here (this file
+// is never lazy-loaded) would pull dagre into the always-loaded main
+// bundle instead of only downloading it when Autoarrange is actually
+// clicked (see PerformPage.jsx's own dynamic import of it).
+import { NODE_W, NODE_H } from './graphConstants.js';
 import { engine, performAdvance, prefetchHop, PREFETCH_LOOKAHEAD_SEC, buildHopDecision, syncSessionFromFiredPlan } from './audioEngine.js';
 import { isCrateSyncConfigured, createCrate, fetchCrateLibrary, subscribeCrateLibrary, pushCrateSong, deleteCrateSong, pushCrateEdge, deleteCrateEdge } from './crateStore.js';
 import Sidebar from './components/Sidebar.jsx';
@@ -9,14 +15,6 @@ import Sidebar from './components/Sidebar.jsx';
 // code path from the personal library below, not a variant of it: a
 // crate has no relationship to whatever this browser's own solo library
 // is, and must never read from or write into it (spec requirement 9).
-// Deliberately duplicated from graphLayout.js's own NODE_W/NODE_H rather
-// than imported — that module also imports `dagre` at its top level, so
-// importing ANYTHING from it here (this file is never lazy-loaded) would
-// pull dagre into the always-loaded main bundle instead of Perform's own
-// lazy chunk, undoing the whole point of lazy-loading it. Only used for
-// findFreePosition's own overlap math below, which just needs the node's
-// real footprint in pixels, not graphLayout.js's actual layout logic.
-const APPROX_NODE_W = 208, APPROX_NODE_H = 165;
 
 const CRATE_ID = new URLSearchParams(window.location.search).get('crate') || null;
 const CRATE_SESSION_KEY = CRATE_ID ? 'djflow:crate:' + CRATE_ID : null;
@@ -508,7 +506,7 @@ export default function App() {
     // position in scope) via the same findFreePosition a manual duplicate
     // uses, rather than duplicating this logic in the upload form itself.
     const positions = {}; Object.values(songs).forEach(s => { positions[s.id] = { x: s.x, y: s.y }; });
-    const pos = findFreePosition(positions, song.x, song.y, APPROX_NODE_W, APPROX_NODE_H);
+    const pos = findFreePosition(positions, song.x, song.y, NODE_W, NODE_H);
     const stamped = { ...song, x: pos.x, y: pos.y, contributedBy: song.contributedBy || getProfileName() };
     if (isDemo) { clearExample(); setSongs({ [stamped.id]: stamped }); return; }
     setSongs(prev => ({ ...prev, [stamped.id]: stamped }));
@@ -524,7 +522,7 @@ export default function App() {
     const song = songs[songId];
     if (!song) return;
     const positions = {}; Object.values(songs).forEach(s => { positions[s.id] = { x: s.x, y: s.y }; });
-    const pos = findFreePosition(positions, song.x + APPROX_NODE_W + 24, song.y, APPROX_NODE_W, APPROX_NODE_H);
+    const pos = findFreePosition(positions, song.x + NODE_W + 24, song.y, NODE_W, NODE_H);
     const copy = {
       ...song, id: uid('s'), x: pos.x, y: pos.y,
       title: song.title + ' (copy)', audioUrl: null, mashupOf: null,

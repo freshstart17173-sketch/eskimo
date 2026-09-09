@@ -81,10 +81,23 @@ export const ICONS = {
 };
 
 // A real cover thumbnail when a song has one (url), otherwise the same
-// decorative diagonal-stripe placeholder as before.
+// decorative diagonal-stripe placeholder as before. Fades in on load
+// rather than popping straight in — even a fast local blob URL still has
+// one real decode frame, and swapping the placeholder for the photo the
+// instant `resolved` exists (before the browser's actually painted it)
+// read as a flicker across a Library page with a lot of rows.
 export function AlbumArt({ className, style, url }) {
   const resolved = useResolvedAudioUrl(url);
-  if (resolved) return <img className={'art-swatch art-photo ' + (className || '')} style={style} src={resolved} alt="" />;
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { setLoaded(false); }, [resolved]);
+  if (resolved) {
+    return (
+      <img
+        className={'art-swatch art-photo' + (loaded ? ' art-photo-loaded' : '') + ' ' + (className || '')}
+        style={style} src={resolved} alt="" onLoad={() => setLoaded(true)}
+      />
+    );
+  }
   return <div className={'art-swatch ' + (className || '')} style={style} />;
 }
 

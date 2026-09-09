@@ -9,7 +9,7 @@ import {
 } from '../core.js';
 import { engine, findOutroEdgeFor } from '../audioEngine.js';
 import { useTransportControls } from '../playbackControls.js';
-import { computeDagreLayout, NODE_W, NODE_H, END_W, END_H } from '../graphLayout.js';
+import { NODE_W, NODE_H, END_W, END_H } from '../graphConstants.js';
 import GraphPane from './GraphPane.jsx';
 import { Icon, ICONS, AlbumArt } from './shared.jsx';
 import { Playhead } from './SequencePane.jsx';
@@ -251,7 +251,12 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     return p;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placedSongs, session.startPos, session.endPos]);
-  function arrangeForMe() {
+  // Dynamically imports graphLayout.js (and, with it, dagre) only when
+  // Autoarrange is actually clicked — dagre is a real chunk of code that
+  // most visits to the Graph page never need, since most of the time
+  // you're not re-laying-out the whole thing.
+  async function arrangeForMe() {
+    const { computeDagreLayout } = await import('../graphLayout.js');
     const layout = computeDagreLayout(placedSongs, session.activePlaylist);
     setSongs(prev => {
       const next = { ...prev };
