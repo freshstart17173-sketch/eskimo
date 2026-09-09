@@ -976,6 +976,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <button className="icon-btn" onClick={goBack} aria-label="Back" data-tooltip="Back">
             <Icon path={ICONS.skipBack} filled size={16} />
           </button>
+          <HistoryButton songs={songs} history={session.history} onJumpTo={(id) => jumpToSong(id, 'cut')} />
           <button className="icon-btn" onClick={togglePlaying} aria-label={session.isPlaying ? 'Pause' : 'Play'}>
             <Icon path={session.isPlaying ? ICONS.pause : ICONS.play} filled={!session.isPlaying} size={16} />
           </button>
@@ -1231,6 +1232,49 @@ function DetailPane({ song, socketData, io, songs, onPlay, onClose }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// session.history already tracks every song this set has actually played
+// (up to 50, most recent last — advanceSession/jumpToSong/goBack all push
+// to it), which is what the single-step Back button pops from — but
+// nothing in the UI let you actually SEE it beyond that one step back.
+// Same collapsed-icon-to-popover pattern as VolumeControl below; clicking
+// an entry jumps straight to it (a plain cut, same as Skip/Back's own
+// "nothing in front" convention) rather than only ever being able to
+// step back one song at a time.
+function HistoryButton({ songs, history, onJumpTo }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDocMouseDown(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [open]);
+  const recent = [...(history || [])].reverse().slice(0, 20);
+  return (
+    <div className="player-bar-history" ref={ref}>
+      <button className="icon-btn" aria-label="History" data-tooltip="Played earlier this set" onClick={() => setOpen(o => !o)} disabled={recent.length === 0}>
+        <Icon path={ICONS.history} size={15} />
+      </button>
+      {open && (
+        <div className="player-bar-volume-popover player-bar-history-popover">
+          {recent.length === 0 ? (
+            <div className="empty-note-sm">nothing played yet this set</div>
+          ) : recent.map((id, i) => {
+            const song = songs[id];
+            if (!song) return null;
+            return (
+              <button key={i} type="button" className="history-row" onClick={() => { onJumpTo(id); setOpen(false); }}>
+                <AlbumArt className="picker-chip-art" url={song.coverUrl} />
+                <span className="history-row-title">{song.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,12 @@
+{
+  "name": "Eskimo Studio",
+  "short_name": "Eskimo",
+  "description": "A graph-based DJ set editor — wire transitions, intros, and outros between songs and perform them live.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcfcfc",
+  "theme_color": "#131313",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

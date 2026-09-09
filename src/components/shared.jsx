@@ -77,6 +77,7 @@ export const ICONS = {
   skipBack: <><polygon points="19,4 9,12 19,20" fill="currentColor"></polygon><rect x="4.5" y="4" width="2.5" height="16" fill="currentColor"></rect></>,
   stop: <rect x="5" y="5" width="14" height="14" fill="currentColor"></rect>,
   volume: <><polygon points="3,9 8,9 13,4 13,20 8,15 3,15" fill="currentColor"></polygon><path d="M16.5 8.5a5 5 0 0 1 0 7"></path></>,
+  history: <><circle cx="12" cy="12" r="8.5"></circle><polyline points="12,7 12,12 15.5,14"></polyline><path d="M4.5 4.5l-1 3.5 3.5-1"></path></>,
 };
 
 // A real cover thumbnail when a song has one (url), otherwise the same
