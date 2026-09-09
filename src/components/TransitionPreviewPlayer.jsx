@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fmtTime, clamp } from '../core.js';
 import { getAudioContext } from '../audioDetect.js';
-import { buildTransitionPreviewBuffer, previewEnvelope } from '../transitionPreview.js';
+import { buildTransitionPreviewBuffer, buildEdgePreviewBuffer, previewEnvelope } from '../transitionPreview.js';
 import { Icon, ICONS } from './shared.jsx';
 
 const WINDOW_SEC = 0.05;
@@ -34,7 +34,13 @@ function barHeights(envelope) {
 // same anchor-based position tracking (a ctx-time + an offset, not a
 // running clock) audioEngine.js itself uses, which is what makes the
 // rAF-driven playhead immune to the drift a setInterval clock would add.
-export default function TransitionPreviewPlayer({ file, leftSong, rightSong, outSeconds, inSeconds }) {
+// `file` (Add Audio's not-yet-uploaded drop) and `edgeUrl` (Library's
+// already-saved edge) are mutually exclusive sources for the same clip —
+// exactly one is ever passed by a given caller — routed to
+// buildTransitionPreviewBuffer/buildEdgePreviewBuffer respectively so
+// there's one shared trim/scope/concat implementation regardless of which
+// stage of the audio's life this is previewing.
+export default function TransitionPreviewPlayer({ file, edgeUrl, leftSong, rightSong, outSeconds, inSeconds, clipStartSec, clipEndSec }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null); // { buffer, regions, envelope } | null
@@ -176,23 +182,27 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
     }
   }
 
-  // Decode/build effect — gated on there being a file and at least one
-  // reference song to scope against (the caller only mounts this component
-  // under that same condition, but the guard holds regardless). A closure
-  // `cancelled` flag is the generation guard: if leftId/rightId/outSeconds/
-  // inSeconds changes again before this decode finishes, the stale result
-  // is dropped instead of clobbering the newer selection's state.
+  // Decode/build effect — gated on there being a source (file or edgeUrl)
+  // and at least one reference song to scope against (the caller only
+  // mounts this component under that same condition, but the guard holds
+  // regardless). A closure `cancelled` flag is the generation guard: if
+  // leftId/rightId/outSeconds/inSeconds changes again before this decode
+  // finishes, the stale result is dropped instead of clobbering the newer
+  // selection's state.
   useEffect(() => {
     stopPlayback();
     startOffsetRef.current = 0;
     wasInTransitionRef.current = false;
     setData(null); setError('');
-    if (!file || (!leftSong && !rightSong)) return undefined;
+    if ((!file && !edgeUrl) || (!leftSong && !rightSong)) return undefined;
     let cancelled = false;
     setLoading(true);
-    buildTransitionPreviewBuffer({ file, leftSong, rightSong, outSeconds, inSeconds })
+    const build = file
+      ? buildTransitionPreviewBuffer({ file, leftSong, rightSong, outSeconds, inSeconds, clipStartSec, clipEndSec })
+      : buildEdgePreviewBuffer({ edgeUrl, leftSong, rightSong, outSeconds, inSeconds, clipStartSec, clipEndSec });
+    build
       .then((result) => {
-        if (cancelled) return;
+        if (cancelled || !result) return;
         const envelope = previewEnvelope(result.buffer, WINDOW_SEC);
         setData({ ...result, envelope });
       })
@@ -204,7 +214,7 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, leftSong && leftSong.id, rightSong && rightSong.id, outSeconds, inSeconds]);
+  }, [file, edgeUrl, leftSong && leftSong.id, rightSong && rightSong.id, outSeconds, inSeconds, clipStartSec, clipEndSec]);
 
   // Stop cleanly on unmount (navigating away from Add Audio mid-playback).
   useEffect(() => () => { stopPlayback(); if (litTimerRef.current) clearTimeout(litTimerRef.current); }, []);
@@ -267,7 +277,7 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
     if (gainNodeRef.current) gainNodeRef.current.gain.value = v;
   }
 
-  if (!file || (!leftSong && !rightSong)) return null;
+  if ((!file && !edgeUrl) || (!leftSong && !rightSong)) return null;
 
   if (loading) {
     return (
@@ -315,12 +325,12 @@ export default function TransitionPreviewPlayer({ file, leftSong, rightSong, out
   return (
     <div className="transition-preview">
       <div className="transition-preview-wave" ref={waveRef}>
+        <div className="transition-preview-bracket" ref={bracketRef} style={{ left: bracketStartPct + '%', width: (bracketEndPct - bracketStartPct) + '%' }} />
         {heights.map((h, i) => {
           const t = (i + 0.5) * WINDOW_SEC;
           const inTransition = t >= regions.leftSec && t < regions.leftSec + regions.transitionSec;
           return <span key={i} className={'transition-preview-bar' + (inTransition ? ' in-transition' : '')} style={{ height: h + '%' }} />;
         })}
-        <div className="transition-preview-bracket" ref={bracketRef} style={{ left: bracketStartPct + '%', width: (bracketEndPct - bracketStartPct) + '%' }} />
         <div className="transition-preview-bracket-label" style={{ left: ((bracketStartPct + bracketEndPct) / 2) + '%' }}>
           {bracketLabel} · {fmtTime(regions.transitionSec)}
         </div>

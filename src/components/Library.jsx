@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { libraryRows, uploadCoverIfPossible, uploadExtraFileIfPossible, occludedTransitions, fmtBytes, emptySession } from '../core.js';
 import { isLocalAudioMarker, resolveAudioUrl } from '../localAudioStore.js';
 import { Icon, ICONS, Field, AlbumArt, CoverPicker, SongPicker, useResolvedAudioUrl } from './shared.jsx';
+import TransitionPreviewPlayer from './TransitionPreviewPlayer.jsx';
 
 // A `blob:`/`local:`-resolved URL only exists inside THIS browser — a
 // single-song export bundle (see exportSong below) needs to actually be
@@ -34,10 +35,27 @@ function DownloadReferenceLink({ song }) {
   if (!resolvedUrl) return <span className="hint-text" style={{ alignSelf: 'center' }}>loading reference…</span>;
   return <a className="btn btn-ghost btn-sm" href={resolvedUrl} download target="_blank" rel="noreferrer">Download reference</a>;
 }
-function EdgeAudioPreview({ edge }) {
-  const resolvedUrl = useResolvedAudioUrl(edge.audioUrl);
+// Plays only the scoped window (edge's own real content + a few seconds
+// of the surrounding reference song on either side it actually has) —
+// the same TransitionPreviewPlayer Add Audio uses to audition a clip
+// before saving it, just pointed at the edge's own already-uploaded
+// audioUrl instead of a not-yet-saved File. Previously this played the
+// entire raw uploaded master start to end via a plain <audio> tag — on a
+// full-length produced re-export that's minutes of duplicated original
+// audio before ever reaching the edge's own real content.
+function EdgeAudioPreview({ edge, songs }) {
   if (!edge.audioUrl) return null;
-  return resolvedUrl ? <audio controls src={resolvedUrl} style={{ height: 26 }} /> : null;
+  const leftSong = edge.l ? songs[edge.l] : null;
+  const rightSong = edge.r ? songs[edge.r] : null;
+  return (
+    <TransitionPreviewPlayer
+      edgeUrl={edge.audioUrl} leftSong={leftSong} rightSong={rightSong}
+      outSeconds={edge.outSeconds != null ? edge.outSeconds : null}
+      inSeconds={edge.inSeconds != null ? edge.inSeconds : null}
+      clipStartSec={edge.clipStartSec != null ? edge.clipStartSec : null}
+      clipEndSec={edge.clipEndSec != null ? edge.clipEndSec : null}
+    />
+  );
 }
 // A song's own extra files — stems, the original project file, anything
 // beyond the master itself a collaborator dropped in to help build a
@@ -208,7 +226,6 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                     <div className="drawer-frag-row">
                       <span className="drawer-frag-label">{labelOf(e)}</span>
                       <div className="drawer-frag-actions">
-                        <EdgeAudioPreview edge={e} />
                         <button className="btn btn-ghost btn-xs" onClick={() => onDeleteEdge(e.id)}>Remove</button>
                       </div>
                     </div>
@@ -216,6 +233,7 @@ function LibraryRow({ row, song, edges, songs, open, onToggle, onUpdateSong, onD
                       {destText(e)}
                       {e.contributedBy && <span className="lib-contributor lib-contributor-inline"> · built by {e.contributedBy}</span>}
                     </div>
+                    <EdgeAudioPreview edge={e} songs={songs} />
                     {clashes.length > 0 && (
                       <div className="hint-text" style={{ color: 'var(--danger)' }}>
                         takes over before {clashes.length} transition{clashes.length > 1 ? 's' : ''} off this song — clashes if picked: {' '}

@@ -104,12 +104,22 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
       // real content starts/ends — an outro clip commonly still carries the
       // original song's tail before its own new material, and an intro clip
       // commonly still carries a lead-in into the destination's own opening
-      // after its own new material ends. Only meaningful for Outro/Intro
-      // (a Transition splices at outSeconds/inSeconds on the real decks
-      // instead); undefined here falls back to playing the clip from/to its
-      // own natural start/end, same as when there's no detected cue at all.
-      clipStartSec: (type === 'outro' && detectedCue && detectedCue.leftClipStartSec != null) ? detectedCue.leftClipStartSec : undefined,
-      clipEndSec: (type === 'intro' && detectedCue && detectedCue.rightClipEndSec != null) ? detectedCue.rightClipEndSec : undefined,
+      // after its own new material ends. Stored whenever the corresponding
+      // song side was actually matched (detectSpliceForKnownSongs only ever
+      // computes leftClipStartSec when a leftSong existed, rightClipEndSec
+      // when a rightSong existed) — not gated to Outro/Intro by type, since
+      // a Transition has both sides and this same metadata is exactly what
+      // lets Library's own "listen to the built audio" preview trim a
+      // saved Transition down to its real content too, not just Outro/
+      // Intro. The live engine only ever reads clipStartSec off an outro
+      // edge and clipEndSec off an intro edge (audioEngine.js) — a
+      // Transition splices at outSeconds/inSeconds on the real decks
+      // instead — so storing both here on a Transition is inert for real
+      // playback, just useful metadata for the preview. undefined falls
+      // back to playing the clip from/to its own natural start/end, same
+      // as when there's no detected cue at all.
+      clipStartSec: detectedCue && detectedCue.leftClipStartSec != null ? detectedCue.leftClipStartSec : undefined,
+      clipEndSec: detectedCue && detectedCue.rightClipEndSec != null ? detectedCue.rightClipEndSec : undefined,
     };
     onAddEdge(edge);
     setSaved({ label: type, songId: rightId || leftId });
@@ -189,6 +199,8 @@ export default function AddAudioPage({ songs, edges, onAddEdge, onViewSong, goUp
               <TransitionPreviewPlayer
                 file={file} leftSong={leftSong} rightSong={rightSong}
                 outSeconds={cue ? cue.outSeconds : null} inSeconds={cue ? cue.inSeconds : null}
+                clipStartSec={detectedCue ? detectedCue.leftClipStartSec : null}
+                clipEndSec={detectedCue ? detectedCue.rightClipEndSec : null}
               />
             ) : (
               <div className="audio-preview"><audio controls src={previewUrl} /></div>

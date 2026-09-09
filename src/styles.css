@@ -1251,8 +1251,8 @@ a { color: var(--accent); }
 .detected-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .cue-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
 .waveform-bar { position: relative; height: 40px; background: repeating-linear-gradient(90deg, rgba(19, 19, 19, .14) 0 2px, transparent 2px 6px), var(--line-soft); border-radius: var(--radius); overflow: hidden; }
-.waveform-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); }
-.waveform-marker-label { position: absolute; top: 0; transform: translateX(-50%); font-size: 9px; font-family: var(--font-mono); background: var(--ink); color: var(--paper); padding: 2px 4px; border-radius: 0; white-space: nowrap; }
+.waveform-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); z-index: 2; }
+.waveform-marker-label { position: absolute; top: 0; transform: translateX(-50%); font-size: 9px; font-family: var(--font-mono); background: var(--ink); color: var(--paper); padding: 2px 4px; border-radius: 0; white-space: nowrap; z-index: 2; }
 
 /* Add Audio's "Listen before you save it" — always exactly the window
    the requirement asks for (edgeSeconds of original audio, the dropped
@@ -1266,9 +1266,20 @@ a { color: var(--accent); }
 .transition-preview-wave {
   position: relative; height: 52px; display: flex; align-items: center; gap: 1.5px; cursor: pointer; user-select: none;
 }
-.transition-preview-bar { flex: 1; min-width: 0; border-radius: 1px; background: var(--line); }
+.transition-preview-bar { flex: 1; min-width: 0; border-radius: 1px; background: var(--line); position: relative; z-index: 1; }
 .transition-preview-bar.in-transition { background: var(--accent); }
-.transition-preview-bracket { position: absolute; bottom: -2px; height: 3px; background: var(--accent); border-radius: 2px; pointer-events: none; }
+/* A real, tall region — not a hairline underline — so the transition span
+   reads as its own block at a glance instead of something you have to
+   squint at below the waveform. Rendered BEHIND the bars (it's the first
+   child of .transition-preview-wave in the JSX, and the bars carry their
+   own z-index above it) so the bars still draw on top of it; the vertical
+   inset (top/bottom) plus rounded corners is what gives it "room" instead
+   of filling the wave box edge-to-edge like the old underline did. */
+.transition-preview-bracket {
+  position: absolute; top: 3px; bottom: 3px; z-index: 0;
+  background: var(--accent-bg); border: 1.5px solid var(--accent); border-radius: 7px;
+  pointer-events: none;
+}
 /* Flashes the instant playback actually crosses into or back out of the
    added audio (TransitionPreviewPlayer's own frame-to-frame crossing
    check) — distinct from `.in-transition`'s always-on color, which only
@@ -1279,15 +1290,20 @@ a { color: var(--accent); }
 .transition-preview-bracket.lit { animation: transitionBracketFlash .5s ease-out; }
 @keyframes transitionBracketFlash {
   0% { box-shadow: 0 0 0 6px rgba(255, 255, 255, .9); background: #fff; }
-  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); background: var(--accent); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); background: var(--accent-bg); }
 }
 .transition-preview-bracket-label {
-  position: absolute; bottom: 9px; font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-  color: var(--accent-ink); white-space: nowrap; transform: translateX(-50%); pointer-events: none;
+  position: absolute; top: 6px; font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  /* --accent-text (not --accent-ink) — this label now sits directly on
+     the tall --accent-bg region below, and only --accent-text is paired
+     with a real dark-mode override to stay readable against it; --accent-
+     ink never changes for dark mode and would go near-invisible (dark
+     navy text on the region's own dark navy fill). */
+  color: var(--accent-text); white-space: nowrap; transform: translateX(-50%); pointer-events: none; z-index: 2;
 }
 .transition-preview-playhead {
   position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--ink);
-  pointer-events: none; box-shadow: 0 0 0 2px rgba(19, 19, 19, .15);
+  pointer-events: none; box-shadow: 0 0 0 2px rgba(19, 19, 19, .15); z-index: 2;
 }
 .transition-preview-controls { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .transition-preview-time { font-size: 10px; color: var(--muted); width: 26px; flex: none; }

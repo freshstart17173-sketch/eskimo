@@ -48,7 +48,7 @@ function sliceBuffer(ctx, buffer, startSec, endSec) {
 // cueSeconds, running forward edgeSeconds). Resolves a `local:` marker
 // the same way audioDetect.js's own detection path does, so this works
 // identically regardless of which storage a reference track used.
-export async function loadEdgeSlice(song, cueSeconds, side, edgeSeconds = 1) {
+export async function loadEdgeSlice(song, cueSeconds, side, edgeSeconds = 3) {
   if (!song || !song.audioUrl || cueSeconds == null) return null;
   const url = await resolveAudioUrl(song.audioUrl).catch(() => null);
   if (!url) return null;
@@ -64,9 +64,26 @@ export async function loadEdgeSlice(song, cueSeconds, side, edgeSeconds = 1) {
 // without recomputing boundaries of its own. A side with no reference
 // song (or no detected cue) simply contributes no slice — its region
 // stays 0 rather than the whole thing being withheld.
-export async function buildTransitionPreviewBuffer({ file, leftSong, rightSong, outSeconds, inSeconds, edgeSeconds = 1 }) {
+//
+// `clipStartSec`/`clipEndSec` bound the dropped clip's OWN real content —
+// see audioDetect.js's detectSpliceForKnownSongs. A real produced upload
+// commonly still carries a chunk of the reference song's own audio before
+// (Outro/Transition) or after (Intro/Transition) its actual new material,
+// because that's how the DJ recorded it — matched, near-identical audio
+// the reference-song slices above already cover on their own. Without
+// trimming to [clipStartSec, clipEndSec] first, that duplicated stretch
+// would play as part of the "transition" region too — on a produced
+// master that's a full-length re-export, that's the whole file, which is
+// exactly the bug this trim exists to prevent. null/undefined on either
+// bound means "no detected boundary there" and falls back to the clip's
+// own natural start/end, same as when there's no detected cue at all.
+async function assembleTransitionBuffer({ droppedFull, leftSong, rightSong, outSeconds, inSeconds, clipStartSec, clipEndSec, edgeSeconds = 3 }) {
   const ctx = getAudioContext();
-  const dropped = await decodeFile(file);
+  const clipStart = clipStartSec != null ? clipStartSec : 0;
+  const clipEnd = clipEndSec != null ? clipEndSec : droppedFull.duration;
+  const dropped = (clipStart > 0 || clipEnd < droppedFull.duration)
+    ? sliceBuffer(ctx, droppedFull, clipStart, clipEnd)
+    : droppedFull;
   const [leftSlice, rightSlice] = await Promise.all([
     (leftSong && outSeconds != null) ? loadEdgeSlice(leftSong, outSeconds, 'out', edgeSeconds) : null,
     (rightSong && inSeconds != null) ? loadEdgeSlice(rightSong, inSeconds, 'in', edgeSeconds) : null,
@@ -91,6 +108,29 @@ export async function buildTransitionPreviewBuffer({ file, leftSong, rightSong, 
       rightSec: rightSlice ? rightSlice.duration : 0,
     },
   };
+}
+
+// Add Audio's own "listen before you save it" path — the clip is still a
+// plain dropped File, not yet uploaded anywhere.
+export async function buildTransitionPreviewBuffer({ file, leftSong, rightSong, outSeconds, inSeconds, clipStartSec, clipEndSec, edgeSeconds = 3 }) {
+  const droppedFull = await decodeFile(file);
+  return assembleTransitionBuffer({ droppedFull, leftSong, rightSong, outSeconds, inSeconds, clipStartSec, clipEndSec, edgeSeconds });
+}
+
+// Library's "built audio" preview on an already-saved edge — same
+// scoping, just decoding the edge's own stored audioUrl (resolving a
+// `local:` marker the same way loadEdgeSlice's reference-song lookups
+// do) instead of a dropped File. Without this, Library was playing an
+// already-saved edge's entire raw uploaded master start to end — the
+// same "whole file, not just the real content" bug the File-based path
+// above exists to prevent, just hit from the other place a produced
+// upload's audio gets played back. Returns null (rather than throwing)
+// when the URL can't resolve, so the caller can fall back cleanly.
+export async function buildEdgePreviewBuffer({ edgeUrl, leftSong, rightSong, outSeconds, inSeconds, clipStartSec, clipEndSec, edgeSeconds = 3 }) {
+  const resolved = await resolveAudioUrl(edgeUrl).catch(() => null);
+  if (!resolved) return null;
+  const droppedFull = await fetchAndDecode(resolved);
+  return assembleTransitionBuffer({ droppedFull, leftSong, rightSong, outSeconds, inSeconds, clipStartSec, clipEndSec, edgeSeconds });
 }
 
 // Thin wrapper over audioDetect.js's own RMS math — the same envelope
