@@ -63,6 +63,36 @@
   --state-later: #bcdcef;
   --state-later-bg: #f6fafc;
 
+
+  /* ===== Connection types =====================================================
+     Four punchy, well-separated hues — the one place this near-monochrome app
+     spends real colour, because connection type is the single most important
+     thing the graph has to say and it was previously invisible (every wire
+     drew identical black). Hue angles are pushed far apart on purpose so the
+     four stay distinguishable at 6px tall and at low zoom: blue 211deg,
+     green 145deg, amber 35deg, purple 285deg.
+
+     Each type carries three values: the saturated --ct-* used for an ACTIVE
+     port and for the wire itself, a muted --ct-*-idle for a port that COULD
+     be wired but isn't, and --ct-*-soft for tinted backgrounds. Dark mode
+     lifts all three rather than reusing them, since these need to hold up
+     against #17181a as well as against #fcfcfc. */
+  --ct-none: #0a84ff;
+  --ct-none-idle: #b9d9fb;
+  --ct-none-soft: #e8f2ff;
+  --ct-intro: #00b84d;
+  --ct-intro-idle: #b2e5c6;
+  --ct-intro-soft: #e6f7ed;
+  --ct-outro: #ff8a00;
+  --ct-outro-idle: #ffdcb0;
+  --ct-outro-soft: #fff3e3;
+  --ct-transition: #a855f7;
+  --ct-transition-idle: #e0c9f9;
+  --ct-transition-soft: #f6edfe;
+  /* A port with no produced audio behind it at all — deliberately colourless
+     so "nothing here" never competes with a real type. */
+  --ct-empty: #d8d8d6;
+
   /* fixed regardless of theme — see the note above */
   --paper-fixed: #fcfcfc;
 
@@ -88,6 +118,11 @@
     --danger: #e8a89c; --danger-bg: #3a201c;
     --state-next-bg: #17293a; --state-later-bg: #182430;
     --canvas-bg: #131416;
+    --ct-none: #4da3ff; --ct-none-idle: #1e3a55; --ct-none-soft: #142534;
+    --ct-intro: #2ed673; --ct-intro-idle: #1a3d29; --ct-intro-soft: #12271a;
+    --ct-outro: #ffa233; --ct-outro-idle: #4a3418; --ct-outro-soft: #2e2110;
+    --ct-transition: #c084fc; --ct-transition-idle: #3b2a4f; --ct-transition-soft: #261a33;
+    --ct-empty: #34363a;
   }
 }
 :root[data-theme="dark"] { color-scheme: dark; --ink: #f1f0ed; --paper: #17181a; --panel: #232427; --line: #47494e; --line-soft: #2c2e31; --muted: #b7b8bd; --faint: #85878c;
@@ -95,6 +130,11 @@
   --danger: #e8a89c; --danger-bg: #3a201c;
   --state-next-bg: #17293a; --state-later-bg: #182430;
   --canvas-bg: #131416;
+  --ct-none: #4da3ff; --ct-none-idle: #1e3a55; --ct-none-soft: #142534;
+  --ct-intro: #2ed673; --ct-intro-idle: #1a3d29; --ct-intro-soft: #12271a;
+  --ct-outro: #ffa233; --ct-outro-idle: #4a3418; --ct-outro-soft: #2e2110;
+  --ct-transition: #c084fc; --ct-transition-idle: #3b2a4f; --ct-transition-soft: #261a33;
+  --ct-empty: #34363a;
 }
 
 * { box-sizing: border-box; scrollbar-width: thin; }
@@ -767,67 +807,116 @@ a { color: var(--accent); }
    trick, just for the one state that should look different. */
 .graph-pane .react-flow__node.dragging { cursor: grabbing !important; }
 
-/* Typed left/right sockets (the playlist editor — see TODO.md), laid out
-   Blender-node-style: real labeled rows in normal document flow, inputs
-   on the left and outputs on the right so a connection's direction never
-   has to cross back over the node it came from. A fixed color per *type*
-   (not per song, not per node) — a Transition socket is always the same
-   hue everywhere, exactly like a Geometry socket is always the same
-   green in Blender — which is a different thing from the per-song cover-
-   color scheme tried earlier and dropped: that varied by song and
-   couldn't be trusted to read cleanly against arbitrary art; this is a
-   small fixed four-color legend, the same on every node, which is what
-   actually makes a node graph scannable at a glance. */
-.node-socket-section {
-  display: flex; flex-direction: column; gap: 2px; margin-top: 9px; padding-top: 8px;
-  border-top: 1px dashed var(--line);
-}
-.state-active .node-socket-section { border-top-color: rgba(252, 252, 252, .25); }
-/* The two label/dot columns — kept compact so the fixed three rows per
-   side never take much vertical space; a variant picker opens directly
-   from whichever row is active (see .node-socket-row-picker below), not
-   as a separate line under both columns. */
-.node-socket-columns { display: flex; justify-content: space-between; gap: 22px; }
-/* Rows deliberately stretch to the *column's* full width on both sides
-   (no align-items override here) rather than shrink-wrapping to their
-   label text — the socket dot is `position: absolute` and so takes no
-   part in that sizing at all, meaning a shrink-wrapped row's own edge
-   does NOT reliably land on the card's actual border. That was a real
-   bug on the right side specifically: `align-items: flex-end` let each
-   right row size down to just its label, so `right: -14px` (below) ended
-   up well inside the card instead of straddling its edge, and every
-   arrow into a right-side socket looked like it was landing nowhere near
-   the card. Stretching first, then letting `flex-direction: row-reverse`
-   pack the label against the row's own right edge, is what makes the
-   left and right offsets in `.node-socket-row .node-socket` actually
-   symmetric. */
-.node-socket-side { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
-.node-socket-row {
-  position: relative; display: flex; align-items: center; gap: 6px;
-  height: 22px; min-width: 0; padding: 0 4px 0 8px;
-}
-.node-socket-row-right { flex-direction: row-reverse; padding: 0 8px 0 4px; }
-.node-socket-label {
-  font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; pointer-events: none;
-}
-.node-socket-row-active .node-socket-label { color: var(--ink); font-weight: 700; }
-.node-socket-row-unavailable .node-socket-label { color: var(--faint); font-weight: 500; }
-.state-active .node-socket-label { color: rgba(252, 252, 252, .6); }
-.state-active .node-socket-row-active .node-socket-label { color: var(--paper-fixed); }
-.state-active .node-socket-row-unavailable .node-socket-label { color: rgba(252, 252, 252, .3); }
+/* ===== Ports =============================================================
+   The card's connection surface. Replaced a six-row labelled socket matrix
+   (three rows per side, rendered in full on every card whether or not they
+   carried anything) with two strips: inputs along the top edge, outputs along
+   the bottom. Colour carries the type, position carries identity, so the type
+   name never has to be printed — which is what retired ~300 rows of text and
+   about a hundred instances of the word "None" from the example graph.
 
-/* A row whose active slot has 2+ produced candidates (see socketDataById's
-   `*Options`) is itself the variant-picker trigger — no separate control
-   below the columns, no chevron; the row's own hover/active tint is
-   signal enough that it's clickable (matches
-   docs/design/socket-redesign-v6.html's "no chevron" callout). `nodrag`
-   keeps the click from being read as a node-drag start. */
-.node-socket-row-picker { cursor: pointer; }
-.node-socket-row-picker:hover { background: var(--panel); }
-.state-active .node-socket-row-picker:hover { background: rgba(252, 252, 252, .1); }
-.node-socket-row-picker:active { background: var(--line-soft); }
-.state-active .node-socket-row-picker:active { background: rgba(252, 252, 252, .18); }
+   Each segment IS the React Flow Handle, so despite taking far less of the
+   card these are a much larger hit target than the 9px circles they replace.
+   See docs/design/node-editor-inspiration.pdf for the survey this came from
+   (cables.gl is the closest precedent). */
+.node-ports {
+  display: flex; gap: 2px; padding: 0; margin: 0;
+  position: relative; z-index: 1;
+}
+.node-ports-in { border-radius: var(--radius) var(--radius) 0 0; overflow: hidden; }
+.node-ports-out { border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; }
+.end-node .node-ports { margin: 0 0 6px; }
+.end-node .node-ports-out { margin: 6px 0 0; }
+
+/* Beat React Flow's own absolutely-positioned handle defaults: these are
+   ordinary flex children. Their measured box is what React Flow anchors a
+   wire to, and that measurement works the same either way. */
+.graph-pane .react-flow__handle.node-port {
+  /* The canvas-wide rule above hides every raw React Flow handle; a port is
+     a real, visible control, so it has to opt back in explicitly. */
+  opacity: 1; pointer-events: all;
+  position: relative; left: auto; right: auto; top: auto; bottom: auto;
+  transform: none; flex: 1; min-width: 0;
+  height: 7px; width: auto; border: 0; border-radius: 0;
+  background: var(--ct-empty);
+  transition: background .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+/* A port with real produced audio behind it, but not wired yet. */
+.graph-pane .react-flow__handle.node-port-none.node-port-available { background: var(--ct-none-idle); }
+.graph-pane .react-flow__handle.node-port-intro.node-port-available { background: var(--ct-intro-idle); }
+.graph-pane .react-flow__handle.node-port-outro.node-port-available { background: var(--ct-outro-idle); }
+.graph-pane .react-flow__handle.node-port-transition.node-port-available { background: var(--ct-transition-idle); }
+/* Wired. Full saturation — this is where the colour budget goes. */
+.graph-pane .react-flow__handle.node-port-none.node-port-active { background: var(--ct-none); }
+.graph-pane .react-flow__handle.node-port-intro.node-port-active { background: var(--ct-intro); }
+.graph-pane .react-flow__handle.node-port-outro.node-port-active { background: var(--ct-outro); }
+.graph-pane .react-flow__handle.node-port-transition.node-port-active { background: var(--ct-transition); }
+
+.node-port-clickable { cursor: pointer; }
+.node-port-draggable { cursor: crosshair; }
+.graph-pane .react-flow__handle.node-port-clickable:hover,
+.graph-pane .react-flow__handle.node-port-draggable:hover {
+  box-shadow: inset 0 0 0 2px var(--paper), 0 0 0 1px rgba(0, 0, 0, .25);
+  filter: brightness(1.08);
+}
+/* The output this song has actually committed to firing — a bright pip
+   centred on its port, so "which way is playback going" is answerable from
+   the strip alone without reading the line below it. */
+.graph-pane .react-flow__handle.node-port-committed::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%;
+  background: var(--paper); box-shadow: 0 0 0 1px rgba(0, 0, 0, .3);
+}
+.node-card.node-locked .node-port-clickable,
+.node-card.node-locked .node-port-draggable { cursor: default; }
+
+/* ===== Card body ========================================================= */
+.node-body { display: flex; gap: 8px; align-items: flex-start; padding: 8px 9px; }
+.node-meta { flex: 1; min-width: 0; }
+.node-badges { display: flex; flex-direction: column; gap: 3px; flex: none; padding-top: 1px; }
+.node-badge { width: 6px; height: 6px; border-radius: 50%; background: var(--line); display: block; }
+.node-badge-audio { background: var(--ct-intro); }
+.node-badge-noaudio { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line); }
+.node-badge-built { background: var(--ct-outro); }
+.node-badge-shared { background: var(--ct-transition); }
+.state-active .node-badge-noaudio { box-shadow: inset 0 0 0 1.5px rgba(252, 252, 252, .45); }
+
+/* ===== Flow lines ========================================================
+   "Arrives from X" above the body, "goes to Y" below it, each sitting between
+   a port strip and the main content — placed there by direct instruction, and
+   the thing that makes the strips affordable at all: collapsing ports to pure
+   colour would otherwise have thrown away the destination name, the one
+   genuinely load-bearing thing the old labelled rows carried. */
+.node-flow { padding: 0 9px; }
+.node-flow-in { padding-top: 6px; }
+.node-flow-out { padding-bottom: 6px; }
+.node-flow-line {
+  display: flex; align-items: center; gap: 5px; position: relative;
+  font-size: 10.5px; line-height: 1.5; color: var(--muted);
+  border-radius: var(--radius); padding: 1px 3px; margin: 0 -3px;
+}
+.node-flow-arrow { flex: none; font-size: 9px; color: var(--faint); }
+.node-flow-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-flow-caret { flex: none; font-size: 8px; color: var(--faint); }
+/* Which produced clip is playing into that destination — secondary to the
+   destination itself, so it shrinks rather than competing with it. */
+.node-flow-variant {
+  flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 9px; color: var(--faint); background: var(--panel);
+  padding: 0 3px; border-radius: 2px;
+}
+.state-active .node-flow-variant { color: rgba(252, 252, 252, .65); background: rgba(252, 252, 252, .14); }
+/* The line is tinted by its own connection type, tying it to the port
+   directly above or below it without repeating the type's name. */
+.node-flow-none .node-flow-arrow { color: var(--ct-none); }
+.node-flow-intro .node-flow-arrow { color: var(--ct-intro); }
+.node-flow-outro .node-flow-arrow { color: var(--ct-outro); }
+.node-flow-transition .node-flow-arrow { color: var(--ct-transition); }
+.node-flow-pick { cursor: pointer; }
+.node-flow-pick:hover { background: var(--panel); }
+.state-active .node-flow-line { color: rgba(252, 252, 252, .8); }
+.state-active .node-flow-pick:hover { background: rgba(252, 252, 252, .12); }
+.node-card.node-locked .node-flow-pick { cursor: default; }
 
 /* The open listbox — an absolutely positioned overlay anchored to the
    *row* that opened it (mirroring .node-socket-row .node-socket's own
@@ -845,7 +934,6 @@ a { color: var(--accent); }
   background: var(--paper); border-radius: 5px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .18); overflow: hidden auto; max-height: 160px;
 }
-.node-socket-row-right .node-socket-listbox { left: auto; right: 0; }
 .node-socket-option {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;
   width: 100%; padding: 8px 10px; font-size: 11.5px; color: var(--ink); text-align: left;
@@ -876,106 +964,7 @@ a { color: var(--accent); }
 }
 .state-active .socket-selected-dot { background: var(--paper-fixed); box-shadow: 0 0 0 2px rgba(19, 19, 19, .35); }
 
-/* One dot style, everywhere, full stop — no socket looks like an
-   exception, and no longer color-coded by type (Intro/Outro/Transition)
-   either — matches docs/design/socket-redesign-v6.html's own "Corrected
-   after review: sockets are all plain circles now... type is shown by
-   label text and column (left = input, right = output) only" call,
-   carried through unchanged into screen-atlas.html (whose own
-   --sock-intro/-outro/-transition tokens turned out to be unused leftover
-   copies of the real app's token block — never actually referenced by
-   its own component CSS — not a signal to keep the per-type color).
-   Every *available* socket is a hollow outline (grey border, panel fill)
-   until it's the row actually in use, which fills solid ink instead —
-   the same active/inactive contrast the row's own label text already
-   uses (.node-socket-row-active), just applied to the dot too, and a
-   more legible "chosen vs. not" signal than the old scheme (every
-   available dot solid-filled, active only getting an extra ring). An
-   *unavailable* socket (no produced edge for this song) is flat grey and
-   inert — still occupies its row, per the fixed three-row layout, but
-   can't be dragged, clicked, or connected to. */
-.graph-pane .react-flow__handle.node-socket {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--line);
-  background: var(--panel); z-index: 3; opacity: 1; pointer-events: auto; flex: none;
-}
-/* The visible dot stays modest (13px, matching the row's scale) but the
-   real clickable/draggable target is a much bigger invisible circle
-   around it —
-   a `::before` pseudo-element doesn't change the handle's own measured
-   `getBoundingClientRect` (what React Flow registers as this handle's
-   position for connection-radius math), only what the browser's own
-   hit-testing considers "inside" it, so this doesn't reopen the handle-
-   bounds-drift issue fixed earlier. Positioned relative to the handle's own
-   box (its `position: absolute` already makes it a containing block for
-   this), so it recenters correctly on both left- and right-side rows
-   without needing a separate rule for each.
-   Deliberately NOT counter-scaled against zoom the way the edge disconnect
-   button is (see ActiveEdge in GraphPane.jsx) — tried that first, and at a
-   fairly ordinary zoomed-out view it made adjacent rows' hit-areas overlap
-   so much that clicking the *space between* None/Intro/Transition would
-   land on whichever one happened to win the DOM order, not whichever you
-   were actually closest to (confirmed directly: the same screen point hit
-   .node-socket-intro's hit-area instead of the .node-socket-none it was
-   closest to). 20px keeps this proportional to canvas zoom like the dot
-   itself and everything else on the card, and — recomputed for the bigger
-   13px dot and 22px row (socket-redesign-v6/screen-atlas sizing) — still
-   safely inside the 23px canvas-unit spacing between stacked rows
-   (`.node-socket-row` height 22px + `.node-socket-side` gap 1px): two
-   adjacent 20px hit-circles leave a 3px clear buffer between them, the
-   same margin the original 16px-vs-19px math had. */
-.graph-pane .react-flow__handle.node-socket::before {
-  content: ''; position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
-  transform: translate(-50%, -50%);
-}
-.node-socket-row .node-socket { left: -16px; }
-/* `left` and `right` are different properties, so the ruleset above never
-   gets "overridden" by this one just for coming later — both values apply
-   at once, and per the absolute-positioning spec, a fixed (non-auto)
-   width means `left` wins and `right` is silently ignored. Without
-   `left: auto` here, every right-side socket was actually being
-   positioned by the LEFT rule above (relative to the row's left edge, the
-   wrong side entirely) — this is what made right-side arrows look like
-   they came out of nowhere on the card, not just an offset tweak. */
-.node-socket-row-right .node-socket { left: auto; right: -16px; }
-/* The dot actually in use for this row fills solid ink — no separate
-   ring/glow needed once "chosen" already reads as a fill-color change
-   from the hollow default (see the big comment above); the hover ring
-   below is a distinct, temporary "you're over something" cue, not this
-   permanent state, so the two were never really the same effect. */
-.graph-pane .react-flow__handle.node-socket.node-socket-active { background: var(--ink); border-color: var(--ink); }
-.node-socket-clickable { cursor: pointer; }
-.node-socket-clickable:hover { box-shadow: 0 0 0 4px var(--socket-ring); }
-.node-socket-draggable { cursor: crosshair; }
-/* No `scale()` here on purpose — see the note on `.connectingto.valid`
-   below: growing the handle via `transform` changes its measured
-   `getBoundingClientRect`, which is exactly the box React Flow reads to
-   track where this handle actually is while a connection drag is live.
-   The ring (box-shadow, which doesn't affect layout/measurement at all)
-   still gives the same "you're over something" feedback. */
-.node-socket-draggable:hover { box-shadow: 0 0 0 4px var(--socket-ring); }
-.graph-pane .react-flow__handle.node-socket:not(.node-socket-available) {
-  background: var(--line); border-color: var(--line); pointer-events: none; cursor: default;
-}
 
-/* One neutral hover-ring color for every type now (see the big comment
-   above on why type no longer colors the dot itself). */
-.node-socket-none, .node-socket-intro, .node-socket-outro, .node-socket-transition {
-  --socket-ring: rgba(19, 19, 19, .2);
-}
-/* On the dark Active card, a hollow grey-on-panel dot (and a solid black
-   "chosen" dot) would both disappear against the card's own dark fill —
-   the same light-on-dark swap the row's own label/section-border already
-   get (see .state-active .node-socket-label etc.), applied to the dot. */
-.graph-pane .node-card.state-active .react-flow__handle.node-socket {
-  border-color: rgba(252, 252, 252, .4); background: rgba(252, 252, 252, .12);
-}
-.graph-pane .node-card.state-active .react-flow__handle.node-socket.node-socket-active {
-  background: var(--paper-fixed); border-color: var(--paper-fixed);
-}
-.graph-pane .node-card.state-active .react-flow__handle.node-socket:not(.node-socket-available) {
-  background: rgba(252, 252, 252, .25); border-color: rgba(252, 252, 252, .25);
-}
 
 /* Visual snap feedback while dragging a connection: React Flow marks the
    closest compatible handle within `connectionRadius` with `.valid` (and
@@ -1014,7 +1003,7 @@ a { color: var(--accent); }
 }
 
 .node-card {
-  width: 224px; border-radius: var(--radius); padding: 10px;
+  width: 214px; border-radius: var(--radius); padding: 0;
   background: var(--paper); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .14);
   user-select: none; transition: box-shadow .16s ease, background .16s ease, transform .16s ease;
   position: relative; transform: scale(1); transform-origin: center;
@@ -1079,10 +1068,7 @@ a { color: var(--accent); }
    not as an error. The sockets stop offering a pointer since none of them
    respond any more; the card itself stays fully legible and still
    selectable, and the Active card's own treatment is left alone. */
-.node-card.node-locked .node-socket-clickable,
-.node-card.node-locked .node-socket-draggable { cursor: default; }
-.node-card.node-locked .node-socket-row-picker { cursor: default; }
-.node-card.node-locked:not(.state-active) .node-socket-row-active .node-socket-label { color: var(--muted); }
+.node-card.node-locked:not(.state-active) .node-flow-label { color: var(--faint); }
 .node-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .node-title { font-weight: 600; font-size: 13.5px; line-height: 1.3; }
 .node-artist { font-size: 11px; margin-bottom: 6px; color: var(--muted); line-height: 1.3; }

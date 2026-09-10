@@ -22,7 +22,7 @@ export { NODE_W, NODE_H, END_W, END_H, START_W, START_H };
 // actually connected.
 export function computeDagreLayout(songs, activePlaylist) {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: 'LR', nodesep: 50, ranksep: 110, marginx: 20, marginy: 20 });
+  g.setGraph({ rankdir: 'TB', nodesep: 64, ranksep: 62, marginx: 20, marginy: 20 });
   g.setDefaultEdgeLabel(() => ({}));
 
   // Only feed dagre songs that actually participate in some real wiring

@@ -49,6 +49,16 @@ const PRO_OPTIONS = { hideAttribution: true };
 // distinct dash rhythm from the grey one, not just a color difference, so
 // all three still read at a zoomed-out scale.
 const LINE_COLOR = { light: { grey: '#c7c7c7', ink: '#131313' }, dark: { grey: '#4b4d52', ink: '#f1f0ed' } };
+// Wire colour keyed to connection type, matching the --ct-* port tokens in
+// styles.css exactly — the point of the whole system is that a wire and the
+// port it leaves from are the same colour. Kept as literals rather than read
+// from CSS custom properties because these are handed to React Flow as SVG
+// `stroke` values inside a memo, and resolving a var() per edge per render on
+// a 50-node graph is work for no gain.
+const WIRE_COLOR = {
+  light: { none: '#0a84ff', intro: '#00b84d', outro: '#ff8a00', transition: '#a855f7' },
+  dark: { none: '#4da3ff', intro: '#2ed673', outro: '#ffa233', transition: '#c084fc' },
+};
 const DOT_COLOR = { light: '#c8c8c8', dark: '#38393d' };
 
 // Same control-point math React Flow's own bezier edge uses for fixed
@@ -161,7 +171,7 @@ function ActiveEdge({ id, sourceX, sourceY, sourcePosition, targetX, targetY, ta
 const edgeTypes = { fanned: FannedEdge, active: ActiveEdge };
 
 export default function GraphPane({
-  songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId, lockedIds,
+  songs, positions, transitionEdgesRaw, activePlaylist, socketDataById, onToggleSocket, onSelectVariant, mixingEdgeId, lockedIds, committedWireId,
   onConnect, isValidConnection, onDisconnectOutput, onDisconnectStart,
   stateFor, ioById,
   matchIds, searchActive,
@@ -172,6 +182,7 @@ export default function GraphPane({
 }) {
   const { isDark } = useTheme();
   const lineColor = isDark ? LINE_COLOR.dark : LINE_COLOR.light;
+  const wireColor = isDark ? WIRE_COLOR.dark : WIRE_COLOR.light;
   const dotColor = isDark ? DOT_COLOR.dark : DOT_COLOR.light;
 
   const initialNodes = useMemo(() => buildNodes(), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -351,7 +362,10 @@ export default function GraphPane({
       // set, not equality against a single "primary" edge, so autoconnect
       // (or a second manual drag) shows every wired one as active.
       const isActive = !!sourceNode && nodeOutputs(sourceNode).some(o => o.type === 'transition' && o.edgeId === e.id);
-      const color = isActive ? lineColor.ink : lineColor.grey;
+      // An unwired candidate stays neutral grey — it isn't a connection yet, so
+      // giving it the type's colour would claim more than is true.
+      const color = isActive ? wireColor.transition : lineColor.grey;
+      const isCommitted = isActive && committedWireId === e.id;
       return {
         id: e.id, source: e.l, target: e.r,
         sourceHandle: 'right-transition', targetHandle: 'left-transition',
@@ -361,7 +375,17 @@ export default function GraphPane({
         // node (of any type) untouched.
         data: !isActive ? undefined : { offset, onDisconnect: () => onDisconnectOutput(e.l, 'transition', e.id) },
         animated: isActive && mixingEdgeId === e.id,
-        style: { stroke: color, strokeWidth: isActive ? 3 : 1.5, strokeDasharray: isActive ? undefined : '2 4' },
+        // Two weights for two meanings, the way Blueprints separates execution
+        // from data: the committed path (session.committedHop — the output
+        // playback will actually take) is heavy, every merely-possible path is
+        // a hairline. Reading "where is this set going" across a busy canvas is
+        // the whole job for a live tool.
+        style: {
+          stroke: color,
+          strokeWidth: isCommitted ? 3.5 : (isActive ? 1.75 : 1.25),
+          strokeDasharray: isActive ? undefined : '2 4',
+          opacity: isActive ? 1 : 0.55,
+        },
       };
     });
     // Every active None/Outro entry gets its own synthetic edge (there's
@@ -407,7 +431,10 @@ export default function GraphPane({
           // animated AT ALL, regardless of mixingEdgeId, because `animated`
           // was never even set on this branch.
           animated: o.type === 'outro' && !!mixingEdgeId && mixingEdgeId === o.edgeId,
-          style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
+          style: {
+            stroke: wireColor[o.type] || lineColor.ink,
+            strokeWidth: committedWireId === ('link-' + songId + '-' + o.type) ? 3.5 : 1.75,
+          },
         });
       });
     });
@@ -424,11 +451,11 @@ export default function GraphPane({
         sourceHandle: 'start-out', targetHandle: 'left-' + startMode,
         type: 'active',
         data: { onDisconnect: onDisconnectStart },
-        style: { stroke: lineColor.ink, strokeWidth: 2, strokeDasharray: '5 3' },
+        style: { stroke: wireColor[startMode] || lineColor.ink, strokeWidth: 1.75, strokeDasharray: '5 3' },
       });
     }
     return edgesOut;
-  }, [transitionEdgesRaw, activePlaylist, songs, lineColor, mixingEdgeId, onDisconnectOutput, onDisconnectStart]);
+  }, [transitionEdgesRaw, activePlaylist, songs, lineColor, wireColor, committedWireId, mixingEdgeId, onDisconnectOutput, onDisconnectStart]);
 
   const onNodeDragStop = useCallback((_, node) => {
     onDragSongPosition(node.id, node.position.x, node.position.y);

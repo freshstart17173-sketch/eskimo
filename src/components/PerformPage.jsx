@@ -27,6 +27,8 @@ export default function PerformPage(props) {
   );
 }
 
+const SOCKET_TYPE_LABEL = { none: 'None', intro: 'Intro', outro: 'Outro', transition: 'Transition' };
+
 function PerformPageInner({ songs, setSongs, edges, session, setSession, venueName, goUpload, goLibrary, onLoadExample }) {
   const rf = useReactFlow();
   const [searchQuery, setSearchQuery] = useState('');
@@ -416,6 +418,21 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
   // candidate needs no picker at all.
   const activePlaylist = session.activePlaylist;
   const socketDataById = useMemo(() => {
+    // Who wires INTO each song — the card's own "arrives from" line reads this.
+    // Built once for the whole graph rather than re-scanned per node, since a
+    // naive lookup inside the loop below would be O(n^2) across the canvas.
+    const sourceLabelById = {};
+    const pl = activePlaylist;
+    if (pl.startSongId) sourceLabelById[pl.startSongId] = 'Start Set';
+    Object.keys(pl.nodes || {}).forEach((fromId) => {
+      nodeOutputs(pl.nodes[fromId]).forEach((o) => {
+        if (!o.targetId || o.targetId === END) return;
+        if (sourceLabelById[o.targetId]) return;
+        const t = (songs[fromId] || {}).title;
+        if (t) sourceLabelById[o.targetId] = t;
+      });
+    });
+
     const map = {};
     Object.keys(placedSongs).forEach(id => {
       const node = activePlaylist.nodes[id];
@@ -529,11 +546,33 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
       if (outroEntry && outroEntry.targetId) rightFilledLabelByType.outro = destName(outroEntry.targetId);
       if (transitionEntry && transitionEntry.targetId) rightFilledLabelByType.transition = destName(transitionEntry.targetId);
 
+      const leftAvailableFlags = leftSocketAvailability(visibleEdges, id);
+      const rightAvailableFlags = rightSocketAvailability(visibleEdges, id);
+      const cardSong = songs[id] || {};
+
+      // Every active output type gets a real destination name, not just the
+      // two (outro/transition) the old rows happened to fill in — the card's
+      // flow lines are the only place the destination is shown now, so a plain
+      // None wire has to name where it goes too.
+      const rightTargetLabelByType = {};
+      rightActiveTypes.forEach((t) => {
+        const target = rightTargetIdByType[t];
+        rightTargetLabelByType[t] = (target ? destName(target) : null) || SOCKET_TYPE_LABEL[t] || null;
+      });
+
+      // Status as marks instead of words (see the badge row on the card).
+      const badges = [];
+      if (cardSong.audioUrl) badges.push({ key: 'audio', title: 'Master audio uploaded' });
+      else badges.push({ key: 'noaudio', title: 'No master audio yet' });
+      if (rightAvailableFlags.outro || leftAvailableFlags.intro) badges.push({ key: 'built', title: 'Has produced intro/outro audio' });
+      if (cardSong.contributedBy) badges.push({ key: 'shared', title: 'Added by ' + cardSong.contributedBy });
+
       map[id] = {
-        leftAvailable: leftSocketAvailability(visibleEdges, id), rightAvailable: rightSocketAvailability(visibleEdges, id),
+        leftAvailable: leftAvailableFlags, rightAvailable: rightAvailableFlags,
         leftActive, rightActiveTypes, leftFromStart,
         leftEdgeId, leftOptions, leftFilledLabel,
         rightOptionsByType, rightEdgeIdByType, rightCueSecondsByType, rightTargetIdByType, rightFilledLabelByType,
+        rightTargetLabelByType, sourceLabel: sourceLabelById[id] || null, badges,
       };
     });
     return map;
@@ -932,6 +971,15 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
     : queueHead.mode === 'transition' ? 'transition'
     : queueHead.ending === 'outro' ? 'outro'
     : 'none';
+
+  // Which drawn wire is the committed one, in the id space GraphPane builds its
+  // edges in: a Transition uses its own produced-edge id, while None/Outro ride
+  // a synthetic 'link-<song>-<type>' wrapper. GraphPane draws that one heavier
+  // than every merely-possible path.
+  const committedWireId = (!queueHead || !session.nowPlayingId || !committedOutputType) ? null
+    : (committedOutputType === 'transition'
+      ? (queueHead.edgeId || null)
+      : 'link-' + session.nowPlayingId + '-' + committedOutputType);
   // Only actually "mixing" (and so pulsing the graph's own edge — see
   // GraphPane's mixingEdgeId) within the real ~8s handoff window, same
   // window the scrub bar's own light-up crosses into naturally once
@@ -1072,7 +1120,7 @@ function PerformPageInner({ songs, setSongs, edges, session, setSession, venueNa
           <GraphPane
             songs={placedSongs} positions={positions} transitionEdgesRaw={transitionEdgesRaw} activePlaylist={activePlaylist}
             socketDataById={socketDataById} onToggleSocket={toggleSocket} onSelectVariant={selectVariant} mixingEdgeId={mixingEdgeId}
-            lockedIds={lockedIds}
+            lockedIds={lockedIds} committedWireId={committedWireId}
             onConnect={handleConnect} isValidConnection={isValidConnection}
             onDisconnectOutput={onDisconnectOutput} onDisconnectStart={disconnectStart}
             stateFor={stateFor} ioById={ioById}
@@ -1318,7 +1366,6 @@ function DetailPane({ song, socketData, io, songs, onPlay, onClose }) {
     leftActive: 'none', rightActiveTypes: [], leftEdgeId: null,
     leftOptions: [], rightOptionsByType: {}, rightCueSecondsByType: {}, rightTargetIdByType: {},
   };
-  const SOCKET_LABEL = { none: 'None', intro: 'Intro', outro: 'Outro', transition: 'Transition' };
   // A real wired destination — not just "this output type is on" — gets a
   // small green dot next to its name, the same "this leads somewhere real"
   // signal GraphPane's own edges give the socket that's actually drawn.
@@ -1353,7 +1400,7 @@ function DetailPane({ song, socketData, io, songs, onPlay, onClose }) {
       </button>
       <div className="detail-pane-section">
         <div className="detail-pane-section-title">Input <span className="detail-pane-count">↓{io.inCount}</span></div>
-        <div className="detail-pane-row">{SOCKET_LABEL[sd.leftActive]}{sd.leftOptions.length > 1 && ' (' + sd.leftOptions.length + ' variants)'}</div>
+        <div className="detail-pane-row">{SOCKET_TYPE_LABEL[sd.leftActive]}{sd.leftOptions.length > 1 && ' (' + sd.leftOptions.length + ' variants)'}</div>
       </div>
       <div className="detail-pane-section">
         <div className="detail-pane-section-title">Output <span className="detail-pane-count">↑{io.outCount}</span></div>
@@ -1364,7 +1411,7 @@ function DetailPane({ song, socketData, io, songs, onPlay, onClose }) {
           const dest = destinationLabel(sd.rightTargetIdByType[type]);
           return (
             <div className="detail-pane-row" key={type}>
-              {SOCKET_LABEL[type]}{options && options.length > 1 && ' (' + options.length + ' variants)'}
+              {SOCKET_TYPE_LABEL[type]}{options && options.length > 1 && ' (' + options.length + ' variants)'}
               {cueSec != null && <span className="detail-pane-cue"> · cue at {fmtTime(cueSec)}</span>}
               {dest && (
                 <span className="detail-pane-destination">

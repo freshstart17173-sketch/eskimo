@@ -105,52 +105,34 @@ export const MultiSelectionContext = createContext({ count: 0 });
 // real node editor scannable at a glance.
 const SOCKET_TITLE = { none: 'None', intro: 'Intro', outro: 'Outro', transition: 'Transition' };
 
-// A compact ring instead of a linear bar — cheaper on card width, and just
-// as readable at a glance. Color sweeps a single HSL hue from green (120°)
-// to red (0°) as the cue approaches, which passes through yellow/orange on
-// its own without needing separate named thresholds. The ring only starts
-// draining inside a short warning window before the cue — full green (and,
-// past that window, not rendered at all) the rest of the time, so it reads
-// as "still plenty of time" until it actually needs attention. Sits right
-// next to the label (not off past the dropdown) so scanning the row tells
-// you the urgency before you even look at which edge is selected.
-// Replaced the old live countdown ring on direct instruction: "get rid of
-// the countdown circle and instead replace with a little indicator showing
-// if a certain output is selected/active or not... so I can see at a
-// glance if playback is gonna go with none or outro."
+// The committed-output indicator, in answer to: "get rid of the countdown
+// circle and instead replace with a little indicator showing if a certain
+// output is selected/active or not... so I can see at a glance if playback is
+// gonna go with none or outro."
 //
 // A ring counting down to a cue answered a different question ("how long
-// left") than the one actually being asked at a glance ("which of these
-// is the one that's going to fire"). It also couldn't answer that second
-// question honestly until the hop stopped being re-rolled every tick —
-// with the decision now frozen when the song starts (commitHopFor,
-// core.js) there IS a single true answer to point at, so this is a plain
-// static dot rather than anything animated.
+// left") than the one actually being asked at a glance ("which of these is the
+// one that's going to fire"). It also couldn't answer that second question
+// honestly until the hop stopped being re-rolled every tick — with the
+// decision now frozen when the song starts (commitHopFor, core.js) there IS a
+// single true answer to point at, so this is a plain static dot rather than
+// anything animated.
 function SelectedOutputDot() {
   return <span className="socket-selected-dot" role="img" aria-label="selected — playback will take this output" />;
 }
 
-// This song's own "elapsed / duration" readout — real position, read off
-// the engine's own clock every frame (see usePlaybackFrame,
-// docs/playback-model.md sec 7), not from a once-a-second `elapsed` React
-// prop. That prior version froze for the entire span of a real fragment
-// (an outro/transition clip) actually playing: "elapsed into this song"
-// stops being a coherent question the instant the song's own master ends
-// and a produced clip takes over — there IS no later position on the
-// song's own timeline for a once-a-second `duration - timeLeft` derivation
-// to (wrongly) keep counting up against, so it visibly stuck at the song's
-// own full duration for as long as the fragment kept playing, reading as
-// "frozen" (and easy to mistake for "still playing the original song") —
-// reported directly, twice, against real produced audio. `getPlaybackPosition`'s
-// phase model already has the right shape for this: while `songId`'s own
-// main deck is sounding, show its real elapsed/duration; the moment a
-// fragment takes over, switch to *its* real elapsed/duration instead — the
-// same "coming up next" progress the fixed Add Audio/Library preview
-// players already show, now live during an actual set too. Gated by the
-// caller on "this is the currently-playing card" (mount/unmount, not a
-// per-frame condition here), so a fragment phase always means *this* card's
-// own fragment — nowPlayingId doesn't change to anything else until the
-// fragment's done (see syncSessionFromFiredPlan).
+// This song's own "elapsed / duration" readout — real position, read off the
+// engine's own clock every frame (see usePlaybackFrame, docs/playback-model.md
+// sec 7), not from a once-a-second `elapsed` React prop. That prior version
+// froze for the entire span of a real fragment (an outro/transition clip)
+// actually playing: "elapsed into this song" stops being a coherent question
+// the instant the song's own master ends and a produced clip takes over — so
+// it visibly stuck at the song's full duration for as long as the fragment
+// kept playing, easy to mistake for "still playing the original song", and
+// reported directly twice against real produced audio. Gated by the caller on
+// "this is the currently-playing card" (mount/unmount, not a per-frame
+// condition here), so a fragment phase always means *this* card's own
+// fragment — nowPlayingId doesn't change until the fragment is done.
 function NodePosition({ songId }) {
   const spanRef = useRef(null);
   usePlaybackFrame((pos) => {
@@ -162,47 +144,79 @@ function NodePosition({ songId }) {
   return <span className="node-position mono-num" ref={spanRef} />;
 }
 
-// One row: a colored socket dot (a real React Flow `Handle`) plus a label
-// — normally the fixed type title ("Intro"/"Outro"/"Transition"), so a
-// row this particular song can't use (no produced edge) still renders,
-// just greyed out and non-interactive, giving every node card the same
-// scannable shape instead of a variable number of rows. Available dots
-// (whether active or not) render the same way — solid, filled with the
-// type's color — with only a ring/glow added for the active one;
-// unavailable dots are flat grey. One dot style, one position rule
-// (straddling the card edge, same offset for every row), applied
-// everywhere, is the whole point — no socket looks like an exception.
-// Every *available* socket is drag-connectable, since None/Outro on one
-// song can link to None/Intro on a *different* song (a plain click can't
-// express which other song to link to); None/Intro/Outro additionally
-// toggle on a plain click, for marking a song's own ending/starting style
-// with no particular partner in mind (e.g. "this is the last song, it
-// just has an outro"). Transition is drag-only — two songs only ever have
-// a specific produced transition between them, never a generic one to
-// click into existence. Nesting the Handle inside a `position: relative`
-// row lets it center on *this row* (CSS resolves an absolutely-positioned
-// element against its nearest positioned ancestor, not the whole node),
-// so rows can stack via ordinary flexbox regardless of how many there are.
+// ---------------------------------------------------------------------------
+// Ports and flow lines — the card's whole connection surface.
 //
-// The *active* row for a slot with 2+ produced candidates (see
-// `*Options`) doubles as its own variant picker — the label swaps from
-// the fixed type title to the currently-picked candidate's own name (the
-// only case where a row's text isn't the fixed title: this is the same
-// name a separate trigger button used to show below the columns, just
-// relocated onto the row itself now that that trigger is gone), and
-// clicking the row (not the dot — the dot keeps its own toggle-click)
-// opens a listbox of the other candidates. A Transition row's dot has no
-// click handler at all, so the row's own click can't conflict with it.
-function SocketRow({ side, type, available, active, committed, onToggle, options = [], selectedEdgeId, filledLabel, onSelectVariant, locked }) {
+// This replaced a six-row socket matrix (None/Intro/Transition down the left,
+// None/Outro/Transition down the right) that every card rendered in full
+// whether or not the rows carried anything. On the 50-node example graph that
+// was ~300 rows of mostly-repeated words, and the word "None" alone appeared
+// about a hundred times to label the *absence* of a thing. No other node
+// editor surveyed does this (docs/design/node-editor-inspiration.pdf); the
+// closest precedent, cables.gl, spends almost no space on ports at all.
+//
+// So a port is now a segment of a strip running along the card's top edge
+// (inputs) and bottom edge (outputs). Colour carries the type — see the --ct-*
+// tokens in styles.css — and position carries identity, so the type name never
+// has to be printed. The strip segment IS the React Flow Handle, which makes
+// the hit target substantially larger than the 9px circles it replaces even
+// though it occupies far less of the card.
+//
+// Handles sit on Position.Top/Position.Bottom, so the graph flows top-to-bottom
+// (graphLayout.js ranks TB to match). Handle *ids* are unchanged — still
+// `left-<type>` / `right-<type>` — because isValidConnection and handleConnect
+// in PerformPage.jsx parse them, and this is purely a presentation change.
+//
+// Interaction is preserved exactly: None/Intro/Outro toggle on a plain click,
+// Transition is drag-only (two songs only ever have a specific produced
+// transition between them, never a generic one to click into existence), and
+// every available port is drag-connectable.
+function PortStrip({ side, types, availability, activeTypes = [], committedType = null, onToggle, locked }) {
   const isInput = side === 'left';
-  // A locked row still shows which variant is selected, it just can't be
-  // changed — the choice is already scheduled (see lockedIds, PerformPage.jsx).
-  const hasPicker = !!(active && options.length > 1 && !locked);
+  return (
+    <div className={'node-ports' + (isInput ? ' node-ports-in' : ' node-ports-out')}>
+      {types.map((type) => {
+        const available = !!availability[type];
+        const active = activeTypes.includes(type);
+        const committed = !isInput && active && committedType === type;
+        const clickable = available && type !== 'transition' && !!onToggle;
+        return (
+          <Handle
+            key={type}
+            type={isInput ? 'target' : 'source'}
+            position={isInput ? Position.Top : Position.Bottom}
+            id={side + '-' + type}
+            isConnectable={available}
+            data-tooltip={SOCKET_TITLE[type] + (available ? '' : ' — nothing produced yet')}
+            className={[
+              'node-port', 'node-port-' + type,
+              available && 'node-port-available', active && 'node-port-active',
+              committed && 'node-port-committed',
+              available ? (type === 'transition' ? 'node-port-draggable' : 'node-port-clickable') : null,
+            ].filter(Boolean).join(' ')}
+            onClick={clickable ? (e) => { e.stopPropagation(); onToggle(side, type); } : undefined}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// One line of "where this connection actually goes", sitting inside the card
+// between a port strip and the main content — placed there by direct
+// instruction. It's what makes the strips affordable: collapsing the ports to
+// colour alone would otherwise have thrown away the destination name, which
+// was the one genuinely load-bearing thing the old rows displayed.
+//
+// A line with two or more produced candidates doubles as its own variant
+// picker (the same listbox the old active row carried, just relocated), so
+// choosing between e.g. "Fast cut" and "Slow blend" to the same song stays a
+// single click on the card.
+function FlowLine({ dir, type, label, options = [], selectedEdgeId, committed, onSelectVariant, locked }) {
+  const hasPicker = !!(options && options.length > 1 && !locked);
   const [open, setOpen] = useState(false);
   const rowRef = useRef(null);
-  useEffect(() => {
-    if (!hasPicker) setOpen(false);
-  }, [hasPicker]);
+  useEffect(() => { if (!hasPicker) setOpen(false); }, [hasPicker]);
   useEffect(() => {
     if (!open) return undefined;
     function onDocMouseDown(e) {
@@ -211,19 +225,20 @@ function SocketRow({ side, type, available, active, committed, onToggle, options
     document.addEventListener('mousedown', onDocMouseDown, true);
     return () => document.removeEventListener('mousedown', onDocMouseDown, true);
   }, [open]);
-  const selected = hasPicker ? (options.find(o => o.id === selectedEdgeId) || options[0]) : null;
-  // With the picker suppressed the row would otherwise fall back to the
-  // generic type name and appear to lose the variant the DJ actually chose.
-  const lockedLabel = (locked && active && options.length > 1)
-    ? ((options.find(o => o.id === selectedEdgeId) || options[0]).label) : null;
-  const cls = [
-    'node-socket-row', !isInput && 'node-socket-row-right',
-    active && 'node-socket-row-active', !available && 'node-socket-row-unavailable',
-    hasPicker && 'node-socket-row-picker nodrag',
-  ].filter(Boolean).join(' ');
+
+  const picked = (options || []).find(o => o.id === selectedEdgeId) || (options || [])[0];
+  // The destination always wins the line. When several produced clips lead to
+  // the same place, the chosen one's own name rides alongside it in muted
+  // text rather than replacing it — the old rows showed the variant INSTEAD
+  // of the destination, which was survivable when a separate socket label
+  // still named the target, and isn't now that this line is the only place
+  // the destination appears at all.
+  const variantName = (options && options.length > 1 && picked) ? picked.label : null;
+
   return (
     <div
-      className={cls} ref={rowRef}
+      className={'node-flow-line node-flow-' + type + (hasPicker ? ' node-flow-pick nodrag' : '')}
+      ref={rowRef}
       role={hasPicker ? 'button' : undefined} tabIndex={hasPicker ? 0 : undefined}
       onMouseDown={hasPicker ? (e) => e.stopPropagation() : undefined}
       onClick={hasPicker ? (e) => { e.stopPropagation(); setOpen(o => !o); } : undefined}
@@ -232,28 +247,11 @@ function SocketRow({ side, type, available, active, committed, onToggle, options
         e.preventDefault(); e.stopPropagation(); setOpen(o => !o);
       } : undefined}
     >
-      <Handle
-        type={isInput ? 'target' : 'source'} position={isInput ? Position.Left : Position.Right}
-        id={side + '-' + type} isConnectable={available}
-        className={[
-          'node-socket', 'node-socket-' + type,
-          available && 'node-socket-available', active && 'node-socket-active',
-          available ? (type === 'transition' ? 'node-socket-draggable' : 'node-socket-clickable') : null,
-        ].filter(Boolean).join(' ')}
-        onClick={(!available || type === 'transition' || !onToggle) ? undefined : (e) => { e.stopPropagation(); onToggle(side, type); }}
-      />
-      {/* Only ever show the bare type name ("None"/"Intro"/"Outro"/
-          "Transition") for an empty slot. Once something's actually
-          selected to play through this socket, name that instead — the
-          picker's own variant label when there's a real choice among
-          several built pieces (already distinguishes them, e.g. "Fast
-          cut" vs "Slow blend" to the very same song), otherwise the real
-          song this socket's audio actually connects to (filledLabel, see
-          socketDataById/PerformPage.jsx) — a plain type name told you
-          nothing once a slot had something real playing through it
-          (reported directly). */}
-      <span className="node-socket-label">{hasPicker ? selected.label : (lockedLabel || filledLabel || SOCKET_TITLE[type])}</span>
+      <span className="node-flow-arrow">{dir === 'in' ? '↓' : '→'}</span>
+      <span className="node-flow-label">{label}</span>
+      {variantName && <span className="node-flow-variant">{variantName}</span>}
       {committed && <SelectedOutputDot />}
+      {hasPicker && <span className="node-flow-caret">▾</span>}
       {open && (
         <div className="node-socket-listbox" onMouseDown={(e) => e.stopPropagation()}>
           {options.map((opt) => (
@@ -277,38 +275,6 @@ function SocketRow({ side, type, available, active, committed, onToggle, options
   );
 }
 
-// `activeTypes` is a *set* now, not a single mode — a node's right/output
-// side can have more than one type active at once (None to one place,
-// Outro to another, one-or-more Transitions to others, all
-// simultaneously — reported directly, exactly this shape). The left/
-// arrival side still only ever has zero or one active type (out of scope
-// to change, by direct instruction), so it's just always passed as a
-// one-or-zero-element array here for one shared interface instead of two.
-// `optionsByType`/`selectedEdgeIdByType` are keyed by type for the same
-// reason — each active type gets its own independent dropdown data now,
-// not one shared value gated on a single "which type is active" check.
-// `committedType` is the one output this song has actually committed to
-// firing (session.committedHop, see commitHopFor in core.js) — null for
-// every node that isn't currently playing.
-function SocketList({ side, types, availability, activeTypes = [], onToggle, committedType = null, optionsByType = {}, selectedEdgeIdByType = {}, filledLabelByType = {}, onSelectVariant, locked }) {
-  return (
-    <div className={'node-socket-side' + (side === 'right' ? ' node-socket-side-right' : '')}>
-      {types.map((type) => {
-        const isActive = activeTypes.includes(type);
-        return (
-          <SocketRow
-            key={type} side={side} type={type} available={!!availability[type]} active={isActive}
-            committed={isActive && committedType === type} onToggle={onToggle} locked={locked}
-            options={isActive ? optionsByType[type] : undefined} selectedEdgeId={isActive ? selectedEdgeIdByType[type] : undefined}
-            filledLabel={isActive ? filledLabelByType[type] : null}
-            onSelectVariant={(edgeId) => onSelectVariant(type, selectedEdgeIdByType[type], edgeId)}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
 // `state` is 'active' or null — whether this song is really playing right
 // now (session.nowPlayingId), driving the full color-matched fill/pulse.
 // `isSelected` is a completely independent boolean — purely "what was
@@ -323,7 +289,8 @@ export function SongNode({ data, selected }) {
   const {
     song, state, isSelected, inCount, outCount, playing, onSelect,
     leftAvailable, rightAvailable, leftActive, rightActiveTypes, leftEdgeId, leftFilledLabel,
-    leftOptions, rightOptionsByType, rightEdgeIdByType, rightFilledLabelByType, onToggleSocket, onSelectVariant, locked,
+    leftOptions, rightOptionsByType, rightEdgeIdByType, onToggleSocket, onSelectVariant, locked,
+    rightTargetLabelByType = {}, sourceLabel = null, badges = null,
   } = data;
   const nowPlaying = useContext(NowPlayingContext);
   const { searchActive, matchIds } = useContext(SearchDimContext);
@@ -358,45 +325,83 @@ export function SongNode({ data, selected }) {
   // them yet: "which one fires" is a question that only has an answer
   // once a song is actually the one playing.
   const committedType = isNowPlayingHere ? (nowPlaying.committedType || null) : null;
+  // Every active output, in the order the strip shows them, so the lines under
+  // the card body read in the same order as the ports above them.
+  const outLines = RIGHT_SOCKET_TYPES.filter(t => rightActiveTypes.includes(t)).map(type => ({
+    type,
+    label: rightTargetLabelByType[type] || SOCKET_TITLE[type],
+    options: rightOptionsByType[type],
+    selectedEdgeId: rightEdgeIdByType[type],
+    committed: committedType === type,
+  }));
+  const hasIn = leftActive && leftActive !== 'none' ? true : !!sourceLabel;
+
   return (
     <div className={cls} style={dynamicStyle} onClick={onSelect}>
-      <div className="node-title-row">
-        <div>
+      <PortStrip
+        side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable}
+        activeTypes={leftActive === 'none' ? [] : [leftActive]}
+        onToggle={onToggle} locked={locked}
+      />
+      {hasIn && (
+        <div className="node-flow node-flow-in">
+          <FlowLine
+            dir="in" type={leftActive === 'none' ? 'none' : leftActive}
+            label={leftFilledLabel || sourceLabel || SOCKET_TITLE[leftActive]}
+            options={leftOptions} selectedEdgeId={leftEdgeId} locked={locked}
+            onSelectVariant={(edgeId) => onSelectVariant(song.id, 'left', leftActive, leftEdgeId, edgeId)}
+          />
+        </div>
+      )}
+
+      <div className="node-body">
+        <AlbumArt className="node-art" url={song.coverUrl} />
+        <div className="node-meta">
           <div className="node-title">{song.title}</div>
           <div className="node-artist">{song.artist}</div>
-          {song.contributedBy && <div className="node-contributor" data-tooltip="Added by">{song.contributedBy}</div>}
+          <div className="node-tags">
+            <span className="tag tag-accent">{song.bpm}</span>
+            <span className="tag tag-good">{song.key}</span>
+            <span className="node-io">{inCount}/{outCount}</span>
+          </div>
         </div>
-        <AlbumArt className="node-art" url={song.coverUrl} />
+        {/* Status as marks rather than words — Houdini's badge row, which is
+            how it fits four independent facts under a name without the card
+            growing (docs/design/node-editor-inspiration.pdf). */}
+        {badges && badges.length > 0 && (
+          <div className="node-badges">
+            {badges.map(b => (
+              <span key={b.key} className={'node-badge node-badge-' + b.key} data-tooltip={b.title} />
+            ))}
+          </div>
+        )}
       </div>
-      <div className="node-tags-row">
-        <div className="node-tags">
-          <span className="tag tag-accent">{song.bpm} BPM</span>
-          <span className="tag tag-good">{song.key}</span>
-        </div>
-        <div className="node-io">↓{inCount} ↑{outCount}</div>
-      </div>
+
       {playing && (
         <div className="node-playing-row">
           <LiveWaveform />
           {isNowPlayingHere && <NodePosition songId={song.id} />}
         </div>
       )}
-      <div className="node-socket-section">
-        <div className="node-socket-columns">
-          <SocketList
-            side="left" types={LEFT_SOCKET_TYPES} availability={leftAvailable} activeTypes={leftActive === 'none' ? [] : [leftActive]} onToggle={onToggle} locked={locked}
-            optionsByType={{ [leftActive]: leftOptions }} selectedEdgeIdByType={{ [leftActive]: leftEdgeId }}
-            filledLabelByType={{ [leftActive]: leftFilledLabel }}
-            onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'left', type, oldEdgeId, edgeId)}
-          />
-          <SocketList
-            side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable} activeTypes={rightActiveTypes} onToggle={onToggle} locked={locked}
-            committedType={committedType} optionsByType={rightOptionsByType} selectedEdgeIdByType={rightEdgeIdByType}
-            filledLabelByType={rightFilledLabelByType}
-            onSelectVariant={(type, oldEdgeId, edgeId) => onSelectVariant(song.id, 'right', type, oldEdgeId, edgeId)}
-          />
+
+      {outLines.length > 0 && (
+        <div className="node-flow node-flow-out">
+          {outLines.map(l => (
+            <FlowLine
+              key={l.type} dir="out" type={l.type} label={l.label}
+              options={l.options} selectedEdgeId={l.selectedEdgeId}
+              committed={l.committed} locked={locked}
+              onSelectVariant={(edgeId) => onSelectVariant(song.id, 'right', l.type, l.selectedEdgeId, edgeId)}
+            />
+          ))}
         </div>
-      </div>
+      )}
+
+      <PortStrip
+        side="right" types={RIGHT_SOCKET_TYPES} availability={rightAvailable}
+        activeTypes={rightActiveTypes} committedType={committedType}
+        onToggle={onToggle} locked={locked}
+      />
     </div>
   );
 }
@@ -405,19 +410,18 @@ export function SongNode({ data, selected }) {
 // (highlighted next/later like any other hop) but isn't itself clickable:
 // the real trigger lives in the toolbar, deliberately apart from the graph
 // so panning/clicking around the canvas can't end the set by accident. Its
-// one input socket reuses the same dot style as every other socket (was
-// previously invisible — a bare `Handle` with no `.node-socket` class
-// inherits the canvas-wide "hide all raw React Flow handles" rule) so the
-// graph doesn't have one card whose socket looks like an entirely
-// different control.
+// one input port reuses the same edge-strip style as every song card (a bare
+// `Handle` with no port class inherits the canvas-wide "hide all raw React
+// Flow handles" rule and would be invisible) so the graph doesn't have one
+// card whose connector looks like an entirely different control.
 export function EndNode({ data }) {
   const { queued } = data;
   return (
     <div className="end-node">
-      <div className="node-socket-row">
+      <div className="node-ports node-ports-in">
         <Handle
-          type="target" position={Position.Left} id="left-none"
-          className="node-socket node-socket-none node-socket-available node-socket-draggable"
+          type="target" position={Position.Top} id="left-none"
+          className="node-port node-port-none node-port-available node-port-draggable"
           isConnectable
         />
       </div>
@@ -446,13 +450,6 @@ export function StartNode({ data }) {
   // not-yet-usable control on this canvas rather than disappearing.
   return (
     <div className="end-node start-node">
-      <div className="node-socket-row node-socket-row-right">
-        <Handle
-          type="source" position={Position.Right} id="start-out"
-          className="node-socket node-socket-none node-socket-available node-socket-draggable"
-          isConnectable
-        />
-      </div>
       <div className="end-node-title-row">
         <div className="end-node-title"><Icon path={<polygon points="6,4 20,12 6,20" />} filled size={11} /> Start Set</div>
         {canPlay && (
@@ -466,6 +463,13 @@ export function StartNode({ data }) {
         )}
       </div>
       <div className="end-node-hint">{wiredSongTitle ? (canPlay ? `wired to ${wiredSongTitle} — click play, or use the toolbar` : `wired to ${wiredSongTitle}`) : 'drag to a song’s Intro/None to set the entry point'}</div>
+      <div className="node-ports node-ports-out">
+        <Handle
+          type="source" position={Position.Bottom} id="start-out"
+          className="node-port node-port-none node-port-available node-port-draggable"
+          isConnectable
+        />
+      </div>
     </div>
   );
 }
