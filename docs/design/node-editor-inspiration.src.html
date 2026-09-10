@@ -1,0 +1,1116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node Editor UI — Inspiration Study for Eskimo Studio</title>
+<style>
+  @page { size: A4; margin: 14mm 13mm 16mm 13mm; }
+
+  :root {
+    --ink: #14161a;
+    --body: #2b2f36;
+    --muted: #6b7280;
+    --faint: #9aa1ab;
+    --rule: #dfe3e8;
+    --paper: #ffffff;
+    --wash: #f6f7f9;
+    --accent: #2f5fd0;
+    --accent-wash: #eef3fd;
+    --warn: #b4530f;
+    --good: #17694a;
+    --panel: #14161a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--body);
+    font: 10pt/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 { color: var(--ink); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  p { margin: 0 0 0.7em; }
+  a { color: var(--accent); text-decoration: none; }
+  strong { color: var(--ink); font-weight: 600; }
+  code, .mono { font-family: "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace; font-size: 0.88em; }
+
+  .page { page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .keep { page-break-inside: avoid; }
+
+  /* ---------- cover ---------- */
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: space-between; }
+  .cover-top { padding-top: 26mm; }
+  .eyebrow { font-size: 8.5pt; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 10mm; }
+  .cover h1 { font-size: 34pt; line-height: 1.06; letter-spacing: -0.025em; max-width: 150mm; }
+  .cover .sub { font-size: 13pt; color: var(--muted); margin-top: 6mm; max-width: 130mm; line-height: 1.45; }
+  .cover-rule { height: 3px; background: var(--ink); width: 34mm; margin: 9mm 0; }
+  .cover-meta { font-size: 9pt; color: var(--faint); border-top: 1px solid var(--rule); padding-top: 4mm; display: flex; justify-content: space-between; }
+  .toc { columns: 2; column-gap: 12mm; font-size: 9.5pt; margin-top: 8mm; }
+  .toc div { break-inside: avoid; padding: 2.2mm 0; border-bottom: 1px solid var(--rule); color: var(--body); }
+  .toc span { color: var(--faint); margin-right: 3mm; font-variant-numeric: tabular-nums; }
+
+  /* ---------- section furniture ---------- */
+  .sec-head { border-top: 3px solid var(--ink); padding-top: 4mm; margin-bottom: 5.5mm; }
+  .sec-head .num { font-size: 8.5pt; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+  .sec-head h2 { font-size: 20pt; line-height: 1.15; margin-top: 2mm; }
+  .sec-head .lede { font-size: 10.5pt; color: var(--muted); margin-top: 3mm; max-width: 155mm; }
+
+  h3 { font-size: 12pt; margin: 5.5mm 0 2.5mm; }
+  h4 { font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); margin: 5mm 0 2mm; }
+
+  /* ---------- figures ---------- */
+  figure { margin: 0 0 4mm; page-break-inside: avoid; }
+  figure img { width: 100%; display: block; border-radius: 3px; max-height: 74mm; object-fit: contain; object-position: center; }
+  .figrow figure img { max-height: 46mm; }
+  figure.tall img { max-height: 82mm; }
+  .shot { background: var(--panel); padding: 3mm; border-radius: 5px; }
+  .shot.light { background: var(--wash); border: 1px solid var(--rule); }
+  figcaption { font-size: 8.5pt; color: var(--muted); margin-top: 2mm; line-height: 1.45; }
+  figcaption b { color: var(--ink); font-weight: 600; }
+  .figrow { display: flex; gap: 4mm; }
+  .figrow figure { flex: 1; }
+
+  /* ---------- tool profile ---------- */
+  .tool-head { display: flex; align-items: baseline; gap: 4mm; border-bottom: 1px solid var(--rule); padding-bottom: 3mm; margin-bottom: 5mm; }
+  .tool-head .idx { font-size: 22pt; font-weight: 600; color: var(--rule); line-height: 1; letter-spacing: -0.03em; }
+  .tool-head h2 { font-size: 17pt; }
+  .tool-head .tag { margin-left: auto; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.1em; padding: 1.6mm 3mm; border-radius: 999px; white-space: nowrap; }
+  .t-rel { background: #eef1f4; color: #4a5560; }
+  .t-sleek { background: #14161a; color: #e8eaed; }
+  .t-colour { background: var(--accent-wash); color: var(--accent); }
+  .tool-sub { font-size: 9pt; color: var(--muted); margin-top: 1mm; }
+
+  .cols { display: flex; gap: 7mm; align-items: stretch; }
+  .cols > * { flex: 1; display: flex; flex-direction: column; }
+  .cols .mock-canvas { flex: 1; display: flex; align-items: center; justify-content: center; }
+
+  /* ---------- steal box ---------- */
+  .steal { border-left: 3px solid var(--accent); background: var(--accent-wash); padding: 3.4mm 5mm; border-radius: 0 4px 4px 0; page-break-inside: avoid; margin-top: 4mm; }
+  .steal h4 { margin: 0 0 2mm; color: var(--accent); }
+  .steal p { margin: 0 0 0.5em; font-size: 9.5pt; }
+  .steal p:last-child { margin-bottom: 0; }
+
+  .note { border-left: 3px solid var(--rule); padding-left: 4mm; color: var(--muted); font-size: 9pt; margin: 4mm 0; }
+
+  /* ---------- lists ---------- */
+  ul.tight { margin: 0 0 1em; padding-left: 4.5mm; }
+  ul.tight li { margin-bottom: 1.6mm; }
+  ul.tight li::marker { color: var(--faint); }
+
+  .findings { list-style: none; margin: 0; padding: 0; counter-reset: f; }
+  .findings li { position: relative; padding-left: 10mm; margin-bottom: 3.1mm; page-break-inside: avoid; counter-increment: f; }
+  .findings li::before {
+    content: counter(f); position: absolute; left: 0; top: 0.1em;
+    width: 6.5mm; height: 6.5mm; border-radius: 50%; background: var(--ink); color: #fff;
+    font-size: 8pt; font-weight: 600; display: flex; align-items: center; justify-content: center;
+  }
+  .findings b { display: block; color: var(--ink); margin-bottom: 0.6mm; }
+
+  /* ---------- spectrum ---------- */
+  .spectrum { margin: 6mm 0 8mm; page-break-inside: avoid; }
+  .spec-bar { height: 7mm; border-radius: 999px; background: linear-gradient(90deg, #e7eaee 0%, #cfd6de 22%, #2c3240 50%, #2f5fd0 78%, #d94f8a 100%); }
+  .spec-labels { display: flex; justify-content: space-between; margin-top: 2mm; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+  .spec-grid { display: flex; gap: 3mm; margin-top: 5mm; }
+  .spec-col { flex: 1; }
+  .spec-col h4 { margin: 0 0 2mm; }
+  .spec-col ul { list-style: none; margin: 0; padding: 0; font-size: 9pt; }
+  .spec-col li { padding: 1.8mm 0; border-bottom: 1px solid var(--rule); color: var(--ink); }
+  .spec-col li em { display: block; font-style: normal; color: var(--faint); font-size: 8pt; }
+
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 3mm 0 5mm; page-break-inside: avoid; }
+  th { text-align: left; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; border-bottom: 1.5px solid var(--ink); padding: 2mm 2.5mm 2mm 0; }
+  td { padding: 2.4mm 2.5mm 2.4mm 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td:first-child { color: var(--ink); font-weight: 600; width: 34%; }
+
+  /* ---------- recreations (CSS, not screenshots) ---------- */
+  .recreate { background: var(--panel); border-radius: 5px; padding: 6mm; page-break-inside: avoid; }
+  .recreate.pale { background: #20242c; }
+  .rec-label { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.1em; color: #6f7883; margin-bottom: 4mm; }
+
+  .hnode { width: 62mm; background: #3c4450; border-radius: 2px; padding: 2mm 2.5mm; color: #dfe4ea; font-size: 8pt; position: relative; }
+  .hnode .hname { font-size: 9pt; color: #fff; }
+  .hbadges { display: flex; gap: 1.4mm; margin-top: 1.4mm; }
+  .hbadge { width: 3.2mm; height: 3.2mm; border-radius: 1px; background: #6b7480; }
+  .hbadge.err { background: #d0453f; } .hbadge.warn { background: #d09a2f; } .hbadge.note { background: #4f8ad0; }
+  .hflags { position: absolute; right: 1.6mm; top: 2mm; display: flex; flex-direction: column; gap: 1.2mm; }
+  .hflag { width: 2.6mm; height: 2.6mm; border-radius: 50%; border: 1px solid #8a939f; }
+  .hflag.on { background: #4fd0a0; border-color: #4fd0a0; }
+
+  .ublock { display: flex; align-items: center; gap: 0; }
+  .unode { background: #2a2d33; border-radius: 3px; overflow: hidden; width: 52mm; border: 1px solid #14161a; }
+  .unode .uhead { padding: 1.8mm 2.5mm; font-size: 8.5pt; color: #fff; }
+  .uhead.fn { background: linear-gradient(180deg,#2f6fb5,#26527f); }
+  .uhead.ev { background: linear-gradient(180deg,#a83232,#7d2323); }
+  .upins { padding: 2mm 2.5mm; display: flex; justify-content: space-between; font-size: 7.5pt; color: #b9c0c9; }
+  .upin { display: flex; align-items: center; gap: 1.4mm; margin-bottom: 1.2mm; }
+  .pin { width: 2.4mm; height: 2.4mm; border-radius: 50%; }
+  .pin.exec { border-radius: 0.6mm; background: #fff; width: 2mm; height: 3mm; }
+  .pin.bool { background: #b31c1c; } .pin.flt { background: #8cd42a; }
+  .pin.obj { background: #23a3d6; } .pin.str { background: #d92ec4; }
+
+  .nnode { background: #4a4a4a; border: 1px solid #2a2a2a; border-radius: 1px; padding: 1.2mm 3mm; color: #e6e6e6; font-size: 8pt; display: inline-block; min-width: 26mm; text-align: center; }
+  .nnode.read { background: #7d5a2e; } .nnode.merge { background: #3f5f7d; } .nnode.write { background: #6d3535; }
+  .nstamp { width: 26mm; height: 15mm; background: linear-gradient(135deg,#4a6b8a,#8a6b4a); border: 1px solid #2a2a2a; border-bottom: 0; }
+
+  /* ---------- eskimo before/after mockup ---------- */
+  .mock-canvas { background: #f1f2f4; border: 1px solid var(--rule); border-radius: 5px; padding: 7mm; page-break-inside: avoid; }
+  .mock-canvas.dark { background: #16181c; border-color: #2a2e36; }
+
+  .ecard {
+    width: 58mm; background: #fff; border-radius: 6px; padding: 3mm;
+    box-shadow: 0 1px 3px rgba(0,0,0,.14); font-size: 7.5pt; color: #333;
+  }
+  .ecard .et { font-size: 9pt; font-weight: 600; color: #131313; }
+  .ecard .ea { color: #8a8a8a; font-size: 7.5pt; margin-bottom: 1.5mm; }
+  .erow { display: flex; justify-content: space-between; padding: 0.7mm 0; }
+  .edot { width: 2mm; height: 2mm; border-radius: 50%; border: 1px solid #b9b9b9; display: inline-block; }
+
+  /* proposed */
+  .pcard { width: 52mm; font-size: 7.5pt; }
+  .pcard .plabel { font-size: 8pt; font-weight: 600; color: #131313; margin-bottom: 1.2mm; padding-left: 0.5mm; }
+  .pcard .plabel em { font-style: normal; color: #9aa1ab; font-weight: 400; }
+  .pbody { background: #fff; border-radius: 5px; box-shadow: 0 1px 4px rgba(0,0,0,.16); overflow: hidden; }
+  .pports { display: flex; gap: 1px; height: 2.4mm; }
+  .pport { flex: 1; }
+  .pw { background: #c9ccd1; } .pi { background: #4fb0a0; } .po { background: #d98b3f; } .pt { background: #6f7fd0; }
+  .pmain { display: flex; gap: 2.5mm; padding: 2.5mm; align-items: center; }
+  .part { width: 9mm; height: 9mm; border-radius: 3px; background: linear-gradient(135deg,#7b4fd0,#4f6fd0); flex: none; }
+  .pmeta { flex: 1; min-width: 0; }
+  .pwave { height: 5mm; display: flex; align-items: flex-end; gap: 0.5mm; margin-top: 1.2mm; }
+  .pwave i { flex: 1; background: #d3d6db; border-radius: 0.4mm; }
+  .ptags { display: flex; gap: 1.5mm; font-size: 6.5pt; color: #7a7f87; margin-top: 0.8mm; }
+  .ptags span { background: #f0f1f3; padding: 0.3mm 1.2mm; border-radius: 2px; }
+  .pbadges { display: flex; gap: 1mm; margin-left: auto; }
+  .pbadge { width: 2.6mm; height: 2.6mm; border-radius: 50%; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 2mm 5mm; font-size: 8pt; color: var(--muted); margin-top: 4mm; }
+  .legend span { display: flex; align-items: center; gap: 1.5mm; }
+  .legend i { width: 3mm; height: 3mm; border-radius: 1px; display: block; }
+
+  .verdict { background: var(--ink); color: #e9ebee; border-radius: 5px; padding: 6mm 7mm; page-break-inside: avoid; }
+  .verdict h3 { color: #fff; margin: 0 0 3mm; font-size: 13pt; }
+  .verdict p { color: #b9c0c9; }
+  .verdict strong { color: #fff; }
+
+  .srclist { font-size: 8.5pt; color: var(--muted); }
+  .srclist div { padding: 1.8mm 0; border-bottom: 1px solid var(--rule); }
+  .srclist b { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<!-- ============================= COVER ============================= -->
+<section class="page cover">
+  <div class="cover-top">
+    <div class="eyebrow">Eskimo Studio · Design Research</div>
+    <h1>What professional node editors do that Eskimo doesn't</h1>
+    <div class="cover-rule"></div>
+    <p class="sub">Ten node-based interfaces, from utilitarian workhorses to colour-forward
+    modern tools — and the specific, borrowable decisions that make them read as
+    professional software.</p>
+
+    <div class="toc">
+      <div><span>01</span> Eskimo today: an honest diagnosis</div>
+      <div><span>02</span> The spectrum</div>
+      <div><span>03</span> Nuke</div>
+      <div><span>04</span> Houdini</div>
+      <div><span>05</span> Blender</div>
+      <div><span>06</span> TouchDesigner</div>
+      <div><span>07</span> Audulus</div>
+      <div><span>08</span> cables.gl</div>
+      <div><span>09</span> ComfyUI</div>
+      <div><span>10</span> n8n</div>
+      <div><span>11</span> Unreal Blueprints</div>
+      <div><span>12</span> Bitwig — The Grid</div>
+      <div><span>13</span> What they all agree on</div>
+      <div><span>14</span> Recommendations for Eskimo</div>
+      <div><span>15</span> Proposed node anatomy</div>
+      <div><span>16</span> Sources</div>
+    </div>
+  </div>
+
+  <div class="cover-meta">
+    <span>Prepared for the Eskimo Studio graph redesign</span>
+    <span>September 2026</span>
+  </div>
+</section>
+
+<!-- ============================= 01 DIAGNOSIS ============================= -->
+<section class="page">
+  <div class="sec-head">
+    <div class="num">01</div>
+    <h2>Eskimo today: an honest diagnosis</h2>
+    <p class="lede">Before borrowing anything, it's worth being precise about what
+    actually looks wrong. Most of it is not styling — it's information density.</p>
+  </div>
+
+  <figure class="tall">
+    <div class="shot light"><img src="{{img:eskimo_cluster}}" alt="Eskimo graph, current state"></div>
+    <figcaption><b>Eskimo Studio, current build.</b> A representative crop of the example
+    graph at 1:1. Fifty cards, one size, one colour, six socket rows each.</figcaption>
+  </figure>
+
+  <ol class="findings">
+    <li><b>The socket matrix is always fully expanded.</b>
+    Every card prints six rows — None / Intro / Transition on the left, None / Outro /
+    Transition on the right — whether or not they carry anything. Across fifty nodes
+    that is three hundred rows of mostly-repeated words. It is the single largest
+    source of visual noise, and no other tool in this study does it.</li>
+
+    <li><b>The word "None" appears twice on every card.</b>
+    Once per side. It labels the absence of a thing. Roughly a hundred instances of
+    the same non-information across the canvas.</li>
+
+    <li><b>Every wire looks identical.</b>
+    Uniform black, uniform weight, no directionality, no type. A transition, a cold
+    cut and an outro handoff are visually indistinguishable — even though the
+    difference between them is the entire point of the app.</li>
+
+    <li><b>Wires route straight through other cards.</b>
+    Long diagonals cross unrelated nodes, so the card boundary stops reading as a
+    boundary. Every tool here solves this with curvature, orthogonal routing, or both.</li>
+
+    <li><b>There is exactly one node size.</b>
+    A four-input hub and a leaf node occupy identical space. Importance is not
+    expressible, and zooming out doesn't simplify anything — it just makes the same
+    text unreadable.</li>
+
+    <li><b>Colour is spent on decoration, and there's no figure/ground.</b>
+    The only colour is the album swatch — which tells you which record the song is from,
+    something the title beside it already said. Meanwhile white cards on light grey with
+    a 1px shadow leave almost no value gap, so the graph reads as a flat sheet of text
+    rather than as objects in space.</li>
+  </ol>
+
+  <div class="note">Worth saying plainly: the interaction model is fine — toggling
+  sockets, the variant picker, drag-to-connect, autoarrange, multi-select. Several tools
+  in this study do less. This is a presentation problem, not an architecture one.</div>
+</section>
+
+<!-- ============================= 02 SPECTRUM ============================= -->
+<section class="page">
+  <div class="sec-head">
+    <div class="num">02</div>
+    <h2>The spectrum</h2>
+    <p class="lede">Ten tools, placed by how much visual personality they spend. None of
+    these positions is "better" — they're different answers to how much the interface
+    should assert itself over the work.</p>
+  </div>
+
+  <div class="spectrum">
+    <div class="spec-bar"></div>
+    <div class="spec-labels">
+      <span>Boring but reliable</span>
+      <span>Sleek and modern</span>
+      <span>Colourful and intuitive</span>
+    </div>
+  </div>
+
+  <div class="spec-grid">
+    <div class="spec-col">
+      <h4>Boring but reliable</h4>
+      <ul>
+        <li>Nuke <em>Foundry · compositing</em></li>
+        <li>Houdini <em>SideFX · procedural 3D</em></li>
+        <li>Blender <em>shader &amp; geometry nodes</em></li>
+      </ul>
+    </div>
+    <div class="spec-col">
+      <h4>Sleek and modern</h4>
+      <ul>
+        <li>TouchDesigner <em>Derivative · realtime</em></li>
+        <li>Audulus <em>modular synthesis</em></li>
+        <li>cables.gl <em>browser-native creative coding</em></li>
+      </ul>
+    </div>
+    <div class="spec-col">
+      <h4>Colourful and intuitive</h4>
+      <ul>
+        <li>ComfyUI <em>diffusion pipelines</em></li>
+        <li>n8n <em>workflow automation</em></li>
+        <li>Unreal Blueprints <em>visual scripting</em></li>
+        <li>Bitwig — The Grid <em>modular audio</em></li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Where Eskimo sits, and where it could sit</h3>
+  <p>Eskimo is currently at the far left by default rather than by decision — it is
+  restrained, but restraint isn't the same as reliability, and the restraint isn't
+  buying density. The most useful target is around <strong>n8n and Bitwig</strong>: a
+  light, calm canvas that still uses colour to carry meaning, with one strong idea
+  (signal type) driving the palette.</p>
+
+  <div class="figrow">
+    <figure>
+      <div class="shot light"><img src="{{img:eskimo_graph}}" alt="Eskimo light theme"></div>
+      <figcaption><b>Eskimo, light.</b> The default and the one that matters most.</figcaption>
+    </figure>
+    <figure>
+      <div class="shot"><img src="{{img:eskimo_dark}}" alt="Eskimo dark theme"></div>
+      <figcaption><b>Eskimo, dark.</b> Already implemented. Note how much better the
+      cards separate from the canvas here — the value gap does the work.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================= 03 NUKE ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">03</span>
+    <div>
+      <h2>Nuke</h2>
+      <div class="tool-sub">Foundry · film compositing · the DAG</div>
+    </div>
+    <span class="tag t-rel">Boring but reliable</span>
+  </div>
+
+  <p>Nuke's node graph is close to the minimum viable node editor, and it has survived
+  three decades of professional use in exactly that form. Nodes are small coloured
+  bars carrying a name. Flow reads top-to-bottom. There is almost no chrome.</p>
+
+  <div class="recreate">
+    <div class="rec-label">Recreation — Nuke node conventions (not a screenshot)</div>
+    <div style="display:flex; align-items:flex-start; gap:14mm;">
+      <div style="text-align:center">
+        <div class="nstamp"></div>
+        <div class="nnode read">Read1</div>
+        <div style="color:#6f7883; font-size:7pt; margin-top:2mm">with postage stamp</div>
+      </div>
+      <div style="text-align:center">
+        <div class="nnode merge">Merge2</div>
+        <div style="color:#6f7883; font-size:7pt; margin-top:2mm">colour by class</div>
+      </div>
+      <div style="text-align:center">
+        <div class="nnode write">Write1</div>
+        <div style="color:#6f7883; font-size:7pt; margin-top:2mm">output</div>
+      </div>
+    </div>
+  </div>
+
+  <h4>The design system</h4>
+  <ul class="tight">
+    <li><strong>Node colour encodes class</strong> — reads, merges, writes and filters
+    each get a family hue, and users can recolour any node to mark up their own script.</li>
+    <li><strong>The node is the label.</strong> No subtitle, no metadata, no icon. Size is
+    driven by the name.</li>
+    <li><strong>Postage stamps</strong> — optional thumbnails on the node showing what it
+    passes downstream. Critically, they can be set to a static frame or switched off
+    entirely, because on a large script they cost real performance.</li>
+  </ul>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>The postage stamp, and its off switch.</strong> A song node showing a
+    waveform with its cue points marked is the direct analogue, and it would make the
+    graph genuinely informative rather than decorative. Nuke's hard-won lesson is that
+    the thumbnail must be optional — Eskimo already renders fifty album swatches with
+    dominant-colour extraction, so the same "turn it off on big graphs" affordance
+    belongs there too.</p>
+    <p><strong>Colour by class, not by decoration.</strong> Nuke spends its entire colour
+    budget on "what kind of node is this". Eskimo currently spends its budget on album art.</p>
+  </div>
+</section>
+
+<!-- ============================= 04 HOUDINI ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">04</span>
+    <div>
+      <h2>Houdini</h2>
+      <div class="tool-sub">SideFX · procedural 3D · the network editor</div>
+    </div>
+    <span class="tag t-rel">Boring but reliable</span>
+  </div>
+
+  <p>Houdini packs more state onto a node than anything else in this study, and does it
+  without the node becoming a mess. The trick is that state is expressed as small,
+  fixed-position marks rather than words.</p>
+
+  <div class="recreate">
+    <div class="rec-label">Recreation — Houdini node anatomy (not a screenshot)</div>
+    <div style="display:flex; gap:12mm; align-items:center;">
+      <div class="hnode">
+        <div class="hflags">
+          <span class="hflag on"></span>
+          <span class="hflag"></span>
+          <span class="hflag"></span>
+        </div>
+        <div class="hname">attribwrangle1</div>
+        <div class="hbadges">
+          <span class="hbadge warn"></span>
+          <span class="hbadge note"></span>
+          <span class="hbadge"></span>
+        </div>
+      </div>
+      <div style="color:#8b939e; font-size:8pt; line-height:1.6">
+        <div><span style="color:#4fd0a0">●</span> flags — display / render / template / bypass</div>
+        <div><span style="color:#d09a2f">■</span> badges — a row of status icons under the name</div>
+        <div style="color:#6f7883">hovering reveals a ring with larger targets</div>
+      </div>
+    </div>
+  </div>
+
+  <h4>UX features worth noting</h4>
+  <table>
+    <tr><th>Feature</th><th>What it solves</th></tr>
+    <tr><td>Flags</td><td>Persistent per-node state (which node is the output, what's bypassed) as always-visible toggles on the node body, not buried in a panel.</td></tr>
+    <tr><td>Badges</td><td>A row of small icons beneath the name carrying status — errors, warnings, comments, time dependency. Glanceable across a whole network.</td></tr>
+    <tr><td>The node ring</td><td>Hovering a node summons a contextual ring with big click targets for those flags. It exists specifically because the flags themselves become unclickable when zoomed out.</td></tr>
+    <tr><td>Network boxes</td><td>Labelled, coloured, resizable containers that group nodes and move them together.</td></tr>
+  </table>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>The badge row.</strong> Eskimo has at least four things it currently either
+    hides or spells out in words: has produced audio, verified splice, local-only vs
+    synced, and contributed-by. Four small marks under the title would replace a lot of
+    text and make the whole library state visible at a glance.</p>
+    <p><strong>The hover ring is the answer to Eskimo's tiny sockets.</strong> The socket
+    dots are ~9px and sit outside the card; at any zoom below 100% they're
+    near-impossible to hit. Houdini hit this exact wall and solved it by escalating the
+    target on hover rather than making the resting state bigger.</p>
+  </div>
+</section>
+
+<!-- ============================= 05 BLENDER ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">05</span>
+    <div>
+      <h2>Blender</h2>
+      <div class="tool-sub">Shader, compositor and geometry node editors</div>
+    </div>
+    <span class="tag t-rel">Boring but reliable</span>
+  </div>
+
+  <p>Blender's node editors are the best mainstream example of a <em>rigorously applied
+  type system expressed as colour</em>. It is not decorative; the colour is the
+  documentation.</p>
+
+  <figure>
+    <div class="shot"><img src="{{img:blender_sockets}}" alt="Blender socket type colours"></div>
+    <figcaption><b>The socket colour legend.</b> Every data type gets one colour, and that
+    colour is identical on the socket, on the wire, and in every editor. Geometry green,
+    boolean pink, float grey, integer green, string blue, vector purple; data-blocks get
+    their own family — object orange, material red, texture pink, image purple.</figcaption>
+  </figure>
+
+  <div class="figrow">
+    <figure>
+      <div class="shot"><img src="{{img:blender_shader}}" alt="Blender shader editor"></div>
+      <figcaption><b>Header colour by category</b>, and node width set by content.</figcaption>
+    </figure>
+    <figure>
+      <div class="shot"><img src="{{img:blender_mute}}" alt="Blender muted links"></div>
+      <figcaption><b>Muted links render differently</b> — a disabled connection stays
+      visible and legible rather than disappearing.</figcaption>
+    </figure>
+  </div>
+
+  <h4>The design system</h4>
+  <ul class="tight">
+    <li><strong>One colour per type, everywhere.</strong> Learn it once, apply it in every editor.</li>
+    <li><strong>Collapse to a title pill.</strong> Any node folds down to just its header —
+    the primary density control, available per node.</li>
+    <li><strong>Sockets are labelled with what they are</strong> ("Geometry", "Color"), not
+    with their state.</li>
+  </ul>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>Commit to one socket-type palette and use it on the wires too.</strong>
+    Eskimo has exactly four connection types — None, Intro, Outro, Transition. Four
+    colours, applied to the socket dot <em>and</em> the wire, would make the graph
+    self-documenting and directly fix diagnosis #3.</p>
+    <p><strong>Collapse-to-pill.</strong> The cheapest possible fix for the density problem,
+    and it's per-node so the user chooses what matters.</p>
+  </div>
+</section>
+
+<!-- ============================= 06 TOUCHDESIGNER ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">06</span>
+    <div>
+      <h2>TouchDesigner</h2>
+      <div class="tool-sub">Derivative · realtime visual systems</div>
+    </div>
+    <span class="tag t-sleek">Sleek and modern</span>
+  </div>
+
+  <p>TouchDesigner's central idea is that <strong>a node should show its own output</strong>.
+  The node isn't a label for a process, it's a live window onto it. On a dark canvas with
+  restrained chrome, the content becomes the colour.</p>
+
+  <figure>
+    <div class="shot"><img src="{{img:td_viewer}}" alt="TouchDesigner node viewers"></div>
+    <figcaption><b>Nodes as live viewers.</b> Each operator renders its current output in
+    its own body, with a right-click menu controlling exactly what the viewer displays —
+    channels, field guide, pixel values. The node name sits in a strip along the bottom.</figcaption>
+  </figure>
+
+  <div class="figrow">
+    <figure>
+      <div class="shot"><img src="{{img:td_single}}" alt="TouchDesigner display flags"></div>
+      <figcaption><b>Per-node display flags</b> along the node's edge.</figcaption>
+    </figure>
+    <figure>
+      <div class="shot"><img src="{{img:td_op}}" alt="TouchDesigner operator family colour"></div>
+      <figcaption><b>Operator family colour.</b> TOP, CHOP, SOP, DAT, MAT and COMP each
+      own a hue — the primary wayfinding device in a large network.</figcaption>
+    </figure>
+  </div>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>Put the waveform on the card.</strong> This is the highest-value idea in the
+    whole study for Eskimo specifically. A song node that shows its waveform with the
+    outro splice point marked turns the graph from a diagram of the set into a picture of
+    the set. The data already exists — <code>rmsEnvelope()</code> is already implemented and
+    already used for the transition preview.</p>
+    <p><strong>Family colour as wayfinding.</strong> Eskimo's equivalent axis is artist, BPM
+    band, or key — any of which would give the canvas structure at a glance.</p>
+  </div>
+</section>
+
+<!-- ============================= 07 AUDULUS ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">07</span>
+    <div>
+      <h2>Audulus</h2>
+      <div class="tool-sub">Modular synthesis · desktop and iPad</div>
+    </div>
+    <span class="tag t-sleek">Sleek and modern</span>
+  </div>
+
+  <p>The most visually confident tool here, and the closest to "sleek" as an explicit
+  goal. Pure black canvas, hairline neon wires, and a strict two-hue accent palette.</p>
+
+  <figure>
+    <div class="shot"><img src="{{img:audulus_editor}}" alt="Audulus patch editor"></div>
+    <figcaption><b>Audulus.</b> Modules read as instrument panels rather than boxes of
+    text. Note the category tab bar pinned along the bottom — util, math, meter, midi,
+    mod, dsp, synth, module, poly, switch — so the taxonomy is permanently visible
+    instead of hidden behind a search box.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="shot"><img src="{{img:audulus_wires}}" alt="Audulus wire aesthetic"></div>
+    <figcaption><b>The wire aesthetic, isolated.</b> Sub-pixel-thin strokes with a slight
+    glow, gently curved, high chroma against near-black. Compare to Eskimo's uniform
+    2px black lines.</figcaption>
+  </figure>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>Wire craft is most of the perceived polish.</strong> Thin beats thick. Curved
+    beats straight. A subtle glow or outer stroke lets wires cross without visually
+    merging. This is a pure CSS/SVG change with no data model implications and would
+    probably move Eskimo's perceived quality more than anything else on this list.</p>
+    <p><strong>A permanent category palette.</strong> Eskimo hides "add a node" behind a
+    right-click. A docked strip would make the vocabulary of the app visible.</p>
+  </div>
+</section>
+
+<!-- ============================= 08 CABLES ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">08</span>
+    <div>
+      <h2>cables.gl</h2>
+      <div class="tool-sub">Browser-native creative coding</div>
+    </div>
+    <span class="tag t-sleek">Sleek and modern</span>
+  </div>
+
+  <p>The most radical density answer in the study, and the most directly applicable to
+  Eskimo's specific problem. cables.gl has many ports per node — and spends almost no
+  space on them.</p>
+
+  <figure>
+    <div class="shot"><img src="{{img:cables_connect}}" alt="cables.gl node ports"></div>
+    <figcaption><b>Ports as edge strips.</b> Each node is a plain rectangle with its name.
+    Ports are small coloured blocks butted together along the top and bottom edges —
+    colour carries the type, position carries the identity. A node with eight ports is
+    barely larger than one with two.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="shot"><img src="{{img:cables_search}}" alt="cables.gl search"></div>
+    <figcaption><b>Search-to-place.</b> Typing filters the whole operator library inline
+    on the canvas, and the result drops where you were looking.</figcaption>
+  </figure>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>This is the fix for diagnosis #1.</strong> Eskimo's six socket rows —
+    roughly 60% of every card's height — could collapse into two edge strips a few
+    pixels tall. The type is the colour; the label appears on hover or on the detail
+    pane. Rectangular ports are also a <em>larger</em> hit target than the current 9px
+    circles despite taking less space, which incidentally helps the drag-connect problem.</p>
+  </div>
+</section>
+
+<!-- ============================= 09 COMFYUI ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">09</span>
+    <div>
+      <h2>ComfyUI</h2>
+      <div class="tool-sub">Diffusion pipelines · web</div>
+    </div>
+    <span class="tag t-colour">Colourful and intuitive</span>
+  </div>
+
+  <p>The most-used node editor of the last few years, and a good model for a modern
+  web-native one. Its nodes are <em>forms</em>: they carry real controls, not just wires.</p>
+
+  <figure>
+    <div class="shot"><img src="{{img:comfy_ui}}" alt="ComfyUI graph"></div>
+    <figcaption><b>ComfyUI.</b> Typed sockets carry the type name in caps as the label —
+    MODEL, CLIP, VAE, LATENT, IMAGE, CONDITIONING — with the wire in the matching colour.
+    Inline widgets (text areas, number steppers with −/+, dropdowns) live in the node
+    body. Each node has a collapse chevron in its title bar.</figcaption>
+  </figure>
+
+  <h4>The design system</h4>
+  <ul class="tight">
+    <li><strong>Sockets are named by type, and the name is on the node</strong>, right-aligned
+    for outputs and left-aligned for inputs, so the reading order matches the flow.</li>
+    <li><strong>Widgets in the body.</strong> Editing the common parameters never requires
+    opening a side panel.</li>
+    <li><strong>Restrained node chrome, saturated wires.</strong> The nodes are near-black; all
+    the colour is in the connections.</li>
+  </ul>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>Inline controls.</strong> Eskimo's variant picker already lives on the node —
+    that instinct was right. The natural extension is the cue point: a draggable
+    in/out marker directly on the card's waveform, rather than a number in a pane.</p>
+    <p><strong>Let the wires carry the saturation and keep the cards quiet.</strong> This is
+    the opposite of Eskimo's current split, where the cards carry a colour swatch and the
+    wires are black.</p>
+  </div>
+</section>
+
+<!-- ============================= 10 N8N ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">10</span>
+    <div>
+      <h2>n8n</h2>
+      <div class="tool-sub">Workflow automation · web · light theme</div>
+    </div>
+    <span class="tag t-colour">Colourful and intuitive</span>
+  </div>
+
+  <p>The single most relevant reference here, because it is the one modern, polished,
+  <strong>light-themed</strong> node editor in the study — which is the mode Eskimo actually
+  ships in.</p>
+
+  <figure>
+    <div class="shot light"><img src="{{img:n8n_flow}}" alt="n8n workflow editor"></div>
+    <figcaption><b>n8n.</b> Nodes are small rounded squares carrying an icon. The name sits
+    <em>outside and below</em> the node. Outputs are labelled only where the label means
+    something ("true" / "false"). Sub-connections use dashed wires and circular nodes to
+    mark a different class of relationship. Unconnected outputs carry a <span class="mono">+</span>
+    button that adds the next step.</figcaption>
+  </figure>
+
+  <h4>UX features worth noting</h4>
+  <table>
+    <tr><th>Feature</th><th>Why it works</th></tr>
+    <tr><td>Label outside the node</td><td>The node box stays small and uniform; long names cost nothing because they overflow into empty canvas.</td></tr>
+    <tr><td>The <span class="mono">+</span> on an open output</td><td>Turns an empty socket into an invitation. Building a chain never requires finding the node palette.</td></tr>
+    <tr><td>Dashed vs solid wires</td><td>Two connection classes, distinguished without spending a colour.</td></tr>
+    <tr><td>Selective output labels</td><td>Only branching nodes label their outputs. Everything else stays clean.</td></tr>
+    <tr><td>Light canvas, dotted grid</td><td>Proves a light node editor can look modern — it just needs real spacing and a value gap between card and canvas.</td></tr>
+  </table>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>Move the song title outside the card.</strong> Eskimo's cards are sized by their
+    text. Put the title and artist below the card and the card itself can shrink to
+    artwork plus waveform — a large density win that costs nothing.</p>
+    <p><strong>Add the <span class="mono">+</span> affordance to unwired outputs.</strong> Eskimo
+    already knows which outputs are open and what could legally connect there.</p>
+    <p><strong>Label outputs only when they branch.</strong> Directly retires the ~100
+    redundant "None" labels.</p>
+  </div>
+</section>
+
+<!-- ============================= 11 UNREAL ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">11</span>
+    <div>
+      <h2>Unreal Engine — Blueprints</h2>
+      <div class="tool-sub">Epic Games · visual scripting</div>
+    </div>
+    <span class="tag t-colour">Colourful and intuitive</span>
+  </div>
+
+  <p>Blueprints solve a problem Eskimo has exactly: <strong>two different kinds of
+  connection that must never be confused.</strong> Unreal's answer is to give them
+  different physical weight, not just different colour.</p>
+
+  <div class="recreate">
+    <div class="rec-label">Recreation — Blueprint node conventions (not a screenshot)</div>
+    <div class="ublock" style="gap:6mm">
+      <div class="unode">
+        <div class="uhead ev">Event BeginPlay</div>
+        <div class="upins">
+          <div></div>
+          <div><div class="upin"><span>exec</span><span class="pin exec"></span></div></div>
+        </div>
+      </div>
+      <div style="width:14mm; height:2px; background:#fff; position:relative">
+        <div style="position:absolute; right:-1mm; top:-1.6mm; border-left:2.4mm solid #fff; border-top:1.8mm solid transparent; border-bottom:1.8mm solid transparent"></div>
+      </div>
+      <div class="unode">
+        <div class="uhead fn">Set Volume</div>
+        <div class="upins">
+          <div>
+            <div class="upin"><span class="pin exec"></span><span>exec</span></div>
+            <div class="upin"><span class="pin obj"></span><span>Target</span></div>
+            <div class="upin"><span class="pin flt"></span><span>Level</span></div>
+          </div>
+          <div><div class="upin"><span>exec</span><span class="pin exec"></span></div></div>
+        </div>
+      </div>
+    </div>
+    <div style="color:#6f7883; font-size:7.5pt; margin-top:4mm; line-height:1.6">
+      Thick white execution wires with arrowheads carry <em>order of operations</em>.
+      Thin coloured wires carry <em>data</em>, with the pin colour keyed to type.
+      Title bars are tinted by node category — events crimson, functions blue.
+    </div>
+  </div>
+
+  <h4>UX features worth noting</h4>
+  <ul class="tight">
+    <li><strong>Execution wires are visually heavier than data wires</strong> and carry
+    direction arrows. You can read the control flow of a huge graph at a glance while
+    ignoring the data plumbing.</li>
+    <li><strong>Comment boxes</strong> are coloured, titled, and dragging one moves everything
+    inside it — grouping without a formal container type.</li>
+    <li><strong>Wire animation during debugging</strong> shows execution travelling along the
+    path in real time.</li>
+  </ul>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>Two weights for two meanings.</strong> Eskimo already has this distinction and
+    doesn't draw it: the <em>committed</em> playback path (now frozen in
+    <code>session.committedHop</code>) versus every other <em>possible</em> path. Committed
+    should be heavy with direction; possible should be a hairline. That one change would
+    make "where is this set going" readable from across the room — which for a live DJ
+    tool is the entire job.</p>
+    <p><strong>The debug wire animation is the model for live playback</strong> — and Eskimo
+    already has an animated active-path edge, so this instinct is confirmed by a tool
+    that ships it to millions of users.</p>
+  </div>
+</section>
+
+<!-- ============================= 12 BITWIG ============================= -->
+<section class="page">
+  <div class="tool-head">
+    <span class="idx">12</span>
+    <div>
+      <h2>Bitwig Studio — The Grid</h2>
+      <div class="tool-sub">Modular audio inside a DAW</div>
+    </div>
+    <span class="tag t-colour">Colourful and intuitive</span>
+  </div>
+
+  <p>The closest peer in the entire study: a node editor for <em>audio</em>, built for
+  people who are also DJs and producers, and designed to be legible while something is
+  playing.</p>
+
+  <figure>
+    <div class="shot"><img src="{{img:bitwig_grid}}" alt="Bitwig The Grid"></div>
+    <figcaption><b>The Grid.</b> Wire colour encodes signal type. Nodes carry real inline
+    controls — knobs, editable envelope curves, waveform selectors — and the node title is
+    tinted to match its module category.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="shot"><img src="{{img:bitwig_signals}}" alt="Bitwig signal types"></div>
+    <figcaption><b>Signal types as a colour system.</b> The palette is the specification —
+    which outputs may meet which inputs is answered by colour before you ever attempt
+    the connection.</figcaption>
+  </figure>
+
+  <div class="steal">
+    <h4>Steal this for Eskimo</h4>
+    <p><strong>The whole signal-type colour model transfers directly.</strong> Eskimo's four
+    connection types are its signal types. Bitwig demonstrates that in an audio tool this
+    reads as professional rather than childish, provided the palette is disciplined —
+    saturated wires, desaturated everything else.</p>
+    <p><strong>Inline controls read as an instrument.</strong> Bitwig's nodes look like gear.
+    Eskimo's look like a spreadsheet row. A waveform, a cue marker and a small level
+    readout would close most of that gap.</p>
+  </div>
+</section>
+
+<!-- ============================= 13 CONSENSUS ============================= -->
+<section class="page">
+  <div class="sec-head">
+    <div class="num">13</div>
+    <h2>What they all agree on</h2>
+    <p class="lede">Individual tricks are interesting; unanimity is actionable. Five
+    patterns appear in essentially every tool studied — and Eskimo does none of them.</p>
+  </div>
+
+  <table>
+    <tr><th>Pattern</th><th>Who does it</th><th>Eskimo today</th></tr>
+    <tr>
+      <td>Connections are colour-coded by type</td>
+      <td>Blender, ComfyUI, Bitwig, Unreal, cables.gl, TouchDesigner</td>
+      <td>All wires identical black</td>
+    </tr>
+    <tr>
+      <td>A per-node density control</td>
+      <td>Blender (collapse), Nuke (stamps off), Houdini (badges scale), ComfyUI (chevron)</td>
+      <td>None — always maximum detail</td>
+    </tr>
+    <tr>
+      <td>The node displays its own content</td>
+      <td>TouchDesigner, Nuke, Substance, ComfyUI, Bitwig</td>
+      <td>Album art only — decorative, not informative</td>
+    </tr>
+    <tr>
+      <td>Labels only where they carry information</td>
+      <td>n8n, cables.gl, Nuke, Houdini</td>
+      <td>Six labels per card regardless of state</td>
+    </tr>
+    <tr>
+      <td>Node size or shape varies with role</td>
+      <td>Blender, Unreal, ComfyUI, n8n, Bitwig</td>
+      <td>One fixed card size for everything</td>
+    </tr>
+  </table>
+
+  <h3>The one genuine disagreement</h3>
+  <p>Canvas value. Eight of the ten use a dark canvas; n8n is the notable exception and it
+  looks excellent. So <strong>light is a legitimate choice</strong> — but it is the harder
+  one, because a light canvas gives you a much smaller value range to separate card from
+  background. n8n buys that separation with generous whitespace, a crisp card border
+  radius, and by keeping nodes small. Eskimo currently pays for a light canvas without
+  buying any of the three.</p>
+
+  <div class="verdict">
+    <h3>The short version</h3>
+    <p>Eskimo doesn't look unprofessional because it's under-designed. It looks
+    unprofessional because <strong>it spends its space on labels and its colour on
+    decoration</strong>, when every tool that reads as professional does the reverse:
+    space goes to content, colour goes to meaning.</p>
+  </div>
+</section>
+
+<!-- ============================= 14 RECOMMENDATIONS ============================= -->
+<section class="page">
+  <div class="sec-head">
+    <div class="num">14</div>
+    <h2>Recommendations for Eskimo</h2>
+    <p class="lede">Ordered by impact per unit of work. The first four are the ones that
+    would change how the app feels; the rest are refinement.</p>
+  </div>
+
+  <ol class="findings">
+    <li><b>Collapse the socket matrix into edge strips.</b>
+    <span class="mono">cables.gl</span> · Two thin coloured strips instead of six labelled
+    rows. Recovers roughly 60% of card height, removes ~300 rows of text from the canvas,
+    and gives a bigger hit target than the current circles. Highest impact by a wide
+    margin.</li>
+
+    <li><b>Colour wires by connection type; two weights for committed vs possible.</b>
+    <span class="mono">Bitwig · Unreal · Blender</span> · Four hues for None / Intro /
+    Outro / Transition. Heavy stroke with direction for the committed path, hairline for
+    everything else. Pure rendering change — no data model work, since
+    <code>committedHop</code> already exists.</li>
+
+    <li><b>Put the waveform on the card.</b>
+    <span class="mono">TouchDesigner · Nuke</span> · With the splice point marked. The
+    envelope data and the renderer already exist for the transition preview. Make it
+    disable-able on large graphs, as Nuke does.</li>
+
+    <li><b>Move title and artist outside the card.</b>
+    <span class="mono">n8n</span> · Lets the card shrink to art plus waveform and stops
+    long titles from driving layout.</li>
+
+    <li><b>Thin the wires and improve routing.</b>
+    <span class="mono">Audulus</span> · 1–1.5px with a soft outer stroke so crossings stay
+    readable, and enough curvature that wires stop cutting through unrelated cards.</li>
+
+    <li><b>Add a badge row.</b>
+    <span class="mono">Houdini</span> · Has audio, verified splice, local-only, contributed —
+    four marks replacing four different text treatments.</li>
+
+    <li><b>Collapse-to-pill per node.</b>
+    <span class="mono">Blender</span> · The user's own density control, and the natural
+    home for a zoom-based level-of-detail rule later.</li>
+
+    <li><b>A <span class="mono">+</span> affordance on unwired outputs.</b>
+    <span class="mono">n8n</span> · Turns an empty socket into the primary way to build a set.</li>
+
+    <li><b>Escalate socket targets on hover.</b>
+    <span class="mono">Houdini's node ring</span> · Fixes small-target hit testing at low
+    zoom without enlarging the resting state.</li>
+
+    <li><b>A permanent category strip for adding nodes.</b>
+    <span class="mono">Audulus</span> · Makes the app's vocabulary visible instead of
+    hiding it behind a right-click.</li>
+  </ol>
+
+  <div class="note"><b>Sequencing note.</b> Items 1–4 are mutually reinforcing and should be
+  designed together — shrinking the card, moving the label out, and adding the waveform
+  are really one redesign of the node, not four. Item 2 is independent and could ship on
+  its own tomorrow.</div>
+</section>
+
+<!-- ============================= 15 ANATOMY ============================= -->
+<section class="page">
+  <div class="sec-head">
+    <div class="num">15</div>
+    <h2>Proposed node anatomy</h2>
+    <p class="lede">A sketch, not a spec — recommendations 1 through 6 applied to a single
+    card so the combined effect is visible. Both are drawn at the same scale.</p>
+  </div>
+
+  <div class="cols">
+    <div>
+      <h4>Today</h4>
+      <div class="mock-canvas">
+        <div class="ecard">
+          <div style="display:flex; justify-content:space-between">
+            <div>
+              <div class="et">Black Skinhead</div>
+              <div class="ea">Kanye West</div>
+            </div>
+            <div style="width:11mm; height:11mm; border-radius:2px; background:#4f6fd0"></div>
+          </div>
+          <div style="display:flex; gap:1.5mm; margin:1.5mm 0">
+            <span style="border:1px solid #e2e2e2; border-radius:2px; padding:0.3mm 1.2mm">110 BPM</span>
+            <span style="border:1px solid #e2e2e2; border-radius:2px; padding:0.3mm 1.2mm">C min</span>
+          </div>
+          <div style="border-top:1px dashed #e2e2e2; margin:1.5mm 0"></div>
+          <div class="erow"><span><span class="edot"></span> None</span><span>None <span class="edot"></span></span></div>
+          <div class="erow"><span><span class="edot"></span> Intro</span><span>Outro <span class="edot"></span></span></div>
+          <div class="erow"><span><span class="edot"></span> Transition</span><span>I Am a God <span class="edot"></span></span></div>
+        </div>
+      </div>
+      <p style="font-size:8.5pt; color:var(--muted); margin-top:3mm">
+        Six socket rows, ~60% of the height. Title drives the width. The only colour is
+        decorative. Nothing indicates what the audio actually is.</p>
+    </div>
+
+    <div>
+      <h4>Proposed</h4>
+      <div class="mock-canvas">
+        <div class="pcard">
+          <div class="plabel">Black Skinhead <em>· Kanye West</em></div>
+          <div class="pbody">
+            <div class="pports">
+              <div class="pport pw"></div><div class="pport pi"></div><div class="pport pt"></div>
+            </div>
+            <div class="pmain">
+              <div class="part"></div>
+              <div class="pmeta">
+                <div class="pwave">
+                  <i style="height:30%"></i><i style="height:55%"></i><i style="height:80%"></i>
+                  <i style="height:65%"></i><i style="height:90%"></i><i style="height:72%"></i>
+                  <i style="height:95%"></i><i style="height:60%"></i><i style="height:78%"></i>
+                  <i style="height:45%"></i><i style="height:88%"></i><i style="height:52%"></i>
+                  <i style="height:70%"></i><i style="height:35%"></i>
+                  <i style="height:62%; background:#d98b3f"></i><i style="height:80%; background:#d98b3f"></i>
+                  <i style="height:48%; background:#d98b3f"></i>
+                </div>
+                <div class="ptags">
+                  <span>110</span><span>C min</span><span>3:24</span>
+                  <div class="pbadges">
+                    <span class="pbadge" style="background:#4fb0a0"></span>
+                    <span class="pbadge" style="background:#c9ccd1"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="pports">
+              <div class="pport pw"></div><div class="pport po"></div><div class="pport pt"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:8.5pt; color:var(--muted); margin-top:3mm">
+        Ports become edge strips. Title moves outside. The waveform shows the outro region
+        in its own type colour. Badges replace text. Roughly 45% shorter.</p>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="pw"></i> None</span>
+    <span><i class="pi"></i> Intro</span>
+    <span><i class="po"></i> Outro</span>
+    <span><i class="pt"></i> Transition</span>
+    <span style="color:var(--faint)">— the same four colours on the wires</span>
+  </div>
+
+  <h3>What this does not solve</h3>
+  <p>Edge strips lose the ability to label a specific target song on the card
+  ("Transition → I Am a God"). That information has to move somewhere — hover, the detail
+  pane, or a label on the wire itself. Wire labels are what Blender and Unreal would do,
+  but they add their own clutter at scale. <strong>This is a real trade-off and worth
+  deciding deliberately rather than by default.</strong></p>
+
+  <div class="note">The current build already has the hard parts: a committed-hop model,
+  an envelope renderer, dominant-colour extraction, dark theme tokens, and a working
+  drag-connect. Every recommendation here is presentation sitting on top of those.</div>
+</section>
+
+<!-- ============================= 16 SOURCES ============================= -->
+<section class="page">
+  <div class="sec-head">
+    <div class="num">16</div>
+    <h2>Sources</h2>
+    <p class="lede">Screenshots are from official documentation and product pages,
+    reproduced here for design study. Three tools are illustrated with labelled
+    recreations rather than screenshots.</p>
+  </div>
+
+  <h4>Screenshots</h4>
+  <div class="srclist">
+    <div><b>Blender</b> — docs.blender.org/manual · node parts, socket types, editing, shader editor</div>
+    <div><b>TouchDesigner</b> — docs.derivative.ca · Operator, TOP, viewers</div>
+    <div><b>ComfyUI</b> — docs.comfy.org · interface overview</div>
+    <div><b>n8n</b> — github.com/n8n-io/n8n · README workflow screenshot</div>
+    <div><b>Bitwig Studio</b> — bitwig.com/the-grid · product pages</div>
+    <div><b>cables.gl</b> — cables.gl · interface captures</div>
+    <div><b>Audulus</b> — audulus.com · editor and wire treatment</div>
+    <div><b>Eskimo Studio</b> — captured from the current build at 2× on the example graph</div>
+  </div>
+
+  <h4>Recreations (drawn for this document)</h4>
+  <div class="srclist">
+    <div><b>Nuke</b> — node classes and postage stamps, per Foundry documentation and support notes on disabling or freezing thumbnails in large scripts</div>
+    <div><b>Houdini</b> — flags, badges and the hover ring, per SideFX network editor documentation</div>
+    <div><b>Unreal Blueprints</b> — execution versus data wires and pin typing, per long-standing Blueprint conventions</div>
+  </div>
+
+  <h4>Written references</h4>
+  <div class="srclist">
+    <div>SideFX — Houdini network editor: nodes, flags and badges</div>
+    <div>Foundry Learn — Working with Nodes; PostageStamp node reference</div>
+    <div>Foundry Support Q100036 — disabling thumbnails or setting static frames for script performance</div>
+    <div>Blender Manual — Interface › Controls › Nodes › Parts of a node</div>
+  </div>
+
+  <div class="note" style="margin-top:8mm">Compiled for Eskimo Studio, September 2026.
+  All product names and screenshots remain the property of their respective owners and
+  appear here solely as design reference.</div>
+</section>
+
+</body>
+</html>
